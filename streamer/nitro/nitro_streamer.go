@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -147,6 +146,8 @@ func (s *EspressoStreamer) Peek(ctx context.Context) *MessageWithMetadataAndPos 
 
 // Call this function to advance the streamer to the next message
 func (s *EspressoStreamer) Advance() {
+	s.messageLock.Lock()
+	defer s.messageLock.Unlock()
 	s.currentMessagePos += 1
 }
 
@@ -156,7 +157,7 @@ func (s *EspressoStreamer) Advance() {
 // Expose the *parseHotShotPayloadFn* to the caller for testing purposes
 func (s *EspressoStreamer) QueueMessagesFromHotshot(
 	ctx context.Context,
-	parseHotShotPayloadFn func(tx espressoTypes.Bytes, l1Height uint64) ([]*MessageWithMetadataAndPos, error),
+	parseHotShotPayloadFn func(tx espressoTypes.Bytes) ([]*MessageWithMetadataAndPos, error),
 ) error {
 	s.messageLock.Lock()
 	defer s.messageLock.Unlock()
@@ -179,8 +180,7 @@ func (s *EspressoStreamer) QueueMessagesFromHotshot(
 	return nil
 }
 
-func (s *EspressoStreamer) verifyBatchPosterSignature(signature []byte, userDataHash [32]byte, l1Height uint64) error {
-	_ = l1Height
+func (s *EspressoStreamer) verifyBatchPosterSignature(signature []byte, userDataHash [32]byte) error {
 	publicKey, err := crypto.SigToPub(userDataHash[:], signature)
 	if err != nil {
 		return fmt.Errorf("failed to convert signature to public key: %w", err)
@@ -195,6 +195,8 @@ func (s *EspressoStreamer) verifyBatchPosterSignature(signature []byte, userData
 }
 
 func (s *EspressoStreamer) GetCurrentEarliestHotShotBlockNumber() uint64 {
+	s.messageLock.Lock()
+	defer s.messageLock.Unlock()
 	if len(s.messageWithMetadataAndPos) == 0 {
 		// This case means that the espresso streamer is empty and the earliest hotshot block number
 		// is the next hotshot block number.
@@ -203,7 +205,7 @@ func (s *EspressoStreamer) GetCurrentEarliestHotShotBlockNumber() uint64 {
 	return s.messageWithMetadataAndPos[0].HotshotHeight
 }
 
-func (s *EspressoStreamer) parseEspressoTransaction(tx espressoTypes.Bytes, l1Height uint64) ([]*MessageWithMetadataAndPos, error) {
+func (s *EspressoStreamer) parseEspressoTransaction(tx espressoTypes.Bytes) ([]*MessageWithMetadataAndPos, error) {
 	signature, userDataHash, indices, messages, err := ParseHotShotPayload(tx)
 	if err != nil {
 		log.Warn("failed to parse hotshot payload", "err", err)
@@ -219,7 +221,7 @@ func (s *EspressoStreamer) parseEspressoTransaction(tx espressoTypes.Bytes, l1He
 
 	userDataHashArr := [32]byte(userDataHash)
 
-	err = s.verifyBatchPosterSignature(signature, userDataHashArr, l1Height)
+	err = s.verifyBatchPosterSignature(signature, userDataHashArr)
 	if err != nil {
 		log.Warn("failed to verify batch poster signature", "err", err)
 		return nil, err
@@ -258,7 +260,7 @@ func fetchNextHotshotBlock(
 	ctx context.Context,
 	espressoClient espressoClient.EspressoClient,
 	nextHotshotBlockNum uint64,
-	parseHotShotPayloadFn func(tx espressoTypes.Bytes, l1Height uint64) ([]*MessageWithMetadataAndPos, error),
+	parseHotShotPayloadFn func(tx espressoTypes.Bytes) ([]*MessageWithMetadataAndPos, error),
 	namespace uint64,
 ) ([]*MessageWithMetadataAndPos, uint64, error) {
 
@@ -291,24 +293,13 @@ func fetchNextHotshotBlock(
 		return []*MessageWithMetadataAndPos{}, toBlock, nil
 	}
 
-	// we are subtracting 1 here because FetchNamespaceTransactionsInRange is exclusive of the last element
-	header, err := espressoClient.FetchHeaderByHeight(ctx, toBlock-1)
-	l1Height := uint64(0)
-	if err != nil {
-		return []*MessageWithMetadataAndPos{}, 0, fmt.Errorf("%w: %w", ErrFailedToFetchTransactions, err)
-	}
-
-	finalized := header.Header.GetL1Finalized()
-	if finalized != nil {
-		l1Height = finalized.Number
-	}
 	result := []*MessageWithMetadataAndPos{}
 
 	for _, namespaceTransactionData := range namespaceTransactionRangeData {
 		for _, tx := range namespaceTransactionData.Transactions {
 			txPayloadBytes := tx.Payload
-			messages, err := parseHotShotPayloadFn(txPayloadBytes, l1Height)
-			if err != nil && !strings.Contains(err.Error(), ErrRetryParsingHotShotPayload.Error()) {
+			messages, err := parseHotShotPayloadFn(txPayloadBytes)
+			if err != nil && !errors.Is(err, ErrRetryParsingHotShotPayload) {
 				log.Warn("failed to verify espresso transaction", "err", err)
 				continue
 			}
@@ -351,7 +342,7 @@ func (s *EspressoStreamer) Start(ctxIn context.Context) error {
 			err := s.QueueMessagesFromHotshot(ctx, s.parseEspressoTransaction)
 			if err != nil {
 				now := time.Now()
-				isEphemeral := strings.Contains(err.Error(), ErrFailedToFetchTransactions.Error())
+				isEphemeral := errors.Is(err, ErrFailedToFetchTransactions)
 
 				if isEphemeral {
 					if ephemeralFirstSeen.IsZero() {

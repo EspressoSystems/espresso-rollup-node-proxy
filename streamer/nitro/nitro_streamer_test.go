@@ -120,7 +120,7 @@ func TestEspressoStreamer(t *testing.T) {
 
 		streamer := NewEspressoStreamer(namespace, 3, mockEspressoClient, nil, 1*time.Second)
 
-		testParseFn := func(tx espressoTypes.Bytes, l1 uint64) ([]*MessageWithMetadataAndPos, error) {
+		testParseFn := func(tx espressoTypes.Bytes) ([]*MessageWithMetadataAndPos, error) {
 			return nil, nil
 		}
 
@@ -173,9 +173,9 @@ func TestEspressoStreamer(t *testing.T) {
 
 		streamer := NewEspressoStreamer(namespace, 3, mockEspressoClient, nil, 1*time.Second)
 
-		testParseFn := func(pos uint64, hotshotheight uint64) func(tx espressoTypes.Bytes, l1Height uint64) ([]*MessageWithMetadataAndPos, error) {
+		testParseFn := func(pos uint64, hotshotheight uint64) func(tx espressoTypes.Bytes) ([]*MessageWithMetadataAndPos, error) {
 
-			return func(tx espressoTypes.Bytes, l1Height uint64) ([]*MessageWithMetadataAndPos, error) {
+			return func(tx espressoTypes.Bytes) ([]*MessageWithMetadataAndPos, error) {
 				return []*MessageWithMetadataAndPos{
 					{
 						MessageWithMeta: MessageWithMetadata{
@@ -247,7 +247,7 @@ func TestEspressoStreamer(t *testing.T) {
 		}, nil).Once()
 
 		parseAttemptCount := 0
-		parseFn := func(tx espressoTypes.Bytes, _ uint64) ([]*MessageWithMetadataAndPos, error) {
+		parseFn := func(tx espressoTypes.Bytes) ([]*MessageWithMetadataAndPos, error) {
 			if assert.ObjectsAreEqual(tx, tx2) {
 				parseAttemptCount++
 				return nil, rpc.ErrNoResult
@@ -287,7 +287,7 @@ func TestEspressoStreamer(t *testing.T) {
 			return []byte{1}, nil
 		}
 		signedPayload, _ := SignHotShotPayload(payload, signerFunc)
-		_, err := streamer.parseEspressoTransaction(signedPayload, 1)
+		_, err := streamer.parseEspressoTransaction(signedPayload)
 		require.ErrorIs(t, err, ErrPayloadHadNoMessages)
 	})
 
@@ -305,11 +305,11 @@ func TestEspressoStreamer(t *testing.T) {
 		validAddr := crypto.PubkeyToAddress(privateKey.PublicKey)
 
 		streamerWithValidSigner := NewEspressoStreamer(1, 1, mockEspressoClient, []common.Address{validAddr}, time.Millisecond)
-		err = streamerWithValidSigner.verifyBatchPosterSignature(signature, hashArr, 1)
+		err = streamerWithValidSigner.verifyBatchPosterSignature(signature, hashArr)
 		require.NoError(t, err)
 
 		streamerWithNoValidSigners := NewEspressoStreamer(1, 1, mockEspressoClient, []common.Address{}, time.Millisecond)
-		err = streamerWithNoValidSigners.verifyBatchPosterSignature(signature, hashArr, 1)
+		err = streamerWithNoValidSigners.verifyBatchPosterSignature(signature, hashArr)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "address not valid")
 	})
@@ -353,7 +353,7 @@ func TestEspressoStreamer(t *testing.T) {
 		signedPayload, err := SignHotShotPayload(payload, signer)
 		require.NoError(t, err)
 
-		result, err := streamer.parseEspressoTransaction(signedPayload, 1)
+		result, err := streamer.parseEspressoTransaction(signedPayload)
 		require.NoError(t, err)
 		require.Equal(t, 2, len(result))
 		require.Equal(t, uint64(5), result[0].Pos)

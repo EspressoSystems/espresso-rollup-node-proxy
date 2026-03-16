@@ -194,18 +194,18 @@ func TestCountUniqueEntries(t *testing.T) {
 		t.Errorf("Expected result of 3 for , but got %v", result1)
 	}
 	if result2 != 3 {
-		t.Errorf("Expected result of 3 for , but got %v", result1)
+		t.Errorf("Expected result of 3 for , but got %v", result2)
 	}
 	if result3 != 4 {
-		t.Errorf("Expected result of 4 for , but got %v", result1)
+		t.Errorf("Expected result of 4 for , but got %v", result3)
 	}
 	if result4 != 4 {
-		t.Errorf("Expected result of 4 for , but got %v", result1)
+		t.Errorf("Expected result of 4 for , but got %v", result4)
 	}
 	if result5 != 4 {
-		t.Errorf("Expected result of 4 for , but got %v", result1)
+		t.Errorf("Expected result of 4 for , but got %v", result5)
 	}
 	if result6 != 5 {
-		t.Errorf("Expected result of 5 for , but got %v", result1)
+		t.Errorf("Expected result of 5 for , but got %v", result6)
 	}
 }
