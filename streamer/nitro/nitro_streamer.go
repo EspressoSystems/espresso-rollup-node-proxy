@@ -333,13 +333,17 @@ func (s *EspressoStreamer) Start(ctxIn context.Context) error {
 			default:
 			}
 
-			if s.nextHotshotBlockNum%1000 == 0 {
+			prevHotshotBlockNum := s.nextHotshotBlockNum
+
+			err := s.QueueMessagesFromHotshot(ctx, s.parseEspressoTransaction)
+
+			// Use integer division to detect 1000-block boundary crossings, so
+			// ranges that skip over a multiple of 1000 still trigger the Info log.
+			if s.nextHotshotBlockNum/1000 > prevHotshotBlockNum/1000 {
 				log.Info("Now processing hotshot block", "block number", s.nextHotshotBlockNum)
 			} else {
 				log.Debug("Now processing hotshot block", "block number", s.nextHotshotBlockNum)
 			}
-
-			err := s.QueueMessagesFromHotshot(ctx, s.parseEspressoTransaction)
 			if err != nil {
 				now := time.Now()
 				isEphemeral := errors.Is(err, ErrFailedToFetchTransactions)
