@@ -76,7 +76,9 @@ func (v *Verifier) verify(ctx context.Context) {
 		"earliestHotshotHeight", earliestHotshotHeight,
 	)
 
-	v.espressoStore.Update(espressoMsg.Pos, earliestHotshotHeight)
+	if err := v.espressoStore.Update(espressoMsg.Pos, earliestHotshotHeight); err != nil {
+		log.Warn("failed to write position and height to disk", "err", err)
+	}
 	v.streamer.Advance()
 
 }

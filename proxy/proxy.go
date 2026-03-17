@@ -31,7 +31,11 @@ func (p *Proxy) Serve(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		return
 	}
-	defer r.Body.Close()
+	defer func() {
+		if err := r.Body.Close(); err != nil {
+			log.Error("failed to close response body", "error", err)
+		}
+	}()
 
 	intercepted, err := p.interceptor.Intercept(body)
 	if err != nil {
@@ -55,7 +59,11 @@ func (p *Proxy) Serve(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to send request to upstream: "+err.Error(), http.StatusBadGateway)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := r.Body.Close(); err != nil {
+			log.Error("failed to close response body", "error", err)
+		}
+	}()
 
 	for k, vals := range resp.Header {
 		for _, v := range vals {

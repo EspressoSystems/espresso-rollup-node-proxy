@@ -92,7 +92,9 @@ func (fc *FeedClient) readLoop(ctx context.Context) {
 		log.Info("connected to the feed", "url", fc.feedWSURL)
 		backoff = fc.reconnectBackoff
 		fc.readMessages(ctx, conn)
-		conn.Close()
+		if err := conn.Close(); err != nil {
+			log.Warn("error closing connection", "err", err)
+		}
 	}
 }
 

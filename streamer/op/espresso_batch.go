@@ -67,12 +67,12 @@ func (b *EspressoBatch) ToEspressoTransaction(ctx context.Context, namespace uin
 
 func BlockToEspressoBatch(rollupCfg *rollup.Config, block *types.Block) (*EspressoBatch, error) {
 	if len(block.Transactions()) == 0 {
-		return nil, fmt.Errorf("Block doesn't contain any transactions")
+		return nil, fmt.Errorf("block doesn't contain any transactions")
 	}
 
 	l1InfoDeposit := block.Transactions()[0]
 	if !l1InfoDeposit.IsDepositTx() {
-		return nil, fmt.Errorf("First transaction is not L1 info deposit")
+		return nil, fmt.Errorf("first transaction is not L1 info deposit")
 	}
 
 	batch, _, err := derive.BlockToSingularBatch(rollupCfg, block)
