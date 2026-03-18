@@ -1,0 +1,16 @@
+{         
+    "listen-addr": ":9000",
+    "full-node-url": "http://localhost:8546", 
+    "espresso-url": "http://localhost:24000",
+    "namespace": 22266222,                    
+    "state-file": "./espresso-state.json",                                                                                                                           
+    "mode": "op",                                                                                                                                                    
+    "op": {                                                                                                                                                          
+      "l1-url": "http://localhost:8545",                                                                                                                             
+      "rollup-l1-url": "http://localhost:8545",                                                                                                                      
+      "batch-poster-address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",                                                                                          
+      "origin-hotshot-pos": 1,                                                                                                                                       
+      "origin-batch-pos": 1,                                                                                                                                         
+      "poll-interval": "1s"                                                                                                                                          
+    }                                                                                                                                                                
+  }

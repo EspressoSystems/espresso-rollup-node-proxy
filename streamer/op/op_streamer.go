@@ -426,6 +426,11 @@ func (s *BatchStreamer[B]) processEspressoTransaction(ctx context.Context, trans
 	return nil
 }
 
+// HotShotPos returns the last HotShot block processed by the streamer.
+func (s *BatchStreamer[B]) HotShotPos() uint64 {
+	return s.hotShotPos
+}
+
 // UnmarshalBatch implements EspressoStreamerIFace
 func (s *BatchStreamer[B]) Next(ctx context.Context) *B {
 	// Is the next batch available?

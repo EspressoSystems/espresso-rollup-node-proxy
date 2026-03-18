@@ -53,13 +53,24 @@ type NitroConfig struct {
 	RetryTime        Duration `json:"retry-time"`
 }
 
+type OpConfig struct {
+	L1URL              string   `json:"l1-url"`
+	RollupL1URL        string   `json:"rollup-l1-url"`
+	BatchPosterAddress string   `json:"batch-poster-address"`
+	OriginHotShotPos   uint64   `json:"origin-hotshot-pos"`
+	OriginBatchPos     uint64   `json:"origin-batch-pos"`
+	PollInterval       Duration `json:"poll-interval"`
+}
+
 type Config struct {
 	ListenAddr  string      `json:"listen-addr"`
 	FullNodeURL string      `json:"full-node-url"`
 	EspressoURL string      `json:"espresso-url"`
 	Namespace   uint64      `json:"namespace"`
 	StateFile   string      `json:"state-file"`
+	Mode        string      `json:"mode"`
 	Nitro       NitroConfig `json:"nitro"`
+	Op          OpConfig    `json:"op"`
 }
 
 func DefaultConfig() *Config {
@@ -82,7 +93,7 @@ func (c *Config) Validate() error {
 	if c.EspressoURL == "" {
 		return fmt.Errorf("espresso-url is required")
 	}
-	if c.Nitro.FeedWSURL == "" {
+	if c.Mode == "nitro" && c.Nitro.FeedWSURL == "" {
 		return fmt.Errorf("nitro.feed-ws-url is required")
 	}
 	return nil
