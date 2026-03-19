@@ -1,0 +1,15 @@
+{
+  "proxyPort": "8089",
+  "fullNodeExecutionRPC": "http://localhost:8547",
+  "fullNodeConsensusRPC": "http://localhost:9546",
+  "espressoUrl": "http://localhost:24000",
+  "l1Rpc": "http://localhost:8545",
+  "espressoStoreFilePath": "/tmp/espresso-state.json",
+  "namespace": 22266222,
+  "batcherAddress": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+  "originHotShotPos": 1,
+  "originBatchPos": 1,
+  "hotShotPollingIntervalMs": 1000,
+  "verifierIntervalMs": 1000,
+  "streamerUpdateIntervalMs": 1000
+}
