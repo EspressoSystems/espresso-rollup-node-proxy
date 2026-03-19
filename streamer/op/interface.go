@@ -1,4 +1,4 @@
-package op
+package streamer
 
 import (
 	"context"
@@ -62,4 +62,12 @@ type EspressoStreamer[B Batch] interface {
 	// are no batches left to read, at the moment of the call, it will return
 	// nil.
 	Next(ctx context.Context) *B
+
+	// Peek attempts to return the next batch from the streamer without advancing the streamer's position.
+	// If there are no batches left to read, at the moment of the call, it will return nil.
+	Peek(ctx context.Context) *B
+
+	// GetFallbackHotShotPos returns the safe HotShot block position that
+	// guarantees not to skip any unsafe batches on re-sync.
+	GetFallbackHotShotPos() uint64
 }

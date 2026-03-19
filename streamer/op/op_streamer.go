@@ -1,4 +1,4 @@
-package op
+package streamer
 
 import (
 	"context"
@@ -486,6 +486,46 @@ func (s *BatchStreamer[B]) HasNext(ctx context.Context) bool {
 	}
 }
 
+// Peek returns the next valid batch without consuming it.
+// Unlike HasNext, Peek does not modify the streamer's state (headBatch or BatchBuffer).
+func (s *BatchStreamer[B]) Peek(ctx context.Context) *B {
+	if s.headBatch != nil {
+		validity := s.CheckBatch(ctx, *s.headBatch)
+		switch validity {
+		case BatchAccept:
+			return s.headBatch
+		case BatchUndecided:
+			return nil
+		case BatchDrop, BatchPast:
+		}
+	}
+
+	for i := 0; i < s.BatchBuffer.Len(); i++ {
+		candidate := s.BatchBuffer.Get(i)
+		if candidate == nil {
+			break
+		}
+		if (*candidate).Number() < s.BatchPos {
+			continue
+		}
+		if (*candidate).Number() > s.BatchPos {
+			break
+		}
+
+		validity := s.CheckBatch(ctx, *candidate)
+		switch validity {
+		case BatchAccept:
+			return candidate
+		case BatchUndecided:
+			return nil
+		case BatchDrop, BatchPast:
+			continue
+		}
+	}
+
+	return nil
+}
+
 // This function allows to "pin" the Espresso block height that is guaranteed not to contain
 // any batches that have origin >= safeL1Origin.
 // We do this by reading block height from Light Client FinalizedState at safeL1Origin.
@@ -525,6 +565,12 @@ func (s *BatchStreamer[B]) confirmEspressoBlockHeight(safeL1Origin eth.BlockID) 
 	s.fallbackHotShotPos = hotshotState.BlockHeight
 
 	return shouldReset
+}
+
+// GetFallbackHotShotPos returns the safe HotShot block position that
+// guarantees not to skip any unsafe batches on re-sync.
+func (s *BatchStreamer[B]) GetFallbackHotShotPos() uint64 {
+	return s.fallbackHotShotPos
 }
 
 // UnmarshalBatch implements EspressoStreamerIFace

@@ -11,16 +11,16 @@ import (
 )
 
 type Proxy struct {
-	fullNodeURL string
-	interceptor *interceptor.Interceptor
-	httpClient  *http.Client
+	fullNodeExecutionRPC string
+	interceptor          *interceptor.Interceptor
+	httpClient           *http.Client
 }
 
-func NewProxy(fullNodeURL string, blockNumberProvider interceptor.BlockNumberProvider) *Proxy {
+func NewProxy(fullNodeExecutionRPC string, blockNumberProvider interceptor.BlockNumberProvider) *Proxy {
 	return &Proxy{
-		fullNodeURL: fullNodeURL,
-		interceptor: interceptor.NewInterceptor(blockNumberProvider),
-		httpClient:  &http.Client{},
+		fullNodeExecutionRPC: fullNodeExecutionRPC,
+		interceptor:          interceptor.NewInterceptor(blockNumberProvider),
+		httpClient:           &http.Client{},
 	}
 }
 
@@ -44,7 +44,7 @@ func (p *Proxy) Serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	upstreamReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, p.fullNodeURL, bytes.NewReader(intercepted))
+	upstreamReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, p.fullNodeExecutionRPC, bytes.NewReader(intercepted))
 	if err != nil {
 		log.Error("failed to create upstream request", "error", err)
 		http.Error(w, "internal error: "+err.Error(), http.StatusInternalServerError)
