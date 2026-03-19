@@ -17,11 +17,15 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - uses: extractions/setup-just@v2
+
       - name: Build
-        run: go build ./...
+        run: just build
 
       - name: Lint
         uses: golangci/golangci-lint-action@v7
+        with:
+          args: ./... ./streamer/op/...
 
       - name: Test
-        run: go test -v -race ./...
+        run: just test -v -race
