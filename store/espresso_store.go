@@ -56,13 +56,13 @@ func NewEspressoStore(filePath string, hotshotHeight uint64, finalizedL2BlockNum
 }
 
 // GetBlockNumber returns the current L2 block number stored in the state
-func (es *EspressoStore) GetBlockNumber() (uint64, error) {
+func (es *EspressoStore) GetState() (*EspressoState, error) {
 	es.mu.RLock()
 	defer es.mu.RUnlock()
 	if es.state == nil {
-		return 0, fmt.Errorf("state is not initialized")
+		return nil, fmt.Errorf("state is not initialized")
 	}
-	return es.state.L2BlockNumber, nil
+	return es.state, nil
 }
 
 // Update updates the L2 block number and fallback hotshot height in the state

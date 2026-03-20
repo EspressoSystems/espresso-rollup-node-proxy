@@ -9,7 +9,6 @@ import (
 	"math/big"
 	"math/rand"
 	"testing"
-	"time"
 
 	espressoClient "github.com/EspressoSystems/espresso-network/sdks/go/client"
 	espressoCommon "github.com/EspressoSystems/espresso-network/sdks/go/types"
@@ -36,7 +35,6 @@ func TestNewEspressoStreamer(t *testing.T) {
 		nil,
 		nil,
 		nil, nil, nil, CreateEspressoBatchUnmarshaler(common.Address{}),
-		50*time.Millisecond,
 		0,
 		1,
 	)
@@ -401,7 +399,6 @@ func setupStreamerTesting(namespace uint64, batcherAddress common.Address) (*Moc
 		state,
 		logger,
 		CreateEspressoBatchUnmarshaler(batcherAddress),
-		50*time.Millisecond,
 		0,
 		1,
 	)
@@ -1041,7 +1038,6 @@ func TestStreamerBufferCapacityAndSkipPos(t *testing.T) {
 			state,
 			logger,
 			CreateEspressoBatchUnmarshaler(signerAddress),
-			50*time.Millisecond,
 			0,
 			0, // originBatchPos=0, so BatchPos starts at 1
 		)
@@ -1118,7 +1114,6 @@ func TestStreamerBufferCapacityAndSkipPos(t *testing.T) {
 			state,
 			logger,
 			CreateEspressoBatchUnmarshaler(signerAddress),
-			50*time.Millisecond,
 			0,
 			0, // originBatchPos=0, so BatchPos starts at 1
 		)
