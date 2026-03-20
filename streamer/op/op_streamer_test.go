@@ -1269,3 +1269,57 @@ func TestStreamerBatchOrderingDeterminism(t *testing.T) {
 		require.False(t, streamer.HasNext(ctx))
 	})
 }
+
+func TestPeek(t *testing.T) {
+	namespace := uint64(42)
+	chainID := big.NewInt(int64(namespace))
+	privateKeyString := "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+	chainSignerFactory, signerAddress, _ := crypto.ChainSignerFactoryFromConfig(&NoOpLogger{}, privateKeyString, "", "", opsigner.CLIConfig{})
+	chainSigner := chainSignerFactory(chainID, common.Address{})
+
+	t.Run("returns valid batch without consuming it", func(t *testing.T) {
+		ctx := context.Background()
+
+		state, streamer := setupStreamerTesting(namespace, signerAddress)
+		rng := rand.New(rand.NewSource(10))
+
+		syncStatus := state.SyncStatus()
+		err := streamer.Refresh(ctx, syncStatus.FinalizedL1, syncStatus.SafeL2.Number, syncStatus.SafeL2.L1Origin)
+		require.NoError(t, err)
+
+		l2Height := 1
+		_, _, _, espTxnInBlock := state.CreateEspressoTxnData(ctx, namespace, rng, chainID, uint64(l2Height), chainSigner)
+		state.AddEspressoTransactionData(0, namespace, espTxnInBlock)
+
+		err = streamer.Update(ctx)
+		require.NoError(t, err)
+		require.True(t, streamer.HasNext(ctx))
+
+		peeked := streamer.Peek(ctx)
+		require.NotNil(t, peeked)
+		require.Equal(t, uint64(l2Height), (*peeked).Number())
+
+		peekedAgain := streamer.Peek(ctx)
+		require.NotNil(t, peekedAgain)
+		require.Equal(t, (*peeked).Number(), (*peekedAgain).Number())
+
+		consumed := streamer.Next(ctx)
+		require.NotNil(t, consumed)
+		require.Equal(t, (*peeked).Number(), (*consumed).Number())
+	})
+
+	t.Run("returns nil when no batches available", func(t *testing.T) {
+		ctx := context.Background()
+
+		state, streamer := setupStreamerTesting(namespace, signerAddress)
+
+		syncStatus := state.SyncStatus()
+		err := streamer.Refresh(ctx, syncStatus.FinalizedL1, syncStatus.SafeL2.Number, syncStatus.SafeL2.L1Origin)
+		require.NoError(t, err)
+
+		err = streamer.Update(ctx)
+		require.NoError(t, err)
+
+		require.Nil(t, streamer.Peek(ctx))
+	})
+}

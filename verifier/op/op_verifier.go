@@ -37,6 +37,8 @@ type OpVerifier struct {
 	rollupConfig     *rollup.Config
 	logger           log.Logger
 	l1Client         *ethclient.Client
+	cancel           context.CancelFunc
+	done             chan struct{}
 }
 
 func NewVerifier(ctx context.Context, logger log.Logger, store *espressoStore.EspressoStore, opVerifierConfig *OpVerifierConfig) *OpVerifier {
@@ -58,6 +60,7 @@ func NewVerifier(ctx context.Context, logger log.Logger, store *espressoStore.Es
 		logger.Crit("failed to create consensus client", "error", err)
 		return nil
 	}
+	defer consensusClient.Close()
 	rollupConfig, err := consensusClient.RollupConfig(ctx)
 	if err != nil {
 		logger.Crit("failed to read rollup config", "error", err)
@@ -120,10 +123,14 @@ func NewVerifier(ctx context.Context, logger log.Logger, store *espressoStore.Es
 
 func (v *OpVerifier) Start(ctx context.Context) {
 	v.logger.Info("Starting OP Verifier")
+	ctx, cancel := context.WithCancel(ctx)
+	v.cancel = cancel
+	v.done = make(chan struct{})
 	go v.run(ctx)
 }
 
 func (v *OpVerifier) run(ctx context.Context) {
+	defer close(v.done)
 	ticker := time.NewTicker(v.opVerifierConfig.VerificationInterval)
 	defer ticker.Stop()
 
@@ -132,7 +139,6 @@ func (v *OpVerifier) run(ctx context.Context) {
 		case <-ticker.C:
 			v.verify(ctx)
 		case <-ctx.Done():
-			v.logger.Info("Stopping OP Verifier")
 			return
 		}
 	}
@@ -157,6 +163,8 @@ func (v *OpVerifier) verify(ctx context.Context) {
 		v.logger.Error("failed to create eth client", "error", err)
 		return
 	}
+	defer ethClient.Close()
+
 	block, err := ethClient.BlockByNumber(ctx, new(big.Int).SetUint64((*espressoBatch).Number()))
 	if err != nil {
 		v.logger.Error("failed to get block by number", "error", err, "block_number", (*espressoBatch).Number())
@@ -211,6 +219,7 @@ func (v *OpVerifier) peekNextBatch(ctx context.Context) (*opStreamer.EspressoBat
 		v.logger.Error("failed to create consensus client", "error", err)
 		return nil, err
 	}
+	defer rollupClient.Close()
 	syncStatus, err := rollupClient.SyncStatus(ctx)
 	if err != nil {
 		v.logger.Error("failed to get L2 head block", "error", err)
@@ -254,4 +263,14 @@ func (v *OpVerifier) advanceStreamerAndEspressoState(ctx context.Context, blockN
 	v.streamer.Next(ctx)
 
 	return nil
+}
+
+func (v *OpVerifier) Stop() {
+	v.logger.Info("Stopping OP Verifier")
+	v.cancel()
+	<-v.done
+
+	v.endpointProvider.Close()
+	v.l1Client.Close()
+	v.logger.Info("OP Verifier stopped")
 }
