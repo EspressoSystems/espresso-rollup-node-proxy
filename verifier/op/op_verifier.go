@@ -29,6 +29,12 @@ type OpVerifierConfig struct {
 	BatcherAddress       string        `json:"batcher_address"`
 }
 
+// OpVerifier is responsible for verifying that the batches produced by the OP full node match what the OP streamer has in its buffer.
+// It does this by periodically peeking the next batch from the OP streamer, fetching the corresponding block from the OP node,
+// converting it to an EspressoBatch and comparing the two.
+// If they match, it advances the OP streamer and updates the espresso state in the store to reflect the new block number relative to the espresso tag.
+// If they dont match, it logs an error and tries again on the next interval. Eventually the tag will be advanced after
+// a batch is posted to Ethereum and it finalizes because Ethereum will only finalize data that matches the data finalized by Espresso.
 type OpVerifier struct {
 	streamer         opStreamer.EspressoStreamer[opStreamer.EspressoBatch]
 	espressoStore    *espressoStore.EspressoStore
@@ -106,8 +112,8 @@ func NewVerifier(ctx context.Context, logger log.Logger, store *espressoStore.Es
 		espressoLightClient,
 		logger,
 		opStreamer.CreateEspressoBatchUnmarshaler(batcherAddr),
-		espressoState.L2BlockNumber,
 		espressoState.FallbackHotshotHeight,
+		espressoState.L2BlockNumber,
 	)
 
 	return &OpVerifier{
@@ -136,10 +142,10 @@ func (v *OpVerifier) run(ctx context.Context) {
 
 	for {
 		select {
-		case <-ticker.C:
-			v.verify(ctx)
 		case <-ctx.Done():
 			return
+		case <-ticker.C:
+			v.verify(ctx)
 		}
 	}
 }

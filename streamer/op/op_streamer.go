@@ -322,42 +322,10 @@ func (s *BatchStreamer[B]) Update(ctx context.Context) error {
 }
 
 // Peek returns the next valid batch without consuming it.
-// Unlike HasNext, Peek does not modify the streamer's state (headBatch or BatchBuffer).
 func (s *BatchStreamer[B]) Peek(ctx context.Context) *B {
-	if s.headBatch != nil {
-		validity := s.CheckBatch(ctx, *s.headBatch)
-		switch validity {
-		case BatchAccept:
-			return s.headBatch
-		case BatchUndecided:
-			return nil
-		case BatchDrop, BatchPast:
-		}
+	if s.HasNext(ctx) {
+		return s.headBatch
 	}
-
-	for i := 0; i < s.BatchBuffer.Len(); i++ {
-		candidate := s.BatchBuffer.Get(i)
-		if candidate == nil {
-			break
-		}
-		if (*candidate).Number() < s.BatchPos {
-			continue
-		}
-		if (*candidate).Number() > s.BatchPos {
-			break
-		}
-
-		validity := s.CheckBatch(ctx, *candidate)
-		switch validity {
-		case BatchAccept:
-			return candidate
-		case BatchUndecided:
-			return nil
-		case BatchDrop, BatchPast:
-			continue
-		}
-	}
-
 	return nil
 }
 

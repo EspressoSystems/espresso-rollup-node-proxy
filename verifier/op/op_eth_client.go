@@ -4,6 +4,8 @@ import (
 	"context"
 	"math/big"
 
+	op "proxy/streamer/op"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
@@ -12,6 +14,8 @@ import (
 type AdaptL1BlockRefClient struct {
 	L1Client *ethclient.Client
 }
+
+var _ op.L1Client = new(AdaptL1BlockRefClient)
 
 // NewAdaptL1BlockRefClient creates a new L1BlockRefClient
 func NewAdaptL1BlockRefClient(L1Client *ethclient.Client) *AdaptL1BlockRefClient {

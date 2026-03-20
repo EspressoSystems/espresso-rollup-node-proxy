@@ -26,7 +26,7 @@ type EspressoState struct {
 type EspressoStore struct {
 	mu       sync.RWMutex
 	filePath string
-	state    *EspressoState
+	state    EspressoState
 }
 
 func NewEspressoStore(filePath string, hotshotHeight uint64, finalizedL2BlockNumber uint64) (*EspressoStore, error) {
@@ -44,7 +44,7 @@ func NewEspressoStore(filePath string, hotshotHeight uint64, finalizedL2BlockNum
 
 	// If the file doesnt exist, initialize the state
 	// with the provided hotshot height and finalized L2 block number
-	store.state = &EspressoState{
+	store.state = EspressoState{
 		L2BlockNumber:         finalizedL2BlockNumber,
 		FallbackHotshotHeight: hotshotHeight,
 		UpdatedAt:             time.Now(),
@@ -56,12 +56,9 @@ func NewEspressoStore(filePath string, hotshotHeight uint64, finalizedL2BlockNum
 }
 
 // GetBlockNumber returns the current L2 block number stored in the state
-func (es *EspressoStore) GetState() (*EspressoState, error) {
+func (es *EspressoStore) GetState() (EspressoState, error) {
 	es.mu.RLock()
 	defer es.mu.RUnlock()
-	if es.state == nil {
-		return nil, fmt.Errorf("state is not initialized")
-	}
 	return es.state, nil
 }
 
@@ -71,10 +68,6 @@ func (es *EspressoStore) GetState() (*EspressoState, error) {
 func (es *EspressoStore) Update(l2BlockNumber uint64, fallbackHotshotHeight uint64) error {
 	es.mu.Lock()
 	defer es.mu.Unlock()
-
-	if es.state == nil {
-		return fmt.Errorf("state is not initialized")
-	}
 
 	es.state.L2BlockNumber = l2BlockNumber
 	es.state.FallbackHotshotHeight = fallbackHotshotHeight
@@ -96,7 +89,7 @@ func (es *EspressoStore) loadFromDisk() error {
 	if state.FallbackHotshotHeight == 0 || state.L2BlockNumber == 0 || state.UpdatedAt.IsZero() {
 		return fmt.Errorf("invalid state file: missing required fields")
 	}
-	es.state = &state
+	es.state = state
 	return nil
 }
 
@@ -113,12 +106,11 @@ func (es *EspressoStore) writeToDisk() error {
 	if err := os.WriteFile(tmp, data, 0644); err != nil {
 		return fmt.Errorf("failed to write temp file: %w", err)
 	}
-	if err := os.Rename(tmp, es.filePath); err != nil {
-		err := os.Remove(tmp)
-		if err != nil {
-			return fmt.Errorf("failed to remove temp file after rename failure: %w", err)
+	if renameErr := os.Rename(tmp, es.filePath); renameErr != nil {
+		if removeErr := os.Remove(tmp); removeErr != nil {
+			return fmt.Errorf("failed to rename temp file: %w (and failed to remove temp file: %v)", renameErr, removeErr)
 		}
-		return fmt.Errorf("failed to rename temp file: %w", err)
+		return fmt.Errorf("failed to rename temp file: %w", renameErr)
 	}
 	return nil
 }
