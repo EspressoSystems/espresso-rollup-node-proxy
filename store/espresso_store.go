@@ -56,6 +56,13 @@ func NewEspressoStore(filePath string, hotshotHeight uint64, finalizedL2BlockNum
 }
 
 // GetBlockNumber returns the current L2 block number stored in the state
+func (es *EspressoStore) GetBlockNumber() uint64 {
+	es.mu.RLock()
+	defer es.mu.RUnlock()
+	return es.state.L2BlockNumber
+}
+
+// GetState returns the full current state
 func (es *EspressoStore) GetState() (EspressoState, error) {
 	es.mu.RLock()
 	defer es.mu.RUnlock()
