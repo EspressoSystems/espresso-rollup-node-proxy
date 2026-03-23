@@ -2,6 +2,7 @@ package verifier
 
 import (
 	"context"
+	"log/slog"
 	"math/big"
 	"path/filepath"
 	"testing"
@@ -21,6 +22,20 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
+
+type logCapturer struct {
+	hadError bool
+}
+
+func (c *logCapturer) Enabled(_ context.Context, _ slog.Level) bool { return true }
+func (c *logCapturer) Handle(_ context.Context, r slog.Record) error {
+	if r.Level >= slog.LevelError {
+		c.hadError = true
+	}
+	return nil
+}
+func (c *logCapturer) WithAttrs(_ []slog.Attr) slog.Handler { return c }
+func (c *logCapturer) WithGroup(_ string) slog.Handler      { return c }
 
 type mockStreamer struct {
 	mock.Mock
@@ -160,8 +175,11 @@ func tempFilePath(t *testing.T) string {
 	return filepath.Join(t.TempDir(), "state.json")
 }
 
-func newTestHarness(t *testing.T) *testHarness {
+func newTestHarness(t *testing.T, logger log.Logger) *testHarness {
 	t.Helper()
+	if logger == nil {
+		logger = log.NewLogger(log.DiscardHandler())
+	}
 	streamer := new(mockStreamer)
 	endpointProvider := new(mockEndpointProvider)
 	rollupClient := new(mockRollupClient)
@@ -176,7 +194,7 @@ func newTestHarness(t *testing.T) *testHarness {
 		},
 		endpointProvider: endpointProvider,
 		rollupConfig:     &rollup.Config{},
-		logger:           log.NewLogger(log.DiscardHandler()),
+		logger:           logger,
 	}
 	return &testHarness{
 		verifier:     verifier,
@@ -186,11 +204,10 @@ func newTestHarness(t *testing.T) *testHarness {
 		ethClient:    ethClient,
 		store:        store,
 	}
-
 }
 
 func TestAdvanceStreamerAndEspressoState(t *testing.T) {
-	h := newTestHarness(t)
+	h := newTestHarness(t, nil)
 	ctx := context.Background()
 
 	h.streamer.On("GetFallbackHotshotPos").Return(uint64(2))
@@ -208,7 +225,7 @@ func TestAdvanceStreamerAndEspressoState(t *testing.T) {
 }
 
 func TestPeekNextBatch(t *testing.T) {
-	h := newTestHarness(t)
+	h := newTestHarness(t, nil)
 	ctx := context.Background()
 	batch := &opStreamer.EspressoBatch{
 		BatchHeader: &types.Header{Number: big.NewInt(100)},
@@ -242,7 +259,8 @@ func TestPeekNextBatch(t *testing.T) {
 }
 
 func TestVerify(t *testing.T) {
-	h := newTestHarness(t)
+	capturer := &logCapturer{}
+	h := newTestHarness(t, log.NewLogger(capturer))
 	ctx := context.Background()
 
 	l1InfoData := make([]byte, 4+32*8)
@@ -273,12 +291,14 @@ func TestVerify(t *testing.T) {
 	h.ethClient.On("BlockByNumber", mock.Anything, mock.Anything).Return(block, nil)
 	h.rollupClient.On("SyncStatus", mock.Anything).Return(syncStatus, nil)
 	h.streamer.On("Refresh", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	h.streamer.On("HasNext", mock.Anything).Return(true).Once()
-	h.streamer.On("Peek", mock.Anything).Return(batch).Once()
+	h.streamer.On("HasNext", mock.Anything).Return(true)
+	h.streamer.On("Peek", mock.Anything).Return(batch)
 	h.streamer.On("GetFallbackHotshotPos").Return(uint64(2))
 	h.streamer.On("Next", mock.Anything).Return(batch)
 
-	h.verifier.verify(ctx)
+	h.verifier.verifyAndAdvance(ctx)
+
+	require.False(t, capturer.hadError, "verifyAndAdvance() should not produce error logs on success")
 
 	state, err := h.store.GetState()
 	require.NoError(t, err)

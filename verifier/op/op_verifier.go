@@ -3,6 +3,8 @@ package verifier
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"math/big"
 	espressoStore "proxy/store"
 	opStreamer "proxy/streamer/op"
@@ -152,57 +154,61 @@ func (v *OPEspressoBatchVerifier) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			v.verify(ctx)
+			v.verifyAndAdvance(ctx)
 		}
 	}
 }
 
-// verify performs a  verification cycle:
-// 1. Peeks the next batch from the OP streamer
-// 2. Fetches the corresponding block from the OP node and converts it to an EspressoBatch
-// 3. Compares the two batches by RLP-encoding them and checking for byte-for-byte equality
-// 4. If they match, advances the OP streamer and updates the espresso state in the store to reflect the new batch number
-// 5. If they dont match, logs an error and tries again on the next interval
-func (v *OPEspressoBatchVerifier) verify(ctx context.Context) {
+// verifyAndAdvance calls VerifyNextBatch to peek the next batch from the OP streamer and verify it against the OP node.
+// If verification succeeds, it advances the OP streamer and updates the espresso state in the store to reflect the new batch number.
+// If verification fails, it logs an error and will try again on the next interval.
+func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 	v.logger.Info("Starting OP batch verification")
 
-	// Get next batch from Espresso
-	espressoBatch, err := v.peekNextBatch(ctx)
-	if err != nil {
-		v.logger.Error("failed to peek next batch", "error", err)
+	var espressoBatch *opStreamer.EspressoBatch
+	var err error
+	if espressoBatch, err = v.VerifyNextBatch(ctx); err != nil {
+		v.logger.Error("batch verification failed", "error", err)
 		return
 	}
 	if espressoBatch == nil {
-		v.logger.Info("No new batches to verify")
+		v.logger.Info("no new batches to verify")
 		return
 	}
 
-	// Get the corresponding batch from the L2 full node
-	fullNodeBatch, err := v.getFullNodeBatch(ctx, (*espressoBatch).Number())
+	batchNumber := espressoBatch.Number()
+	if err := v.advanceStreamerAndEspressoState(ctx, batchNumber); err != nil {
+		v.logger.Error("failed to advance streamer and espresso state", "error", err, "batch_number", batchNumber)
+		return
+	}
+
+	v.logger.Info("Successfully verified and advanced OP batch", "batch_number", batchNumber)
+}
+
+// VerifyNextBatch peeks the next batch from the OP streamer, fetches the corresponding block from the OP node,
+// converts it to an EspressoBatch and compares the two. If they match, it returns the batch for further processing (advancing streamer and updating state).
+// If they dont match, it returns an error.
+func (v *OPEspressoBatchVerifier) VerifyNextBatch(ctx context.Context) (*opStreamer.EspressoBatch, error) {
+	// Peek the next batch from the OP streamer without advancing it
+	espressoBatch, err := v.peekNextBatch(ctx)
 	if err != nil {
-		v.logger.Error("failed to get full node batch", "error", err, "block_number", (*espressoBatch).Number())
-		return
+		return nil, err
 	}
-
-	// Compare the two batches
-	match, err := batchesMatch(espressoBatch, fullNodeBatch)
+	// No new batch to verify, just return
+	if espressoBatch == nil {
+		return nil, nil
+	}
+	batchNumber := espressoBatch.Number()
+	// Fetch the corresponding block from the OP node and convert it to an EspressoBatch
+	fullNodeBatch, err := v.getFullNodeBatch(ctx, batchNumber)
 	if err != nil {
-		v.logger.Error("failed to compare batches", "error", err, "batch_number", (*espressoBatch).Number())
-		return
+		return nil, err
 	}
-	if !match {
-		v.logger.Error("Batch verification failed: Espresso batch does not match full node batch", "batch_number", (*espressoBatch).Number())
-		return
+	// Compare the two batches by RLP-encoding them and checking for byte-for-byte equality
+	if err = ensureBatchesMatch(espressoBatch, fullNodeBatch); err != nil {
+		return nil, fmt.Errorf("batch verification failed for batch number %d: %w", batchNumber, err)
 	}
-
-	// Advance on success
-	err = v.advanceStreamerAndEspressoState(ctx, (*espressoBatch).Number())
-	if err != nil {
-		v.logger.Error("failed to advance streamer and espresso state", "error", err, "batch_number", (*espressoBatch).Number())
-		return
-	}
-
-	v.logger.Info("Successfully verified OP batch", "batch_number", (*espressoBatch).Number())
+	return espressoBatch, nil
 }
 
 // getFullNodeBatch fetches the block at the given number from the L2 full node
@@ -227,19 +233,23 @@ func (v *OPEspressoBatchVerifier) getFullNodeBatch(ctx context.Context, blockNum
 	return batch, nil
 }
 
-// batchesMatch RLP-encodes both batches and compares them byte-for-byte.
-func batchesMatch(a, b *opStreamer.EspressoBatch) (bool, error) {
+// ensureBatchesMatch RLP-encodes both batches and compares them byte-for-byte.
+// Returns an error if encoding fails or if the batches do not match.
+func ensureBatchesMatch(a, b *opStreamer.EspressoBatch) error {
 	aBuf := new(bytes.Buffer)
 	if err := rlp.Encode(aBuf, a); err != nil {
-		return false, err
+		return err
 	}
 
 	bBuf := new(bytes.Buffer)
 	if err := rlp.Encode(bBuf, b); err != nil {
-		return false, err
+		return err
 	}
 
-	return bytes.Equal(aBuf.Bytes(), bBuf.Bytes()), nil
+	if !bytes.Equal(aBuf.Bytes(), bBuf.Bytes()) {
+		return errors.New("espresso batch does not match full node batch")
+	}
+	return nil
 }
 
 // peekNextBatch follows the pattern  getSyncStatus -> refresh -> Update -> Peek
