@@ -43,13 +43,19 @@ func defaultConfig() *Config {
 
 func parseConfig() *Config {
 	cfg := defaultConfig()
-	if configFile := findConfigArg(); configFile != "" {
-		config, err := os.ReadFile(configFile)
+
+	configFlags := pflag.NewFlagSet("config", pflag.ContinueOnError)
+	configFlags.ParseErrorsWhitelist.UnknownFlags = true
+	configFile := configFlags.String("config", "", "path to JSON config file")
+	_ = configFlags.Parse(os.Args[1:])
+
+	if *configFile != "" {
+		data, err := os.ReadFile(*configFile)
 		if err != nil {
-			log.Crit("failed to read config file", "file", configFile, "error", err)
+			log.Crit("failed to read config file", "file", *configFile, "error", err)
 		}
-		if err := json.Unmarshal(config, cfg); err != nil {
-			log.Crit("failed to parse config file", "file", configFile, "error", err)
+		if err := json.Unmarshal(data, cfg); err != nil {
+			log.Crit("failed to parse config file", "file", *configFile, "error", err)
 		}
 	}
 
@@ -74,17 +80,8 @@ func parseConfig() *Config {
 
 }
 
-func findConfigArg() string {
-	for i, arg := range os.Args {
-		if arg == "--config" && i+1 < len(os.Args) {
-			return os.Args[i+1]
-		}
-	}
-	return ""
-}
-
-func (c *Config) toOPVerifierConfig() *verifier.OpVerifierConfig {
-	return &verifier.OpVerifierConfig{
+func (c *Config) toOPVerifierConfig() *verifier.OPEspressoBatchVerifierConfig {
+	return &verifier.OPEspressoBatchVerifierConfig{
 		L1RPC:                c.L1RPC,
 		FullNodeExecutionRPC: c.FullNodeExecutionRPC,
 		FullNodeConsensusRPC: c.OPConfig.FullNodeConsensusRPC,

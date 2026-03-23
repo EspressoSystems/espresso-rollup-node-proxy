@@ -22,10 +22,14 @@ func main() {
 	cfg := parseConfig()
 	if cfg == nil {
 		log.Crit("failed to parse configuration")
+		return
 	}
 
-	// TODO: make log level configurable
-	logger := log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stderr, slog.LevelInfo, true))
+	var logLevel slog.Level
+	if err := logLevel.UnmarshalText([]byte(cfg.LogLevel)); err != nil {
+		log.Crit("invalid log level", "level", cfg.LogLevel, "error", err)
+	}
+	logger := log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stderr, logLevel, true))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -49,7 +53,7 @@ func main() {
 		log.Crit("failed to create espresso store", "error", err)
 	}
 
-	fullNodeVerifier := verifier.NewVerifier(ctx, logger, espressoStore, cfg.toOPVerifierConfig())
+	fullNodeVerifier := verifier.NewOPEspressoBatchVerifier(ctx, logger, espressoStore, cfg.toOPVerifierConfig())
 	if fullNodeVerifier == nil {
 		log.Crit("failed to create OP verifier")
 	}

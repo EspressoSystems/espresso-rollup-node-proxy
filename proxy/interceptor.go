@@ -81,9 +81,8 @@ func (i *Interceptor) interceptSingle(rawRequest []byte) ([]byte, error) {
 		return nil, fmt.Errorf("failed to parse JSON-RPC request: %w", err)
 	}
 
-	// If the request has no params or the params doesnt contain espresso tag
-	// we return the original request without error since there is nothing to replace
-	if req.Params == nil || !bytes.Contains(req.Params, []byte(i.espressoTag)) {
+	// If the request has no params, there is nothing to replace
+	if req.Params == nil {
 		return rawRequest, nil
 	}
 
