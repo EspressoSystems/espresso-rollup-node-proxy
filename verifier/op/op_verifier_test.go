@@ -147,7 +147,7 @@ func (m *mockEthClient) Client() *rpc.Client { return nil }
 func (m *mockEthClient) Close()              {}
 
 type testHarness struct {
-	verifier     *OpVerifier
+	verifier     *OPEspressoBatchVerifier
 	streamer     *mockStreamer
 	endpointProv *mockEndpointProvider
 	rollupClient *mockRollupClient
@@ -168,10 +168,10 @@ func newTestHarness(t *testing.T) *testHarness {
 	ethClient := new(mockEthClient)
 	store, err := espressoStore.NewEspressoStore(tempFilePath(t), 1, 1)
 	require.NoError(t, err)
-	verifier := &OpVerifier{
+	verifier := &OPEspressoBatchVerifier{
 		streamer:      streamer,
 		espressoStore: store,
-		opVerifierConfig: &OpVerifierConfig{
+		config: &OPEspressoBatchVerifierConfig{
 			VerificationInterval: time.Millisecond,
 		},
 		endpointProvider: endpointProvider,
