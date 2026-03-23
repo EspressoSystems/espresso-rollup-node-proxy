@@ -132,7 +132,7 @@ func (v *OpVerifier) Start(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
 	v.cancel = cancel
 	v.done = make(chan struct{})
-	go v.run(ctx)
+	v.run(ctx)
 }
 
 func (v *OpVerifier) run(ctx context.Context) {
