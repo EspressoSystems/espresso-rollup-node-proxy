@@ -3,9 +3,12 @@ package verifier
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"math/big"
 	espressoStore "proxy/store"
 	opStreamer "proxy/streamer/op"
+	"sync"
 	"time"
 
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
@@ -19,7 +22,7 @@ import (
 	espressoLightClient "github.com/EspressoSystems/espresso-network/sdks/go/light-client"
 )
 
-type OpVerifierConfig struct {
+type OPEspressoBatchVerifierConfig struct {
 	L1RPC                string        `json:"l1_rpc"`
 	FullNodeExecutionRPC string        `json:"full_node_execution_rpc"`
 	FullNodeConsensusRPC string        `json:"full_node_consensus_rpc"`
@@ -29,25 +32,26 @@ type OpVerifierConfig struct {
 	BatcherAddress       string        `json:"batcher_address"`
 }
 
-// OpVerifier is responsible for verifying that the batches produced by the OP full node match what the OP streamer has in its buffer.
+// OPEspressoBatchVerifier is responsible for verifying that the batches produced by the OP full node match what the OP streamer has in its buffer.
 // It does this by periodically peeking the next batch from the OP streamer, fetching the corresponding block from the OP node,
 // converting it to an EspressoBatch and comparing the two.
 // If they match, it advances the OP streamer and updates the espresso state in the store to reflect the new block number relative to the espresso tag.
 // If they dont match, it logs an error and tries again on the next interval. Eventually the tag will be advanced after
 // a batch is posted to Ethereum and it finalizes because Ethereum will only finalize data that matches the data finalized by Espresso.
-type OpVerifier struct {
+type OPEspressoBatchVerifier struct {
 	streamer         opStreamer.EspressoStreamer[opStreamer.EspressoBatch]
 	espressoStore    *espressoStore.EspressoStore
-	opVerifierConfig *OpVerifierConfig
+	config           *OPEspressoBatchVerifierConfig
 	endpointProvider dial.L2EndpointProvider
 	rollupConfig     *rollup.Config
 	logger           log.Logger
 	l1Client         *ethclient.Client
 	cancel           context.CancelFunc
-	done             chan struct{}
+	runWg            sync.WaitGroup
+	running          bool
 }
 
-func NewVerifier(ctx context.Context, logger log.Logger, store *espressoStore.EspressoStore, opVerifierConfig *OpVerifierConfig) *OpVerifier {
+func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *espressoStore.EspressoStore, opVerifierConfig *OPEspressoBatchVerifierConfig) *OPEspressoBatchVerifier {
 	if opVerifierConfig == nil {
 		logger.Crit("OP Verifier config is nil")
 		return nil
@@ -116,10 +120,10 @@ func NewVerifier(ctx context.Context, logger log.Logger, store *espressoStore.Es
 		espressoState.L2BlockNumber,
 	)
 
-	return &OpVerifier{
+	return &OPEspressoBatchVerifier{
 		streamer:         streamer,
 		espressoStore:    store,
-		opVerifierConfig: opVerifierConfig,
+		config:           opVerifierConfig,
 		endpointProvider: endpointProvider,
 		rollupConfig:     rollupConfig,
 		logger:           logger,
@@ -127,17 +131,22 @@ func NewVerifier(ctx context.Context, logger log.Logger, store *espressoStore.Es
 	}
 }
 
-func (v *OpVerifier) Start(ctx context.Context) {
+func (v *OPEspressoBatchVerifier) Start(ctx context.Context) {
+	if v.running {
+		v.logger.Warn("OP Verifier is already running")
+		return
+	}
 	v.logger.Info("Starting OP Verifier")
+	v.running = true
 	ctx, cancel := context.WithCancel(ctx)
 	v.cancel = cancel
-	v.done = make(chan struct{})
-	v.run(ctx)
+	v.runWg.Add(1)
+	go v.run(ctx)
 }
 
-func (v *OpVerifier) run(ctx context.Context) {
-	defer close(v.done)
-	ticker := time.NewTicker(v.opVerifierConfig.VerificationInterval)
+func (v *OPEspressoBatchVerifier) run(ctx context.Context) {
+	defer v.runWg.Done()
+	ticker := time.NewTicker(v.config.VerificationInterval)
 	defer ticker.Stop()
 
 	for {
@@ -145,80 +154,108 @@ func (v *OpVerifier) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			v.verify(ctx)
+			v.verifyAndAdvance(ctx)
 		}
 	}
 }
 
-func (v *OpVerifier) verify(ctx context.Context) {
+// verifyAndAdvance calls VerifyNextBatch to peek the next batch from the OP streamer and verify it against the OP node.
+// If verification succeeds, it advances the OP streamer and updates the espresso state in the store to reflect the new batch number.
+// If verification fails, it logs an error and will try again on the next interval.
+func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 	v.logger.Info("Starting OP batch verification")
 
-	// Peek the next batch from the OP streamer
-	espressoBatch, err := v.peekNextBatch(ctx)
-	if err != nil {
-		v.logger.Error("failed to peek next batch", "error", err)
+	var espressoBatch *opStreamer.EspressoBatch
+	var err error
+	if espressoBatch, err = v.VerifyNextBatch(ctx); err != nil {
+		v.logger.Error("batch verification failed", "error", err)
 		return
 	}
 	if espressoBatch == nil {
-		v.logger.Info("No new batches to verify")
+		v.logger.Info("no new batches to verify")
 		return
 	}
 
+	batchNumber := espressoBatch.Number()
+	if err := v.advanceStreamerAndEspressoState(ctx, batchNumber); err != nil {
+		v.logger.Error("failed to advance streamer and espresso state", "error", err, "batch_number", batchNumber)
+		return
+	}
+
+	v.logger.Info("Successfully verified and advanced OP batch", "batch_number", batchNumber)
+}
+
+// VerifyNextBatch peeks the next batch from the OP streamer, fetches the corresponding block from the OP node,
+// converts it to an EspressoBatch and compares the two. If they match, it returns the batch for further processing (advancing streamer and updating state).
+// If they dont match, it returns an error.
+func (v *OPEspressoBatchVerifier) VerifyNextBatch(ctx context.Context) (*opStreamer.EspressoBatch, error) {
+	// Peek the next batch from the OP streamer without advancing it
+	espressoBatch, err := v.peekNextBatch(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// No new batch to verify, just return
+	if espressoBatch == nil {
+		return nil, nil
+	}
+	batchNumber := espressoBatch.Number()
+	// Fetch the corresponding block from the OP node and convert it to an EspressoBatch
+	fullNodeBatch, err := v.getFullNodeBatch(ctx, batchNumber)
+	if err != nil {
+		return nil, err
+	}
+	// Compare the two batches by RLP-encoding them and checking for byte-for-byte equality
+	if err = ensureBatchesMatch(espressoBatch, fullNodeBatch); err != nil {
+		return nil, fmt.Errorf("batch verification failed for batch number %d: %w", batchNumber, err)
+	}
+	return espressoBatch, nil
+}
+
+// getFullNodeBatch fetches the block at the given number from the L2 full node
+// and converts it to an EspressoBatch for comparison.
+func (v *OPEspressoBatchVerifier) getFullNodeBatch(ctx context.Context, blockNumber uint64) (*opStreamer.EspressoBatch, error) {
 	ethClient, err := v.endpointProvider.EthClient(ctx)
 	if err != nil {
-		v.logger.Error("failed to create eth client", "error", err)
-		return
+		return nil, err
 	}
 	defer ethClient.Close()
 
-	block, err := ethClient.BlockByNumber(ctx, new(big.Int).SetUint64((*espressoBatch).Number()))
+	block, err := ethClient.BlockByNumber(ctx, new(big.Int).SetUint64(blockNumber))
 	if err != nil {
-		v.logger.Error("failed to get block by number", "error", err, "block_number", (*espressoBatch).Number())
-		return
+		return nil, err
 	}
 
-	// Convert block to EspressoBatch
-	fullNodeEspressoBatch, err := opStreamer.BlockToEspressoBatch(v.rollupConfig, block)
+	batch, err := opStreamer.BlockToEspressoBatch(v.rollupConfig, block)
 	if err != nil {
-		v.logger.Error("failed to convert block to EspressoBatch", "error", err, "block_number", (*espressoBatch).Number())
-		return
+		return nil, err
 	}
 
-	// Encode both batches to compare them
-	espressoBatchBuf := new(bytes.Buffer)
-	err = rlp.Encode(espressoBatchBuf, espressoBatch)
-	if err != nil {
-		v.logger.Error("failed to encode espresso batch", "error", err, "batch number", (*espressoBatch).Number())
-		return
+	return batch, nil
+}
+
+// ensureBatchesMatch RLP-encodes both batches and compares them byte-for-byte.
+// Returns an error if encoding fails or if the batches do not match.
+func ensureBatchesMatch(a, b *opStreamer.EspressoBatch) error {
+	aBuf := new(bytes.Buffer)
+	if err := rlp.Encode(aBuf, a); err != nil {
+		return err
 	}
 
-	fullNodeBatchBuf := new(bytes.Buffer)
-	err = rlp.Encode(fullNodeBatchBuf, fullNodeEspressoBatch)
-	if err != nil {
-		v.logger.Error("failed to encode full node batch", "error", err, "batch number", (*espressoBatch).Number())
-		return
+	bBuf := new(bytes.Buffer)
+	if err := rlp.Encode(bBuf, b); err != nil {
+		return err
 	}
 
-	if !bytes.Equal(espressoBatchBuf.Bytes(), fullNodeBatchBuf.Bytes()) {
-		v.logger.Error("Batch verification failed: OP batch does not match full node batch", "batch_number", (*espressoBatch).Number(), "block_hash", block.Hash())
-		return
+	if !bytes.Equal(aBuf.Bytes(), bBuf.Bytes()) {
+		return errors.New("espresso batch does not match full node batch")
 	}
-
-	// If they match then advance the streamer and update the espresso state in the store
-	err = v.advanceStreamerAndEspressoState(ctx, (*espressoBatch).Number())
-	if err != nil {
-		v.logger.Error("failed to advance streamer and espresso state", "error", err, "batch_number", (*espressoBatch).Number())
-		return
-	}
-
-	v.logger.Info("Successfully verified OP batch", "batch_number", (*espressoBatch).Number(), "block_hash", block.Hash())
-
+	return nil
 }
 
 // peekNextBatch follows the pattern  getSyncStatus -> refresh -> Update -> Peek
 // It doesnt call Next because Proxy only calls Next if the full node block matches
 // what Espresso has finalized, otherwise it remains stuck on the same batch until the OP node catches up.
-func (v *OpVerifier) peekNextBatch(ctx context.Context) (*opStreamer.EspressoBatch, error) {
+func (v *OPEspressoBatchVerifier) peekNextBatch(ctx context.Context) (*opStreamer.EspressoBatch, error) {
 	// Get the latest L2 block ref from the OP node
 	rollupClient, err := v.endpointProvider.RollupClient(ctx)
 	if err != nil {
@@ -255,7 +292,7 @@ func (v *OpVerifier) peekNextBatch(ctx context.Context) (*opStreamer.EspressoBat
 // advanceStreamerAndEspressoState advances the OP streamer to the next batch
 // and updates the espresso state in the store to reflect the new batch number.
 // This is called after a successful verification to move on to the next batch.
-func (v *OpVerifier) advanceStreamerAndEspressoState(ctx context.Context, blockNumber uint64) error {
+func (v *OPEspressoBatchVerifier) advanceStreamerAndEspressoState(ctx context.Context, blockNumber uint64) error {
 	hotshotFallbackPos := v.streamer.GetFallbackHotshotPos()
 
 	// Update the espresso state in the store to reflect the new batch number
@@ -271,10 +308,15 @@ func (v *OpVerifier) advanceStreamerAndEspressoState(ctx context.Context, blockN
 	return nil
 }
 
-func (v *OpVerifier) Stop() {
+func (v *OPEspressoBatchVerifier) Stop() {
+	if !v.running {
+		v.logger.Warn("OP Verifier is not running")
+		return
+	}
 	v.logger.Info("Stopping OP Verifier")
 	v.cancel()
-	<-v.done
+	v.runWg.Wait()
+	v.running = false
 
 	v.endpointProvider.Close()
 	v.l1Client.Close()

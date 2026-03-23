@@ -36,5 +36,5 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 	waitForHTTPReady(t, opNodeFullNode, 1*time.Minute)
 
 	// wait for 1  min
-	time.Sleep(1 * time.Minute)
+	time.Sleep(3 * time.Minute)
 }

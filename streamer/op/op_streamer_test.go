@@ -1270,6 +1270,12 @@ func TestStreamerBatchOrderingDeterminism(t *testing.T) {
 	})
 }
 
+// TestPeek verifies that Peek returns the next batch without consuming it from the streamer.
+// Acceptance criteria:
+// - Peek returns a valid batch with the correct block number when batches are available.
+// - Consecutive Peek calls return the same batch (non-consuming).
+// - A subsequent Next call returns the same batch that Peek returned (confirming Peek did not advance).
+// - Peek returns nil when no batches are available.
 func TestPeek(t *testing.T) {
 	namespace := uint64(42)
 	chainID := big.NewInt(int64(namespace))
