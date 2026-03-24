@@ -82,12 +82,10 @@ func parseConfig() *Config {
 
 func (c *Config) toOPVerifierConfig() *verifier.OPEspressoBatchVerifierConfig {
 	return &verifier.OPEspressoBatchVerifierConfig{
-		L1RPC:                c.L1RPC,
 		FullNodeExecutionRPC: c.FullNodeExecutionRPC,
 		FullNodeConsensusRPC: c.OPConfig.FullNodeConsensusRPC,
 		VerificationInterval: c.OPConfig.VerificationInterval,
 		QueryServiceURL:      c.OPConfig.QueryServiceURL,
-		LightClientAddress:   c.OPConfig.LightClientAddress,
 		BatcherAddress:       c.OPConfig.BatcherAddress,
 	}
 }

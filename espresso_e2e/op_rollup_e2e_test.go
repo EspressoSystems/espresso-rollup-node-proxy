@@ -1,3 +1,5 @@
+//go:build e2e
+
 package espresso_e2e
 
 import (
@@ -5,20 +7,48 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net"
 	"net/http"
 	"os"
 	"proxy/proxy"
 	espressostore "proxy/store"
+	opStreamer "proxy/streamer/op"
 	verifier "proxy/verifier/op"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	espressoClient "github.com/EspressoSystems/espresso-network/sdks/go/client"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/require"
 )
+
+type mockLightClient struct {
+	client *espressoClient.Client
+	last   uint64
+}
+
+func (m *mockLightClient) FinalizedState(_ *bind.CallOpts) (opStreamer.FinalizedState, error) {
+	current, err := m.client.FetchLatestBlockHeight(context.Background())
+	result := m.last
+	if err == nil {
+		if current >= 20 {
+			m.last = current - 20
+		} else {
+			m.last = 0
+		}
+
+	}
+	return opStreamer.FinalizedState{
+		BlockHeight:   result,
+		ViewNum:       0,
+		BlockCommRoot: big.NewInt(0),
+	}, nil
+}
 
 const (
 	rollupWorkingDir = "./op"
@@ -51,15 +81,21 @@ func mustMarshal(t *testing.T, v any) json.RawMessage {
 
 func startVerifier(ctx context.Context, t *testing.T, logger log.Logger, store *espressostore.EspressoStore) *verifier.OPEspressoBatchVerifier {
 	t.Helper()
-	v := verifier.NewOPEspressoBatchVerifier(ctx, logger, store, &verifier.OPEspressoBatchVerifierConfig{
-		L1RPC:                l1GethURL,
-		FullNodeExecutionRPC: opGethFullNode,
-		FullNodeConsensusRPC: opNodeFullNode,
-		VerificationInterval: time.Second,
-		QueryServiceURL:      espressoURL,
-		LightClientAddress:   "0x703848f4c85f18e3acd8196c8ec91eb0b7bd0797",
-		BatcherAddress:       "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-	})
+	l1Client, err := ethclient.DialContext(ctx, l1GethURL)
+	if err != nil {
+		logger.Crit("failed to create L1 client", "error", err)
+	}
+	v := verifier.NewOPEspressoBatchVerifier(ctx, logger, store,
+		l1Client,
+		&mockLightClient{client: espressoClient.NewClient(espressoURL)},
+		&verifier.OPEspressoBatchVerifierConfig{
+			FullNodeExecutionRPC: opGethFullNode,
+			FullNodeConsensusRPC: opNodeFullNode,
+			VerificationInterval: time.Second,
+			QueryServiceURL:      espressoURL,
+			BatcherAddress:       "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+		},
+	)
 	v.Start(ctx)
 	return v
 }
@@ -103,7 +139,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 
 	const targetBlockNum = uint64(10)
 
-	t.Log("Waiting for block 10 to be produced on OP Geth verifier")
+	t.Log("Waiting for block 10 to be produced on OP Geth full node")
 	deadline := time.Now().Add(3 * time.Minute)
 	for {
 		require.True(t, time.Now().Before(deadline), "block 10 not produced within timeout")
@@ -114,10 +150,10 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		time.Sleep(time.Second)
 	}
 
-	t.Log("Waiting for verifier to update espresso store past block 10")
+	t.Log("Waiting for OP verifer to update espresso store past block 10")
 	deadline = time.Now().Add(3 * time.Minute)
 	for {
-		require.True(t, time.Now().Before(deadline), "verifier did not reach block 10 within timeout")
+		require.True(t, time.Now().Before(deadline), "OP verifier did not reach block 10 within timeout")
 		if storeBlock(t, espressoStore) >= targetBlockNum {
 			break
 		}
@@ -171,11 +207,11 @@ func TestOPE2ERollupEspressoProxyL1Reorg(t *testing.T) {
 	v := startVerifier(ctx, t, logger, espressoStore)
 	defer v.Stop()
 
-	// Wait for the verifier to make initial progress so we have a baseline
-	t.Log("Waiting for verifier to make initial progress")
+	// Wait for the OP verifier to make initial progress so we have a baseline
+	t.Log("Waiting for OP verifier to make initial progress")
 	deadline := time.Now().Add(3 * time.Minute)
 	for {
-		require.True(t, time.Now().Before(deadline), "verifier did not make initial progress within timeout")
+		require.True(t, time.Now().Before(deadline), "OP verifier did not make initial progress within timeout")
 		if storeBlock(t, espressoStore) > 0 {
 			break
 		}
@@ -183,7 +219,7 @@ func TestOPE2ERollupEspressoProxyL1Reorg(t *testing.T) {
 	}
 
 	// Wait for L1 to reach block 60 before triggering the reorg
-	const reorgTriggerL1Block = uint64(60)
+	const reorgTriggerL1Block = uint64(30)
 	t.Logf("Waiting for L1 to reach block %d", reorgTriggerL1Block)
 	deadline = time.Now().Add(3 * time.Minute)
 	for {
@@ -199,22 +235,22 @@ func TestOPE2ERollupEspressoProxyL1Reorg(t *testing.T) {
 		time.Sleep(time.Second)
 	}
 
-	// Get the current L1 safe block number to use as the reorg point
-	safeResult := jsonRPCCall(t, l1GethURL, "eth_getBlockByNumber", mustMarshal(t, []any{"safe", false}))
-	var safeBlock map[string]json.RawMessage
-	require.NoError(t, json.Unmarshal(safeResult, &safeBlock))
-	var safeNumHex string
-	require.NoError(t, json.Unmarshal(safeBlock["number"], &safeNumHex))
-	safeBlockNum, err := strconv.ParseUint(strings.TrimPrefix(safeNumHex, "0x"), 16, 64)
+	// Get the current L1 block number to use as the reorg point
+	latest := jsonRPCCall(t, l1GethURL, "eth_getBlockByNumber", mustMarshal(t, []any{"latest", false}))
+	var latestBlock map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(latest, &latestBlock))
+	var latestNumHex string
+	require.NoError(t, json.Unmarshal(latestBlock["number"], &latestNumHex))
+	latestBlockNum, err := strconv.ParseUint(strings.TrimPrefix(latestNumHex, "0x"), 16, 64)
 	require.NoError(t, err)
-	t.Logf("L1 safe block before reorg: %d", safeBlockNum)
+	t.Logf("L1 latest block before reorg: %d", latestBlockNum)
 
 	blockBeforeReorg := storeBlock(t, espressoStore)
 	t.Logf("Proxy at L2 block %d before triggering reorg", blockBeforeReorg)
 
 	// Trigger the L1 reorg via the mock beacon
-	t.Logf("Triggering L1 reorg at safe block %d", safeBlockNum)
-	forkBody, err := json.Marshal(map[string]uint64{"blockNum": safeBlockNum})
+	t.Logf("Triggering L1 reorg at block %d", latestBlockNum-3)
+	forkBody, err := json.Marshal(map[string]uint64{"blockNum": latestBlockNum - 3})
 	require.NoError(t, err)
 	resp, err := http.Post(mockBeaconURL+"/fork", "application/json", bytes.NewReader(forkBody))
 	require.NoError(t, err)
@@ -258,7 +294,7 @@ func TestOPE2ERollupEspressoProxyL1Reorg(t *testing.T) {
 	t.Logf("Proxy at L2 block %d (%s) after reorg, block never moved backwards", verifiedBlock, verifiedBlockHex)
 
 	proxyResult := jsonRPCCall(t, proxyURL, "eth_getBlockByNumber", mustMarshal(t, []any{espressoTag, false}))
-	directResult := jsonRPCCall(t, opNodeFullNode, "eth_getBlockByNumber", mustMarshal(t, []any{verifiedBlockHex, false}))
+	directResult := jsonRPCCall(t, opGethFullNode, "eth_getBlockByNumber", mustMarshal(t, []any{verifiedBlockHex, false}))
 	require.JSONEq(t, string(directResult), string(proxyResult))
 	t.Log("Proxy espresso tag response matches direct verifier response after reorg")
 }

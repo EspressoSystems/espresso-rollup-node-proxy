@@ -64,7 +64,7 @@ services:
       - --engine=http://l1-geth:${L1_ENGINE_PORT}
       - --eth=http://l1-geth:${L1_HTTP_PORT}
       - --jwt=/config/jwt.txt
-      - --block-time=1s
+      - --block-time=2s
       - --finalized-distance=20
       - --safe-distance=10
       - --addr=0.0.0.0:${L1_BEACON_PORT}
@@ -107,6 +107,7 @@ services:
     environment:
       - MODE=genesis
       - L1_RPC=http://l1-geth:${L1_HTTP_PORT}
+      - HOME=/tmp
     volumes:
       - l2-config:/config
       - deployer:/deployer

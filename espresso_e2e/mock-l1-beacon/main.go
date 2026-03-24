@@ -108,12 +108,12 @@ type FakeBeacon struct {
 	finalizedDist uint64
 	safeDist      uint64
 
-	history []blockInfo
+	history   []blockInfo
+	safe      blockInfo
+	finalized blockInfo
 }
 
-func (fb *FakeBeacon) head() blockInfo      { return fb.history[len(fb.history)-1] }
-func (fb *FakeBeacon) safe() blockInfo      { return fb.atDepth(fb.safeDist) }
-func (fb *FakeBeacon) finalized() blockInfo { return fb.atDepth(fb.finalizedDist) }
+func (fb *FakeBeacon) head() blockInfo { return fb.history[len(fb.history)-1] }
 func (fb *FakeBeacon) atDepth(d uint64) blockInfo {
 	if uint64(len(fb.history)) <= d {
 		return fb.history[0]
@@ -147,16 +147,24 @@ func (fb *FakeBeacon) advance() error {
 	}
 
 	head := fb.head()
-	safe := fb.safe()
-	fin := fb.finalized()
+
+	// make sure in case of fork safe and finalized do not move back
+	safe := fb.atDepth(fb.safeDist)
+	if safe.Number >= fb.safe.Number {
+		fb.safe = safe
+	}
+	fin := fb.atDepth(fb.finalizedDist)
+	if safe.Number >= fb.safe.Number {
+		fb.finalized = fin
+	}
 	fb.mu.Unlock()
 
 	beaconRoot := fakeBeaconRoot(head.Time)
 
 	fcState := map[string]string{
 		"headBlockHash":      head.Hash,
-		"safeBlockHash":      safe.Hash,
-		"finalizedBlockHash": fin.Hash,
+		"safeBlockHash":      fb.safe.Hash,
+		"finalizedBlockHash": fb.finalized.Hash,
 	}
 	payloadAttrs := map[string]interface{}{
 		"timestamp":             fmt.Sprintf("0x%x", time.Now().Unix()),
@@ -212,11 +220,10 @@ func (fb *FakeBeacon) advance() error {
 		return fmt.Errorf("failed to unmarshal execution payload: %w", err)
 	}
 
-	// make canonical
 	canonicalFC := map[string]string{
 		"headBlockHash":      newBlock.BlockHash,
-		"safeBlockHash":      safe.Hash,
-		"finalizedBlockHash": fin.Hash,
+		"safeBlockHash":      fb.safe.Hash,
+		"finalizedBlockHash": fb.finalized.Hash,
 	}
 	if err := callRPC(fb.engineURL, fb.secret, "engine_forkchoiceUpdatedV3",
 		[]interface{}{canonicalFC, nil}, nil); err != nil {
@@ -230,8 +237,8 @@ func (fb *FakeBeacon) advance() error {
 	}
 	fb.mu.Lock()
 	fb.history = append(fb.history, block)
-	if len(fb.history) > 2000 {
-		fb.history = fb.history[len(fb.history)-2000:]
+	if len(fb.history) > 500 {
+		fb.history = fb.history[len(fb.history)-500:]
 	}
 	fb.mu.Unlock()
 
