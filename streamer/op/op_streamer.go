@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -75,12 +74,11 @@ type BatchStreamer[B Batch] struct {
 	// Namespace of the rollup we're interested in
 	Namespace uint64
 
-	L1Client               L1Client
-	RollupL1Client         L1Client
-	EspressoClient         EspressoClient
-	EspressoLightClient    LightClientCallerInterface
-	Log                    log.Logger
-	HotShotPollingInterval time.Duration
+	L1Client            L1Client
+	RollupL1Client      L1Client
+	EspressoClient      EspressoClient
+	EspressoLightClient LightClientCallerInterface
+	Log                 log.Logger
 
 	// Batch number we're to give out next
 	BatchPos uint64
@@ -123,7 +121,6 @@ func NewEspressoStreamer[B Batch](
 	lightClient LightClientCallerInterface,
 	log log.Logger,
 	unmarshalBatch func([]byte) (*B, error),
-	hotShotPollingInterval time.Duration,
 	originHotShotPos uint64,
 	originBatchPos uint64,
 ) *BatchStreamer[B] {
@@ -137,16 +134,15 @@ func NewEspressoStreamer[B Batch](
 		Log:                 log,
 		Namespace:           namespace,
 		// Internally, BatchPos is the position of the batch we are to give out next, hence the +1
-		BatchPos:               originBatchPos + 1,
-		fallbackBatchPos:       originBatchPos + 1,
-		BatchBuffer:            NewBatchBuffer[B](BatchBufferCapacity),
-		HotShotPollingInterval: hotShotPollingInterval,
-		finalizedL1HashCache:   finalizedL1HashCache,
-		unmarshalBatch:         unmarshalBatch,
-		originHotShotPos:       originHotShotPos,
-		fallbackHotShotPos:     originHotShotPos,
-		hotShotPos:             originHotShotPos,
-		skipPos:                math.MaxUint64,
+		BatchPos:             originBatchPos + 1,
+		fallbackBatchPos:     originBatchPos + 1,
+		BatchBuffer:          NewBatchBuffer[B](BatchBufferCapacity),
+		finalizedL1HashCache: finalizedL1HashCache,
+		unmarshalBatch:       unmarshalBatch,
+		originHotShotPos:     originHotShotPos,
+		fallbackHotShotPos:   originHotShotPos,
+		hotShotPos:           originHotShotPos,
+		skipPos:              math.MaxUint64,
 	}
 }
 
@@ -322,6 +318,14 @@ func (s *BatchStreamer[B]) Update(ctx context.Context) error {
 		}
 	}
 
+	return nil
+}
+
+// Peek returns the next valid batch without consuming it.
+func (s *BatchStreamer[B]) Peek(ctx context.Context) *B {
+	if s.HasNext(ctx) {
+		return s.headBatch
+	}
 	return nil
 }
 
@@ -522,6 +526,12 @@ func (s *BatchStreamer[B]) confirmEspressoBlockHeight(safeL1Origin eth.BlockID) 
 	s.fallbackHotShotPos = hotshotState.BlockHeight
 
 	return shouldReset
+}
+
+// GetFallbackHotshotPos is a helper function that allows us
+// to retrieve the fallback hotshot position
+func (s *BatchStreamer[B]) GetFallbackHotshotPos() uint64 {
+	return s.fallbackHotShotPos
 }
 
 // UnmarshalBatch implements EspressoStreamerIFace

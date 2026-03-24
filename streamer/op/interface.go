@@ -62,4 +62,11 @@ type EspressoStreamer[B Batch] interface {
 	// are no batches left to read, at the moment of the call, it will return
 	// nil.
 	Next(ctx context.Context) *B
+
+	// Peek attempts to return the next batch from the streamer without advancing the streamer's position.
+	// If there are no batches left to read, at the moment of the call, it will return nil.
+	Peek(ctx context.Context) *B
+
+	// GetFallbackHotshotPos returns the fallback hotshot position
+	GetFallbackHotshotPos() uint64
 }
