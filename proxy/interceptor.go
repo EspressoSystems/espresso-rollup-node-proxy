@@ -36,6 +36,9 @@ func NewInterceptor(store *espressoStore.EspressoStore, espressoTag string) *Int
 
 // Intercept takes in a raw JSON-RPC request (single or batch), checks if the params
 // contain the espresso tag and if so replaces it with the block number from the store.
+// It distinguishes batch from single requests by checking if the first non-whitespace
+// byte is '[' (0x5B). Since JSON-RPC payloads are UTF-8 encoded, the raw byte value
+// is equivalent to the ASCII character literal.
 func (i *Interceptor) Intercept(rawRequest []byte) ([]byte, error) {
 	trimmed := bytes.TrimLeft(rawRequest, " \t\r\n")
 	if len(trimmed) > 0 && trimmed[0] == '[' {
@@ -111,13 +114,15 @@ func (i *Interceptor) interceptSingle(rawRequest []byte) ([]byte, error) {
 	return modifiedRequest, nil
 }
 
-// replaceEspressoTagWithBlockNumber is a recursive function that takes in the params of a JSON-RPC request and replaces any occurrence of the espresso tag with the provided block number.
-// The params can be a string, json object or json array.
-// The function returns the modified params, a boolean indicating whether the replacement was done and an error if any.
+// replaceEspressoTagWithBlockNumber recursively walks JSON params and replaces
+// exact matches of the espresso tag with a hex block number.
 func (i *Interceptor) replaceEspressoTagWithBlockNumber(params json.RawMessage, espressoFinalizedBlockNumber uint64) (json.RawMessage, bool, error) {
 	var s string
 
-	// First case is where params is a string containing the espresso tag
+	// Case 1: params is a string containing the espresso tag
+	// {"jsonrpc":"2.0","method":"eth_getBalance","params":["0xAddr","espresso"]}`
+	// This case is the end of the recursion since we have found the espresso tag
+	// and replaced it with the block number
 	if err := json.Unmarshal(params, &s); err == nil {
 		if s == i.espressoTag {
 			// convert block number to hex
@@ -132,15 +137,15 @@ func (i *Interceptor) replaceEspressoTagWithBlockNumber(params json.RawMessage, 
 		return params, false, nil
 	}
 
-	// Second case is where params is a json object in which one key value pair has
-	// value as the espresso tag
+	// Case 2: params is a JSON object — recurse into each value
+	// 	`{"jsonrpc":"2.0","id":1,"method":"eth_call","params":{"to":"0xabc","data":"0x123","blockTag":"espresso"}}`
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(params, &obj); err == nil {
 		changed := false
 		for key, value := range obj {
 			result, c, err := i.replaceEspressoTagWithBlockNumber(value, espressoFinalizedBlockNumber)
 			if err != nil {
-				return nil, false, fmt.Errorf("failed to replace espresso tag in object:%w", err)
+				return nil, false, fmt.Errorf("failed to replace espresso tag in object: %w", err)
 			}
 			if c {
 				obj[key] = result
@@ -161,14 +166,15 @@ func (i *Interceptor) replaceEspressoTagWithBlockNumber(params json.RawMessage, 
 		return replacedParams, true, nil
 	}
 
-	// Third case where params is a json array in which one of the values is the espresso tag
+	// Case 3: params is a JSON array — recurse into each element
+	// {"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["espresso",false]}
 	var arr []json.RawMessage
 	if err := json.Unmarshal(params, &arr); err == nil {
 		changed := false
 		for j, value := range arr {
 			result, c, err := i.replaceEspressoTagWithBlockNumber(value, espressoFinalizedBlockNumber)
 			if err != nil {
-				return nil, false, fmt.Errorf("failed to replace espresso tag in array:%w", err)
+				return nil, false, fmt.Errorf("failed to replace espresso tag in array: %w", err)
 			}
 			if c {
 				arr[j] = result
