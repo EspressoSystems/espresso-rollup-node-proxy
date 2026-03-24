@@ -60,7 +60,7 @@ func waitForHTTPReady(t *testing.T, url string, timeout time.Duration) {
 }
 
 type JSONRPCResponse struct {
-	Cersion string          `json:"jsonrpc"`
+	Version string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id"`
 	Result  json.RawMessage `json:"result,omitempty"`
 	Error   json.RawMessage `json:"error,omitempty"`

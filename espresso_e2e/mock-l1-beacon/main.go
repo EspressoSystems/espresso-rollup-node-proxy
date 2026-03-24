@@ -40,13 +40,19 @@ func makeJWT(secret []byte) string {
 }
 
 func callRPC(url string, secret []byte, method string, params []interface{}, result interface{}) error {
-	body, _ := json.Marshal(map[string]interface{}{
+	body, err := json.Marshal(map[string]interface{}{
 		"jsonrpc": "2.0",
 		"method":  method,
 		"params":  params,
 		"id":      1,
 	})
-	req, _ := http.NewRequest("POST", url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to marshal body: %w", err)
+	}
+	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create POST request: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	if secret != nil {
 		req.Header.Set("Authorization", "Bearer "+makeJWT(secret))
@@ -202,7 +208,9 @@ func (fb *FakeBeacon) advance() error {
 		BlockNumber string `json:"blockNumber"`
 		Timestamp   string `json:"timestamp"`
 	}
-	json.Unmarshal(payloadResp.ExecutionPayload, &newBlock)
+	if err := json.Unmarshal(payloadResp.ExecutionPayload, &newBlock); err != nil {
+		return fmt.Errorf("failed to unmarshal execution payload: %w", err)
+	}
 
 	// make canonical
 	canonicalFC := map[string]string{
@@ -234,7 +242,8 @@ func (fb *FakeBeacon) advance() error {
 func (fb *FakeBeacon) fork(blockNumber uint64) error {
 	fb.mu.Lock()
 	var target blockInfo
-	if int(blockNumber) >= len(fb.history) {
+	if blockNumber >= uint64(len(fb.history)) {
+		fb.mu.Unlock()
 		return fmt.Errorf("block %d not found in history", blockNumber)
 	}
 
@@ -284,7 +293,10 @@ func main() {
 			return
 		}
 		log.Printf("fork requested to number %d", req.BlockNumber)
-		fb.fork(req.BlockNumber)
+		if err := fb.fork(req.BlockNumber); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 	})
 
