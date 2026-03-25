@@ -61,7 +61,7 @@ func callRPC(url string, secret []byte, method string, params []interface{}, res
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var out struct {
 		Result json.RawMessage `json:"result"`
 		Error  *struct {
@@ -309,7 +309,7 @@ func main() {
 
 	http.HandleFunc("/eth/v1/node/version", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"data": map[string]string{"version": "fake-beacon/v1.0"},
 		})
 	})

@@ -1,3 +1,5 @@
+//go:build e2e
+
 package espresso_e2e
 
 import (
@@ -81,7 +83,7 @@ func jsonRPCCall(t *testing.T, url, method string, params json.RawMessage) json.
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
