@@ -182,7 +182,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		t.Log("L1 reorg triggered successfully")
 
 		// Poll for 1 minute asserting the verified L2 block never moves backwards,
-		// and that the espresso-tagged block never exceeds the verifier's latest block.
+		// and that the espresso-tagged block never exceeds the OP geth full nodes latest block.
 		t.Log("Monitoring proxy block number for backwards movement during and after reorg")
 		previous := blockBeforeReorg
 		deadline = time.Now().Add(1 * time.Minute)
@@ -195,10 +195,10 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 				previous = current
 			}
 
-			// The espresso-tagged block must not be ahead of the verifier's latest block
+			// The espresso-tagged block must not be ahead of the OP geth full nodes latest block
 			latestFullNodeBlock := getBlockNum(t, opGethFullNode)
 			require.LessOrEqual(t, current, latestFullNodeBlock,
-				"proxy espresso block %d is ahead of verifier latest block %d", current, latestFullNodeBlock)
+				"proxy espresso block %d is ahead of OP geth full nodes latest block %d", current, latestFullNodeBlock)
 
 			if time.Now().After(deadline) {
 				break
