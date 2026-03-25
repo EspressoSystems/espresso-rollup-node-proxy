@@ -1,5 +1,3 @@
-//go:build e2e
-
 package espresso_e2e
 
 import (

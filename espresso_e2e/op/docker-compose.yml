@@ -49,6 +49,8 @@ services:
       - "${L1_HTTP_PORT}:${L1_HTTP_PORT}"
       - "${L1_ENGINE_PORT}:${L1_ENGINE_PORT}"
 
+  # We are using this service to help us with L1 reorgs
+  # We can call /fork on this and give it a block number to do so
   mock-l1-beacon:
     build:
       context: ../
@@ -87,6 +89,8 @@ services:
       - --testnet-dir
       - /config
       - --beacon-nodes
+      # Using mock l1 beacon for now
+      # A todo would be for to only have this being used for l1 reorg tests
       - http://mock-l1-beacon:${L1_BEACON_PORT}
       - --init-slashing-protection
       - --datadir
@@ -197,6 +201,8 @@ services:
       - --p2p.listen.udp=9003
       - --p2p.sequencer.key=${OPERATOR_PRIVATE_KEY}
 
+  # On startup sequencer will generate a random p2p peer id
+  # This image helps connect the full node and sequencer
   op-node-peer-connector:
     image: alpine:3.19
     depends_on:

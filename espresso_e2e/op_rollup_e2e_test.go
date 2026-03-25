@@ -1,5 +1,3 @@
-//go:build e2e
-
 package espresso_e2e
 
 import (
@@ -25,6 +23,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// For e2e tests we are using the mock client as there currently is an issue with light client in espresso dev node
+// Eventually we will fix it and remove this
 type mockLightClient struct {
 	client *espressoClient.Client
 	last   uint64
