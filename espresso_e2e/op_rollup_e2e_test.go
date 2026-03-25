@@ -24,7 +24,7 @@ import (
 )
 
 // For e2e tests we are using the mock client as there currently is an issue with light client in espresso dev node
-// Eventually we will fix it and remove this
+// Eventually we will fix it and remove this.
 type mockLightClient struct {
 	client *espressoClient.Client
 	last   uint64
