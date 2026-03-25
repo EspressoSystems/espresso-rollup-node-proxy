@@ -155,30 +155,6 @@ services:
       - "${OP_HTTP_PORT}:${OP_HTTP_PORT}"
       - "${OP_ENGINE_PORT}:${OP_ENGINE_PORT}"
 
-  op-geth-verifier:
-    platform: linux/amd64
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${OP_HTTP_PORT}"]
-      interval: 3s
-      timeout: 2s
-      retries: 40
-    image: ${OP_GETH_IMAGE}
-    depends_on:
-      l2-genesis:
-        condition: service_completed_successfully
-      l1-geth:
-        condition: service_healthy
-    volumes:
-      - l2-config:/config:ro
-      - op-data-verifier:/data
-    environment:
-      L1_RPC: http://l1-geth:${L1_HTTP_PORT}
-      OP_HTTP_PORT: ${OP_HTTP_PORT}
-      OP_ENGINE_PORT: ${OP_ENGINE_PORT}
-    ports:
-      - "8547:${OP_HTTP_PORT}"
-      - "8553:${OP_ENGINE_PORT}"
-
   op-node-sequencer:
     platform: linux/amd64
     healthcheck:
@@ -298,39 +274,6 @@ services:
       - --p2p.listen.ip=0.0.0.0
       - --p2p.listen.tcp=9004
       - --p2p.listen.udp=9004
-
-  op-node-verifier:
-    platform: linux/amd64
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${VERIFIER_PORT}"]
-      interval: 3s
-      timeout: 2s
-      retries: 40
-    image: ${OP_NODE_IMAGE}
-    depends_on:
-      l2-rollup:
-        condition: service_completed_successfully
-      op-geth-verifier:
-        condition: service_started
-      l1-validator:
-        condition: service_started
-    environment:
-      OP_NODE_L1_ETH_RPC: http://l1-geth:${L1_HTTP_PORT}
-      OP_NODE_L1_BEACON: http://mock-l1-beacon:${L1_BEACON_PORT}
-      OP_NODE_L2_ENGINE_RPC: http://op-geth-verifier:${OP_ENGINE_PORT}
-      OP_NODE_RPC_PORT: ${VERIFIER_PORT}
-    ports:
-      - "${VERIFIER_PORT}:${VERIFIER_PORT}"
-    volumes:
-      - l2-config:/config:ro
-    command:
-      - op-node
-      - --l2.jwt-secret=/config/jwt.txt
-      - --rollup.config=/config/rollup.json
-      - --rpc.addr=0.0.0.0
-      - --l1.http-poll-interval=1s
-      - --l1.epoch-poll-interval=1s
-      - --p2p.disable=true
 
   op-batcher:
     platform: linux/amd64

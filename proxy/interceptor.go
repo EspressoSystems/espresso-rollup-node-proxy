@@ -36,6 +36,9 @@ func NewInterceptor(store *espressoStore.EspressoStore, espressoTag string) *Int
 
 // Intercept takes in a raw JSON-RPC request (single or batch), checks if the params
 // contain the espresso tag and if so replaces it with the block number from the store.
+// It distinguishes batch from single requests by checking if the first non-whitespace
+// byte is '[' (0x5B). Since JSON-RPC payloads are UTF-8 encoded, the raw byte value
+// is equivalent to the ASCII character literal.
 func (i *Interceptor) Intercept(rawRequest []byte) ([]byte, error) {
 	trimmed := bytes.TrimLeft(rawRequest, " \t\r\n")
 	if len(trimmed) > 0 && trimmed[0] == '[' {
