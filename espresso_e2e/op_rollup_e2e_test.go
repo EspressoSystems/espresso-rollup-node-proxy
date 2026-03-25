@@ -140,7 +140,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 	const targetBlockNum = uint64(10)
 
 	t.Log("Waiting for block 10 to be produced on OP Geth full node")
-	deadline := time.Now().Add(3 * time.Minute)
+	deadline := time.Now().Add(2 * time.Minute)
 	for {
 		require.True(t, time.Now().Before(deadline), "block 10 not produced within timeout")
 		result := jsonRPCCall(t, opGethFullNode, "eth_getBlockByNumber", mustMarshal(t, []any{"0xa", false}))
@@ -151,7 +151,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 	}
 
 	t.Log("Waiting for OP verifer to update espresso store past block 10")
-	deadline = time.Now().Add(3 * time.Minute)
+	deadline = time.Now().Add(1 * time.Minute)
 	for {
 		require.True(t, time.Now().Before(deadline), "OP verifier did not reach block 10 within timeout")
 		if storeBlock(t, espressoStore) >= targetBlockNum {
