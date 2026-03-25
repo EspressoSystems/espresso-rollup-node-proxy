@@ -22,6 +22,7 @@ import (
 )
 
 type OPEspressoBatchVerifierConfig struct {
+	L1RPC                string        `json:"l1_rpc"`
 	FullNodeExecutionRPC string        `json:"full_node_execution_rpc"`
 	FullNodeConsensusRPC string        `json:"full_node_consensus_rpc"`
 	VerificationInterval time.Duration `json:"verification_interval"`

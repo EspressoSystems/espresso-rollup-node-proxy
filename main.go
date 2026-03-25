@@ -22,10 +22,6 @@ import (
 
 func main() {
 	cfg := parseConfig()
-	if cfg == nil {
-		log.Crit("failed to parse configuration")
-		return
-	}
 
 	var logLevel slog.Level
 	if err := logLevel.UnmarshalText([]byte(cfg.LogLevel)); err != nil {
@@ -39,20 +35,20 @@ func main() {
 	// Get the finalized block number to initialize the store
 	client, err := ethclient.DialContext(ctx, cfg.FullNodeExecutionRPC)
 	if err != nil {
-		log.Crit("failed to dial full node execution RPC", "url", cfg.FullNodeExecutionRPC, "error", err)
+		logger.Crit("failed to dial full node execution RPC", "url", cfg.FullNodeExecutionRPC, "error", err)
 	}
 	defer client.Close()
 
 	header, err := client.HeaderByNumber(ctx, big.NewInt(int64(rpc.FinalizedBlockNumber)))
 	if err != nil {
-		log.Crit("failed to fetch finalized block from full node", "error", err)
+		logger.Crit("failed to fetch finalized block from full node", "error", err)
 	}
 
 	logger.Info("fetched finalized block number", "number", header.Number.String())
 
 	espressoStore, err := store.NewEspressoStore(cfg.StoreFilePath, cfg.InitialHotshotHeight, header.Number.Uint64())
 	if err != nil {
-		log.Crit("failed to create espresso store", "error", err)
+		logger.Crit("failed to create espresso store", "error", err)
 	}
 
 	// Create an L1 client
@@ -70,7 +66,7 @@ func main() {
 
 	fullNodeVerifier := verifier.NewOPEspressoBatchVerifier(ctx, logger, espressoStore, l1Client, espressoLightClient, cfg.toOPVerifierConfig())
 	if fullNodeVerifier == nil {
-		log.Crit("failed to create OP verifier")
+		logger.Crit("failed to create OP verifier")
 	}
 
 	go fullNodeVerifier.Start(ctx)
