@@ -12,3 +12,5 @@ fmt:
 
 lint:
     golangci-lint run ./... ./streamer/op/...
+
+test
