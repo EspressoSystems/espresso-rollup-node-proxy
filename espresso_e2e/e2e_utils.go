@@ -216,6 +216,17 @@ func (c *logCapturer) WithGroup(_ string) slog.Handler      { return c }
 
 func requireLogAttrs(t *testing.T, capturer *logCapturer, msg string, expected map[string]uint64) {
 	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if matchLogAttrs(capturer, msg, expected) {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("expected log record %q with attrs %v not found in captured logs", msg, expected)
+}
+
+func matchLogAttrs(capturer *logCapturer, msg string, expected map[string]uint64) bool {
 	capturer.mu.Lock()
 	defer capturer.mu.Unlock()
 	for _, r := range capturer.records {
@@ -239,8 +250,8 @@ func requireLogAttrs(t *testing.T, capturer *logCapturer, msg string, expected m
 			}
 		}
 		if allMatch {
-			return
+			return true
 		}
 	}
-	t.Fatalf("expected log record %q with attrs %v not found in captured logs", msg, expected)
+	return false
 }

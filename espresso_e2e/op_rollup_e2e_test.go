@@ -369,8 +369,6 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		}
 
 		verifier.Stop()
-		_ = server.Shutdown(ctx)
-		t.Log("proxy and verifier stopped")
 
 		// After shutting down proxy and verifier, we
 		// retrieve the l2 block and hotshot height from the store
@@ -386,6 +384,8 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 
 		require.Greater(t, preRestartHotshotHeight, initialHotshotHeight, "store did not advance past initial hotshot height")
 		require.Greater(t, preRestartBlock, finalizedL2Block, "store did not advance past finalized block")
+		_ = server.Shutdown(ctx)
+		t.Log("proxy and verifier stopped")
 
 		// Now that proxy has advanced to a higher block number and hotshot height,
 		// we will restart the proxy with with the same state file, and assert it resumes from the persisted state correctly.
