@@ -79,7 +79,10 @@ func getBlockNum(t *testing.T, url string) uint64 {
 	return block
 }
 
-func jsonRPCCall(t *testing.T, url, method string, params json.RawMessage) json.RawMessage {
+// jsonRPCCallRaw performs a JSON-RPC call and returns the full response
+// without failing on JSON-RPC errors. Useful for comparing error responses
+// between proxy and direct node.
+func jsonRPCCallRaw(t *testing.T, url, method string, params json.RawMessage) JSONRPCResponse {
 	t.Helper()
 	req := proxy.JSONRPCRequest{
 		Version: "2.0",
@@ -102,10 +105,71 @@ func jsonRPCCall(t *testing.T, url, method string, params json.RawMessage) json.
 	var rpcResp JSONRPCResponse
 	err = json.Unmarshal(respBody, &rpcResp)
 	require.NoError(t, err)
+	return rpcResp
+}
+
+func jsonRPCCall(t *testing.T, url, method string, params json.RawMessage) json.RawMessage {
+	t.Helper()
+	rpcResp := jsonRPCCallRaw(t, url, method, params)
 	if rpcResp.Error != nil && string(rpcResp.Error) != "null" {
 		t.Fatalf("JSON-RPC call returned error: %s", string(rpcResp.Error))
 	}
 	return rpcResp.Result
+}
+
+func requireJSONRPCEqual(t *testing.T, expected, actual JSONRPCResponse, method string) {
+	t.Helper()
+	expectedHasErr := expected.Error != nil && string(expected.Error) != "null"
+	actualHasErr := actual.Error != nil && string(actual.Error) != "null"
+
+	// If they both have erorrs, check if the errors match
+	// Otherwise fail the test
+	if expectedHasErr != actualHasErr {
+		t.Fatalf("method %s response type mismatch: direct error=%s result=%s, proxy error=%s result=%s",
+			method, string(expected.Error), string(expected.Result), string(actual.Error), string(actual.Result))
+	}
+
+	if expectedHasErr {
+		require.JSONEq(t, string(expected.Error), string(actual.Error),
+			"method %s error response mismatch", method)
+	} else {
+		require.JSONEq(t, string(expected.Result), string(actual.Result),
+			"method %s result response mismatch", method)
+	}
+}
+
+type batchEntry struct {
+	method string
+	params json.RawMessage
+}
+
+func jsonRPCBatchCallRaw(t *testing.T, url string, entries []batchEntry) []JSONRPCResponse {
+	t.Helper()
+	var batch []proxy.JSONRPCRequest
+	for i, e := range entries {
+		batch = append(batch, proxy.JSONRPCRequest{
+			Version: "2.0",
+			ID:      json.RawMessage(fmt.Sprintf("%d", i+1)),
+			Method:  e.method,
+			Params:  e.params,
+		})
+	}
+
+	body, err := json.Marshal(batch)
+	require.NoError(t, err)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+
+	respBody, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	var rpcResps []JSONRPCResponse
+	require.NoError(t, json.Unmarshal(respBody, &rpcResps), "batch response: %s", string(respBody))
+	require.Len(t, rpcResps, len(entries), "batch response count mismatch")
+	return rpcResps
 }
 
 func storeBlock(t *testing.T, store *espressostore.EspressoStore) uint64 {
