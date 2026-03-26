@@ -73,15 +73,6 @@ type JSONRPCResponse struct {
 	Error   json.RawMessage `json:"error,omitempty"`
 }
 
-func getBlockNum(t *testing.T, url string, params json.RawMessage) uint64 {
-	latestResult := jsonRPCCall(t, url, "eth_blockNumber", params)
-	var latestHex string
-	require.NoError(t, json.Unmarshal(latestResult, &latestHex))
-	block, err := strconv.ParseUint(strings.TrimPrefix(latestHex, "0x"), 16, 64)
-	require.NoError(t, err)
-	return block
-}
-
 func getBlockByTag(t *testing.T, url string, tag string) uint64 {
 	t.Helper()
 	result := jsonRPCCall(t, url, "eth_getBlockByNumber", jsonMarshal(t, []any{tag, false}))
