@@ -280,7 +280,8 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 			{"eth_createAccessList", []any{map[string]any{"from": userAddr, "to": userAddr, "data": "0x"}, espressoTag}},
 			{"eth_simulateV1", []any{map[string]any{"blockStateCalls": []any{}}, espressoTag}},
 		}
-
+		// freeze store so espresso tag resolves to a stable block
+		v.Stop()
 		verifiedBlock := storeBlock(t, espressoStore)
 		blockHex := fmt.Sprintf("0x%x", verifiedBlock)
 
