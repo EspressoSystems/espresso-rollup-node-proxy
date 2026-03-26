@@ -2,14 +2,17 @@ package espresso_e2e
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os/exec"
 	"proxy/proxy"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -70,13 +73,25 @@ type JSONRPCResponse struct {
 	Error   json.RawMessage `json:"error,omitempty"`
 }
 
-func getBlockNum(t *testing.T, url string) uint64 {
-	latestResult := jsonRPCCall(t, url, "eth_blockNumber", nil)
+func getBlockNum(t *testing.T, url string, params json.RawMessage) uint64 {
+	latestResult := jsonRPCCall(t, url, "eth_blockNumber", params)
 	var latestHex string
 	require.NoError(t, json.Unmarshal(latestResult, &latestHex))
 	block, err := strconv.ParseUint(strings.TrimPrefix(latestHex, "0x"), 16, 64)
 	require.NoError(t, err)
 	return block
+}
+
+func getBlockByTag(t *testing.T, url string, tag string) uint64 {
+	t.Helper()
+	result := jsonRPCCall(t, url, "eth_getBlockByNumber", jsonMarshal(t, []any{tag, false}))
+	var block struct {
+		Number string `json:"number"`
+	}
+	require.NoError(t, json.Unmarshal(result, &block))
+	num, err := strconv.ParseUint(strings.TrimPrefix(block.Number, "0x"), 16, 64)
+	require.NoError(t, err)
+	return num
 }
 
 // jsonRPCCallRaw performs a JSON-RPC call and returns the full response
@@ -172,11 +187,18 @@ func jsonRPCBatchCallRaw(t *testing.T, url string, entries []batchEntry) []JSONR
 	return rpcResps
 }
 
-func storeBlock(t *testing.T, store *espressostore.EspressoStore) uint64 {
+func getStoredBlock(t *testing.T, store *espressostore.EspressoStore) uint64 {
 	t.Helper()
 	state, err := store.GetState()
 	require.NoError(t, err)
 	return state.L2BlockNumber
+}
+
+func getStoredHotshotHeight(t *testing.T, store *espressostore.EspressoStore) uint64 {
+	t.Helper()
+	state, err := store.GetState()
+	require.NoError(t, err)
+	return state.FallbackHotshotHeight
 }
 
 func jsonMarshal(t *testing.T, v any) json.RawMessage {
@@ -184,4 +206,50 @@ func jsonMarshal(t *testing.T, v any) json.RawMessage {
 	b, err := json.Marshal(v)
 	require.NoError(t, err)
 	return b
+}
+
+type logCapturer struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (c *logCapturer) Enabled(_ context.Context, _ slog.Level) bool { return true }
+func (c *logCapturer) Handle(_ context.Context, r slog.Record) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.records = append(c.records, r)
+	return nil
+}
+func (c *logCapturer) WithAttrs(_ []slog.Attr) slog.Handler { return c }
+func (c *logCapturer) WithGroup(_ string) slog.Handler      { return c }
+
+func requireLogAttrs(t *testing.T, capturer *logCapturer, msg string, expected map[string]uint64) {
+	t.Helper()
+	capturer.mu.Lock()
+	defer capturer.mu.Unlock()
+	for _, r := range capturer.records {
+		if r.Message != msg {
+			continue
+		}
+		actual := make(map[string]uint64)
+		r.Attrs(func(a slog.Attr) bool {
+			if _, ok := expected[a.Key]; ok {
+				actual[a.Key] = a.Value.Uint64()
+			}
+			return true
+		})
+		allMatch := len(actual) == len(expected)
+		if allMatch {
+			for k, v := range expected {
+				if actual[k] != v {
+					allMatch = false
+					break
+				}
+			}
+		}
+		if allMatch {
+			return
+		}
+	}
+	t.Fatalf("expected log record %q with attrs %v not found in captured logs", msg, expected)
 }
