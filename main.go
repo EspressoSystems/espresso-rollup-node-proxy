@@ -103,6 +103,5 @@ func main() {
 		logger.Info("server shutdown gracefully")
 	}
 	fullNodeVerifier.Stop()
-
 	logger.Info("Shutdown complete")
 }
