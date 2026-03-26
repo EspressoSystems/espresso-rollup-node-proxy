@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"time"
 
+	espressoLightClient "github.com/EspressoSystems/espresso-network/sdks/go/light-client"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -49,7 +51,20 @@ func main() {
 		logger.Crit("failed to create espresso store", "error", err)
 	}
 
-	fullNodeVerifier := verifier.NewOPEspressoBatchVerifier(ctx, logger, espressoStore, cfg.toOPVerifierConfig())
+	// Create an L1 client
+	l1Client, err := ethclient.DialContext(ctx, cfg.L1RPC)
+	if err != nil {
+		logger.Crit("failed to create L1 client", "error", err)
+	}
+
+	// Create light client interface
+	lightClientAddr := common.HexToAddress(cfg.OPConfig.LightClientAddress)
+	espressoLightClient, err := espressoLightClient.NewLightclientCaller(lightClientAddr, l1Client)
+	if err != nil || espressoLightClient == nil {
+		logger.Crit("failed to create light client")
+	}
+
+	fullNodeVerifier := verifier.NewOPEspressoBatchVerifier(ctx, logger, espressoStore, l1Client, espressoLightClient, cfg.toOPVerifierConfig())
 	if fullNodeVerifier == nil {
 		logger.Crit("failed to create OP verifier")
 	}
@@ -88,6 +103,5 @@ func main() {
 		logger.Info("server shutdown gracefully")
 	}
 	fullNodeVerifier.Stop()
-
 	logger.Info("Shutdown complete")
 }

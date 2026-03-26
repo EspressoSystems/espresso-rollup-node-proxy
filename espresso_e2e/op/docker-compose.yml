@@ -1,0 +1,381 @@
+services:
+  l1-data-init:
+    image: busybox
+    command: >
+      sh -c '
+        mkdir -p /l1-config /l2-config /deployer
+        mkdir -p /data/lighthouse-validator /data/lighthouse-beacon
+        chown -R ${U_ID:-1000}:${GID:-1000} /l1-config /l2-config /deployer /data
+      '
+    volumes:
+      - l1-config:/l1-config
+      - l2-config:/l2-config
+      - deployer:/deployer
+      - l1-data:/data
+
+  l1-genesis:
+    platform: linux/amd64
+    user: ${U_ID:-1000}:${GID:-1000}
+    restart: on-failure
+    depends_on:
+      l1-data-init:
+        condition: service_completed_successfully
+    image: ${L1_GETH_IMAGE}
+    environment:
+      - MODE=genesis
+    volumes:
+      - l1-config:/config
+      - l1-data:/data
+
+  l1-geth:
+    platform: linux/amd64
+    depends_on:
+      l1-genesis:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${L1_HTTP_PORT}"]
+      interval: 3s
+      timeout: 2s
+      retries: 40
+    image: ${L1_GETH_IMAGE}
+    environment:
+      L1_HTTP_PORT: ${L1_HTTP_PORT}
+      L1_ENGINE_PORT: ${L1_ENGINE_PORT}
+      L1_CHAIN_ID: ${L1_CHAIN_ID}
+    volumes:
+      - l1-config:/config:ro
+      - l1-data:/data
+    ports:
+      - "${L1_HTTP_PORT}:${L1_HTTP_PORT}"
+      - "${L1_ENGINE_PORT}:${L1_ENGINE_PORT}"
+
+  # We are using this service to help us with L1 reorgs
+  # We can call /fork on this and give it a block number to do so
+  mock-l1-beacon:
+    build:
+      context: ../
+      dockerfile: mock-l1-beacon/Dockerfile
+    depends_on:
+      l1-geth:
+        condition: service_healthy
+    volumes:
+      - l1-config:/config:ro
+    ports:
+      - "${L1_BEACON_PORT}:${L1_BEACON_PORT}"
+    command:
+      - --engine=http://l1-geth:${L1_ENGINE_PORT}
+      - --eth=http://l1-geth:${L1_HTTP_PORT}
+      - --jwt=/config/jwt.txt
+      - --block-time=2s
+      - --finalized-distance=20
+      - --safe-distance=10
+      - --addr=0.0.0.0:${L1_BEACON_PORT}
+
+  l1-validator:
+    image: ${LIGHTHOUSE_IMAGE}
+    depends_on:
+      l1-genesis:
+        condition: service_completed_successfully
+      l1-geth:
+        condition: service_started
+      mock-l1-beacon:
+        condition: service_started
+    volumes:
+      - l1-data:/data
+      - l1-config:/config:ro
+    command:
+      - lighthouse
+      - validator_client
+      - --testnet-dir
+      - /config
+      - --beacon-nodes
+      # Using mock l1 beacon for now
+      # A todo would be for to only have this being used for l1 reorg tests
+      - http://mock-l1-beacon:${L1_BEACON_PORT}
+      - --init-slashing-protection
+      - --datadir
+      - /data/lighthouse-validator
+      - --suggested-fee-recipient
+      - ${OPERATOR_ADDRESS}
+
+  l2-genesis:
+    platform: linux/amd64
+    user: "${U_ID:-1000}:${GID:-1000}"
+    restart: on-failure
+    depends_on:
+      l1-data-init:
+        condition: service_completed_successfully
+      l1-geth:
+        condition: service_healthy
+    image: ${OP_GETH_IMAGE}
+    environment:
+      - MODE=genesis
+      - L1_RPC=http://l1-geth:${L1_HTTP_PORT}
+      - HOME=/tmp
+    volumes:
+      - l2-config:/config
+      - deployer:/deployer
+
+  l2-rollup:
+    platform: linux/amd64
+    restart: on-failure
+    image: ${OP_GETH_IMAGE}
+    environment:
+      - MODE=rollup
+      - L1_RPC=http://l1-geth:${L1_HTTP_PORT}
+      - OP_RPC=http://op-geth-sequencer:${OP_HTTP_PORT}
+    depends_on:
+      l1-geth:
+        condition: service_healthy
+      l1-genesis:
+        condition: service_completed_successfully
+      op-geth-sequencer:
+        condition: service_healthy
+    volumes:
+      - l2-config:/config
+      - deployer:/deployer
+
+  op-geth-sequencer:
+    platform: linux/amd64
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${OP_HTTP_PORT}"]
+      interval: 3s
+      timeout: 2s
+      retries: 40
+    image: ${OP_GETH_IMAGE}
+    depends_on:
+      l2-genesis:
+        condition: service_completed_successfully
+      l1-geth:
+        condition: service_healthy
+    volumes:
+      - l2-config:/config:ro
+      - op-data-seq:/data
+    environment:
+      L1_RPC: http://l1-geth:${L1_HTTP_PORT}
+      OP_HTTP_PORT: ${OP_HTTP_PORT}
+      OP_ENGINE_PORT: ${OP_ENGINE_PORT}
+    ports:
+      - "${OP_HTTP_PORT}:${OP_HTTP_PORT}"
+      - "${OP_ENGINE_PORT}:${OP_ENGINE_PORT}"
+
+  op-node-sequencer:
+    platform: linux/amd64
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:${ROLLUP_PORT}"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+    image: ${OP_NODE_IMAGE}
+    depends_on:
+      l2-rollup:
+        condition: service_completed_successfully
+      op-geth-sequencer:
+        condition: service_healthy
+      l1-validator:
+        condition: service_started
+    environment:
+      OP_NODE_L1_ETH_RPC: http://l1-geth:${L1_HTTP_PORT}
+      OP_NODE_L1_BEACON: http://mock-l1-beacon:${L1_BEACON_PORT}
+      OP_NODE_L2_ENGINE_RPC: http://op-geth-sequencer:${OP_ENGINE_PORT}
+      OP_NODE_RPC_PORT: ${ROLLUP_PORT}
+      OP_NODE_SAFEDB_PATH: /data/safedb
+    ports:
+      - "${ROLLUP_PORT}:${ROLLUP_PORT}"
+      - "9003:9003/tcp"
+      - "9003:9003/udp"
+    volumes:
+      - l2-config:/config:ro
+      - op-node-seq:/data
+    command:
+      - op-node
+      - --l2.jwt-secret=/config/jwt.txt
+      - --rollup.config=/config/rollup.json
+      - --sequencer.enabled=true
+      - --sequencer.use-finalized=true
+      - --rpc.addr=0.0.0.0
+      - --l1.http-poll-interval=1s
+      - --l1.epoch-poll-interval=1s
+      - --p2p.listen.ip=0.0.0.0
+      - --p2p.listen.tcp=9003
+      - --p2p.listen.udp=9003
+      - --p2p.sequencer.key=${OPERATOR_PRIVATE_KEY}
+
+  # On startup sequencer will generate a random p2p peer id
+  # This image helps connect the full node and sequencer
+  op-node-peer-connector:
+    image: alpine:3.19
+    depends_on:
+      op-node-sequencer:
+        condition: service_healthy
+      op-node-fullnode:
+        condition: service_started
+    restart: "no"
+    entrypoint:
+      - sh
+      - -c
+      - |
+        apk add --no-cache curl jq > /dev/null
+        sleep 5
+        PEER_ID=$$(curl -sf -X POST http://op-node-sequencer:${ROLLUP_PORT} \
+          -H 'Content-Type: application/json' \
+          -d '{"jsonrpc":"2.0","method":"opp2p_self","params":[],"id":1}' \
+          | jq -r '.result.peerID')
+        MULTIADDR="/dns4/op-node-sequencer/tcp/9003/p2p/$$PEER_ID"
+        echo "Connecting fullnode to sequencer p2p: $$MULTIADDR"
+        curl -sf -X POST http://op-node-fullnode:9548 \
+          -H 'Content-Type: application/json' \
+          -d "{\"jsonrpc\":\"2.0\",\"method\":\"opp2p_connectPeer\",\"params\":[\"$$MULTIADDR\"],\"id\":1}"
+
+  op-geth-fullnode:
+    platform: linux/amd64
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${OP_HTTP_PORT}"]
+      interval: 3s
+      timeout: 2s
+      retries: 40
+    image: ${OP_GETH_IMAGE}
+    depends_on:
+      l2-genesis:
+        condition: service_completed_successfully
+      l1-geth:
+        condition: service_healthy
+    volumes:
+      - l2-config:/config:ro
+      - op-data-fullnode:/data
+    environment:
+      L1_RPC: http://l1-geth:${L1_HTTP_PORT}
+      OP_HTTP_PORT: ${OP_HTTP_PORT}
+      OP_ENGINE_PORT: ${OP_ENGINE_PORT}
+    ports:
+      - "${OP_FULL_HTTP_PORT}:${OP_HTTP_PORT}"
+      - "${OP_FULL_ENGINE_PORT}:${OP_ENGINE_PORT}"
+
+  op-node-fullnode:
+    image: ${OP_NODE_IMAGE}
+    depends_on:
+      l2-rollup:
+        condition: service_completed_successfully
+      op-geth-fullnode:
+        condition: service_started
+      mock-l1-beacon:
+        condition: service_started
+    environment:
+      OP_NODE_L1_ETH_RPC: http://l1-geth:${L1_HTTP_PORT}
+      OP_NODE_L1_BEACON: http://mock-l1-beacon:${L1_BEACON_PORT}
+      OP_NODE_L2_ENGINE_RPC: http://op-geth-fullnode:8552
+      OP_NODE_RPC_PORT: "9548"
+    ports:
+      - "9548:9548"
+    volumes:
+      - l2-config:/config:ro
+    command:
+      - op-node
+      - --l2.jwt-secret=/config/jwt.txt
+      - --rollup.config=/config/rollup.json
+      - --rpc.addr=0.0.0.0
+      - --rpc.enable-admin=true
+      - --l1.http-poll-interval=1s
+      - --l1.epoch-poll-interval=1s
+      - --p2p.listen.ip=0.0.0.0
+      - --p2p.listen.tcp=9004
+      - --p2p.listen.udp=9004
+
+  op-batcher:
+    platform: linux/amd64
+    image: ${OP_BATCHER_IMAGE}
+    depends_on:
+      l1-geth:
+        condition: service_healthy
+      op-geth-sequencer:
+        condition: service_started
+      op-node-sequencer:
+        condition: service_started
+      espresso-dev-node:
+        condition: service_started
+      l2-genesis:
+        condition: service_completed_successfully
+      attestation-service-zk:
+        condition: service_healthy
+    environment:
+      L1_RPC: http://l1-geth:${L1_HTTP_PORT}
+      OP_BATCHER_L1_ETH_RPC: http://l1-geth:${L1_HTTP_PORT}
+      OP_BATCHER_L2_ETH_RPC: http://op-geth-sequencer:${OP_HTTP_PORT}
+      OP_BATCHER_ROLLUP_RPC: http://op-node-sequencer:${ROLLUP_PORT}
+      OP_BATCHER_ESPRESSO_URLS: http://espresso-dev-node:${ESPRESSO_SEQUENCER_API_PORT},http://espresso-dev-node:${ESPRESSO_SEQUENCER_API_PORT}
+      OP_BATCHER_MAX_CHANNEL_DURATION: "32"
+      OP_BATCHER_MAX_PENDING_TX: "32"
+    volumes:
+      - deployer:/deployer:ro
+    command:
+      - op-batcher
+      - --espresso.enabled=true
+      - --espresso.poll-interval=1s
+      - --espresso.espresso-attestation-service=http://attestation-service-zk:${ESPRESSO_ATTESTATION_VERIFIER_PORT}
+      - --espresso.light-client-addr=${ESPRESSO_SEQUENCER_LIGHT_CLIENT_PROXY_ADDRESS}
+      - --espresso.testing-batcher-private-key=${OPERATOR_PRIVATE_KEY}
+      - --private-key=${OPERATOR_PRIVATE_KEY}
+      - --max-channel-duration=2
+      - --target-num-frames=1
+      - --max-pending-tx=32
+      - --data-availability-type=calldata
+      - --rpc.enable-admin
+
+  espresso-dev-node:
+    image: ${ESPRESSO_DEV_NODE_IMAGE}
+    depends_on:
+      l1-geth:
+        condition: service_healthy
+    ports:
+      - "${ESPRESSO_SEQUENCER_API_PORT}:${ESPRESSO_SEQUENCER_API_PORT}"
+      - "${ESPRESSO_DEV_NODE_PORT}:${ESPRESSO_DEV_NODE_PORT}"
+      - "${ESPRESSO_BUILDER_PORT}:${ESPRESSO_BUILDER_PORT}"
+    volumes:
+      - espresso-data:/data
+    env_file:
+      - ./.env
+    environment:
+      RUST_LOG: warn
+      ESPRESSO_DEV_NODE_L1_DEPLOYMENT: skip
+      RUST_BACKTRACE: 1
+      ESPRESSO_SEQUENCER_STORAGE_PATH: /data/espresso
+      ESPRESSO_SEQUENCER_L1_PROVIDER: http://l1-geth:${L1_HTTP_PORT}
+      ESPRESSO_DEPLOYER_ACCOUNT_INDEX: 0
+      ESPRESSO_DEV_NODE_EPOCH_HEIGHT: "4294967295"
+      ESPRESSO_SEQUENCER_ETH_MNEMONIC: "giant issue aisle success illegal bike spike question tent bar rely arctic volcano long crawl hungry vocal artwork sniff fantasy very lucky have athlete"
+
+  attestation-service-zk:
+    image: ghcr.io/espressosystems/attestation-verifier-zk:sha-0e987c3
+    platform: linux/amd64
+    ports:
+      - "${ESPRESSO_ATTESTATION_VERIFIER_PORT}:${ESPRESSO_ATTESTATION_VERIFIER_PORT}"
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 bash -c 'cat < /dev/null > /dev/tcp/localhost/${ESPRESSO_ATTESTATION_VERIFIER_PORT}' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 150s
+    env_file:
+      - ./.env
+    environment:
+      NETWORK_PRIVATE_KEY: "${ESPRESSO_ATTESTATION_VERIFIER_NETWORK_PRIVATE_KEY}"
+      NETWORK_RPC_URL: "${ESPRESSO_ATTESTATION_VERIFIER_NETWORK_RPC_URL}"
+      SP1_PROVER: "${ESPRESSO_ATTESTATION_VERIFIER_SP1_PROVER}"
+      RPC_URL: "${ESPRESSO_ATTESTATION_VERIFIER_RPC_URL}"
+      NITRO_VERIFIER_ADDRESS: "${ESPRESSO_ATTESTATION_VERIFIER_NITRO_VERIFIER_ADDRESS}"
+      USE_DOCKER: "${ESPRESSO_ATTESTATION_VERIFIER_NETWORK_USE_DOCKER}"
+      SKIP_TIME_VALIDITY_CHECK: "${ESPRESSO_ATTESTATION_VERIFIER_SKIP_TIME_VALIDITY_CHECK}"
+      RUST_LOG: "${ESPRESSO_ATTESTATION_VERIFIER_RUST_LOG}"
+      HOST: "${ESPRESSO_ATTESTATION_VERIFIER_HOST}"
+      PORT: "${ESPRESSO_ATTESTATION_VERIFIER_PORT}"
+
+volumes:
+  l1-config:
+  l2-config:
+  deployer:
+  l1-data:
+  op-data-seq:
+  op-data-verifier:
+  op-data-fullnode:
+  op-node-seq:
+  espresso-data:

@@ -19,7 +19,6 @@ import (
 	"github.com/ethereum/go-ethereum/rlp"
 
 	espressoClient "github.com/EspressoSystems/espresso-network/sdks/go/client"
-	espressoLightClient "github.com/EspressoSystems/espresso-network/sdks/go/light-client"
 )
 
 type OPEspressoBatchVerifierConfig struct {
@@ -28,7 +27,6 @@ type OPEspressoBatchVerifierConfig struct {
 	FullNodeConsensusRPC string        `json:"full_node_consensus_rpc"`
 	VerificationInterval time.Duration `json:"verification_interval"`
 	QueryServiceURL      string        `json:"query_service_url"`
-	LightClientAddress   string        `json:"light_client_address"`
 	BatcherAddress       string        `json:"batcher_address"`
 }
 
@@ -51,7 +49,7 @@ type OPEspressoBatchVerifier struct {
 	running          bool
 }
 
-func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *espressoStore.EspressoStore, opVerifierConfig *OPEspressoBatchVerifierConfig) *OPEspressoBatchVerifier {
+func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *espressoStore.EspressoStore, l1Client *ethclient.Client, espressoLightClient opStreamer.LightClientCallerInterface, opVerifierConfig *OPEspressoBatchVerifierConfig) *OPEspressoBatchVerifier {
 	if opVerifierConfig == nil {
 		logger.Crit("OP Verifier config is nil")
 		return nil
@@ -81,24 +79,10 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 		return nil
 	}
 
-	// Create an L1 client
-	l1Client, err := ethclient.DialContext(ctx, opVerifierConfig.L1RPC)
-	if err != nil {
-		logger.Crit("failed to create L1 client", "error", err)
-		return nil
-	}
-
 	// Create an espresso client
 	espressoClient := espressoClient.NewClient(opVerifierConfig.QueryServiceURL)
 	if espressoClient == nil {
 		logger.Crit("failed to create Espresso client")
-		return nil
-	}
-	// Create light client interface
-	lightClientAddr := common.HexToAddress(opVerifierConfig.LightClientAddress)
-	espressoLightClient, err := espressoLightClient.NewLightclientCaller(lightClientAddr, l1Client)
-	if err != nil || espressoLightClient == nil {
-		logger.Crit("failed to create light client")
 		return nil
 	}
 
