@@ -2,10 +2,6 @@ package main
 
 import (
 	"bytes"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -17,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 var (
@@ -29,14 +27,96 @@ var (
 	listenAddr    = flag.String("addr", ":8555", "listen address for fork HTTP API")
 )
 
-// makeJWT creates a HS256 JWT for the engine API.
-func makeJWT(secret []byte) string {
-	h := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","typ":"JWT"}`))
-	p := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf(`{"iat":%d}`, time.Now().Unix())))
-	msg := h + "." + p
-	mac := hmac.New(sha256.New, secret)
-	mac.Write([]byte(msg))
-	return msg + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+type blockTag uint8
+
+const (
+	Latest blockTag = iota
+	Safe
+	Finalized
+)
+
+type blockInfo struct {
+	Hash   string
+	Number uint64
+	Time   uint64
+}
+
+type rpcBlock struct {
+	// Some rpc calls are slightly different json field names
+	Hash      string `json:"hash,omitempty"`
+	BlockHash string `json:"blockHash,omitempty"`
+
+	Number      string `json:"number,omitempty"`
+	BlockNumber string `json:"blockNumber,omitempty"`
+
+	Timestamp string `json:"timestamp"`
+}
+
+type forkchoiceState struct {
+	HeadBlockHash      string `json:"headBlockHash"`
+	SafeBlockHash      string `json:"safeBlockHash"`
+	FinalizedBlockHash string `json:"finalizedBlockHash"`
+}
+
+type payloadAttributes struct {
+	Timestamp             string `json:"timestamp"`
+	PrevRandao            string `json:"prevRandao"`
+	SuggestedFeeRecipient string `json:"suggestedFeeRecipient"`
+	Withdrawals           []any  `json:"withdrawals"`
+	ParentBeaconBlockRoot string `json:"parentBeaconBlockRoot"`
+}
+
+type forkchoiceUpdatedResponse struct {
+	PayloadStatus struct {
+		Status          string `json:"status"`
+		LatestValidHash string `json:"latestValidHash,omitempty"`
+		ValidationError string `json:"validationError,omitempty"`
+	} `json:"payloadStatus"`
+
+	PayloadID *string `json:"payloadId,omitempty"`
+}
+
+type payloadResponse struct {
+	ExecutionPayload  json.RawMessage   `json:"executionPayload"`
+	ExecutionRequests []json.RawMessage `json:"executionRequests,omitempty"`
+}
+
+type jsonRpcResponse struct {
+	Result json.RawMessage `json:"result"`
+	Error  *jsonRpcError   `json:"error,omitempty"`
+}
+
+type jsonRpcError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    any    `json:"data,omitempty"`
+}
+
+type FakeBeacon struct {
+	mu                sync.Mutex
+	engineURL         string
+	ethURL            string
+	secret            []byte
+	blockTime         time.Duration
+	finalizedDistance uint64
+	safeDistance      uint64
+
+	history   []blockInfo
+	safe      blockInfo
+	finalized blockInfo
+}
+
+func makeJWT(secret []byte) (string, error) {
+	now := time.Now()
+
+	claims := jwt.MapClaims{
+		"iat": now.Unix(),
+		"exp": now.Add(60 * time.Second).Unix(),
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	return token.SignedString(secret)
 }
 
 func callRPC(url string, secret []byte, method string, params []interface{}, result interface{}) error {
@@ -55,192 +135,234 @@ func callRPC(url string, secret []byte, method string, params []interface{}, res
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if secret != nil {
-		req.Header.Set("Authorization", "Bearer "+makeJWT(secret))
+		token, err := makeJWT(secret)
+		if err != nil {
+			return fmt.Errorf("failed to create jwt token from secret: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-	var out struct {
-		Result json.RawMessage `json:"result"`
-		Error  *struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	defer func() { _ = resp.Body.Close() }()
+	var rpcResp jsonRpcResponse
+	if err := json.NewDecoder(resp.Body).Decode(&rpcResp); err != nil {
 		return err
 	}
-	if out.Error != nil {
-		return fmt.Errorf("rpc error %d: %s", out.Error.Code, out.Error.Message)
+	if rpcResp.Error != nil {
+		return fmt.Errorf("rpc error %d: %s", rpcResp.Error.Code, rpcResp.Error.Message)
 	}
-	if result != nil && out.Result != nil {
-		return json.Unmarshal(out.Result, result)
+	if result != nil && rpcResp.Result != nil {
+		return json.Unmarshal(rpcResp.Result, result)
 	}
 	return nil
 }
 
-func fakeBeaconRoot(timestamp uint64) string {
-	var b [8]byte
-	binary.LittleEndian.PutUint64(b[:], timestamp)
-	h := sha256.Sum256(b[:])
-	return "0x" + hex.EncodeToString(h[:])
-}
-
-func parseHex(s string) uint64 {
-	n, _ := strconv.ParseUint(strings.TrimPrefix(s, "0x"), 16, 64)
-	return n
-}
-
-type blockInfo struct {
-	Hash   string
-	Number uint64
-	Time   uint64
-}
-
-type FakeBeacon struct {
-	mu            sync.Mutex
-	engineURL     string
-	ethURL        string
-	secret        []byte
-	blockTime     time.Duration
-	finalizedDist uint64
-	safeDist      uint64
-
-	history []blockInfo
-}
-
-func (fb *FakeBeacon) head() blockInfo      { return fb.history[len(fb.history)-1] }
-func (fb *FakeBeacon) safe() blockInfo      { return fb.atDepth(fb.safeDist) }
-func (fb *FakeBeacon) finalized() blockInfo { return fb.atDepth(fb.finalizedDist) }
-func (fb *FakeBeacon) atDepth(d uint64) blockInfo {
-	if uint64(len(fb.history)) <= d {
-		return fb.history[0]
+func (fb *FakeBeacon) getBlockByTag(tag blockTag) blockInfo {
+	len := uint64(len(fb.history))
+	latest := len - 1
+	switch tag {
+	case Latest:
+		return fb.history[latest]
+	case Safe:
+		if len <= fb.safeDistance {
+			return fb.history[0]
+		}
+		return fb.history[latest-fb.safeDistance]
+	case Finalized:
+		if len <= fb.finalizedDistance {
+			return fb.history[0]
+		}
+		return fb.history[latest-fb.finalizedDistance]
+	default:
+		log.Println("unknown tag: %w using default tag of latest", tag)
+		return fb.history[latest]
 	}
-	return fb.history[uint64(len(fb.history))-1-d]
 }
 
 func (fb *FakeBeacon) bootstrap() error {
-	var blk struct {
-		Hash      string `json:"hash"`
-		Number    string `json:"number"`
-		Timestamp string `json:"timestamp"`
-	}
-	if err := callRPC(fb.ethURL, nil, "eth_getBlockByNumber", []interface{}{"latest", false}, &blk); err != nil {
+	var block rpcBlock
+	if err := callRPC(fb.ethURL, nil, "eth_getBlockByNumber", []interface{}{"latest", false}, &block); err != nil {
 		return err
 	}
+	blockNumber, err := strconv.ParseUint(strings.TrimPrefix(block.Number, "0x"), 16, 64)
+	if err != nil {
+		return fmt.Errorf("failed to convert block number hex: %s to uint64", block.Number)
+	}
+	blockTimestamp, err := strconv.ParseUint(strings.TrimPrefix(block.Timestamp, "0x"), 16, 64)
+	if err != nil {
+		return fmt.Errorf("failed to convert block timestamp hex: %s to uint64", block.Timestamp)
+	}
 	fb.history = append(fb.history, blockInfo{
-		Hash:   blk.Hash,
-		Number: parseHex(blk.Number),
-		Time:   parseHex(blk.Timestamp),
+		Hash:   block.Hash,
+		Number: blockNumber,
+		Time:   blockTimestamp,
 	})
 	log.Printf("bootstrapped from block %d hash=%s", fb.history[0].Number, fb.history[0].Hash[:10])
 	return nil
+}
+
+func (fb *FakeBeacon) updateTags() (latest, safe, finalized blockInfo) {
+	latest = fb.getBlockByTag(Latest)
+
+	safe = fb.getBlockByTag(Safe)
+	if safe.Number >= fb.safe.Number {
+		fb.safe = safe
+	}
+
+	finalized = fb.getBlockByTag(Finalized)
+	if finalized.Number >= fb.finalized.Number {
+		fb.finalized = finalized
+	}
+
+	return latest, fb.safe, fb.finalized
+}
+
+func (fb *FakeBeacon) initiateBlockBuilding(latest, safe, finalized blockInfo) (string, error) {
+	fcs := forkchoiceState{
+		HeadBlockHash:      latest.Hash,
+		SafeBlockHash:      safe.Hash,
+		FinalizedBlockHash: finalized.Hash,
+	}
+	attrs := payloadAttributes{
+		Timestamp:             fmt.Sprintf("0x%x", time.Now().Unix()),
+		PrevRandao:            "0x0000000000000000000000000000000000000000000000000000000000000000",
+		SuggestedFeeRecipient: "0x0000000000000000000000000000000000000000",
+		Withdrawals:           []any{},
+		ParentBeaconBlockRoot: "0x0000000000000000000000000000000000000000000000000000000000000000",
+	}
+	var resp forkchoiceUpdatedResponse
+	if err := callRPC(fb.engineURL, fb.secret, "engine_forkchoiceUpdatedV3",
+		[]interface{}{fcs, attrs}, &resp); err != nil {
+		return "", fmt.Errorf("forkchoiceUpdated: %w", err)
+	}
+	if resp.PayloadID == nil {
+		return "", fmt.Errorf("no payloadId, status=%s", resp.PayloadStatus.Status)
+	}
+	return *resp.PayloadID, nil
+}
+
+func (fb *FakeBeacon) retrievePayload(payloadID string) (payloadResponse, error) {
+	var resp payloadResponse
+	if err := callRPC(fb.engineURL, fb.secret, "engine_getPayloadV4",
+		[]interface{}{payloadID}, &resp); err != nil {
+		return payloadResponse{}, fmt.Errorf("getPayload err: %w", err)
+	}
+	return resp, nil
+}
+
+func (fb *FakeBeacon) submitPayload(payload payloadResponse) (rpcBlock, error) {
+	reqs := payload.ExecutionRequests
+	if reqs == nil {
+		reqs = []json.RawMessage{}
+	}
+	var status struct{ Status string }
+	if err := callRPC(fb.engineURL, fb.secret, "engine_newPayloadV4",
+		[]interface{}{
+			json.RawMessage(payload.ExecutionPayload),
+			[]interface{}{},
+			"0x0000000000000000000000000000000000000000000000000000000000000000",
+			reqs,
+		}, &status); err != nil {
+		return rpcBlock{}, fmt.Errorf("newPayload: %w", err)
+	}
+	if status.Status != "VALID" && status.Status != "ACCEPTED" {
+		return rpcBlock{}, fmt.Errorf("newPayload status=%s", status.Status)
+	}
+	var block rpcBlock
+	if err := json.Unmarshal(payload.ExecutionPayload, &block); err != nil {
+		return rpcBlock{}, fmt.Errorf("failed to unmarshal execution payload: %w", err)
+	}
+	return block, nil
+}
+
+func (fb *FakeBeacon) setCanonicalHead(newBlock rpcBlock) error {
+	state := forkchoiceState{
+		HeadBlockHash:      newBlock.BlockHash,
+		SafeBlockHash:      fb.safe.Hash,
+		FinalizedBlockHash: fb.finalized.Hash,
+	}
+	if err := callRPC(fb.engineURL, fb.secret, "engine_forkchoiceUpdatedV3",
+		[]interface{}{state, nil}, nil); err != nil {
+		return fmt.Errorf("forkchoiceUpdated canonical: %w", err)
+	}
+	return nil
+}
+
+func parseBlockInfo(block rpcBlock) (blockInfo, error) {
+	number, err := strconv.ParseUint(strings.TrimPrefix(block.BlockNumber, "0x"), 16, 64)
+	if err != nil {
+		return blockInfo{}, fmt.Errorf("failed to convert block number hex: %s to uint64", block.BlockNumber)
+	}
+	timestamp, err := strconv.ParseUint(strings.TrimPrefix(block.Timestamp, "0x"), 16, 64)
+	if err != nil {
+		return blockInfo{}, fmt.Errorf("failed to convert block timestamp hex: %s to uint64", block.Timestamp)
+	}
+	return blockInfo{Hash: block.BlockHash, Number: number, Time: timestamp}, nil
+}
+
+func (fb *FakeBeacon) recordBlock(block blockInfo) {
+	fb.mu.Lock()
+	defer fb.mu.Unlock()
+	fb.history = append(fb.history, block)
+	// cap entries to 500
+	if len(fb.history) > 500 {
+		fb.history = fb.history[len(fb.history)-500:]
+	}
 }
 
 func (fb *FakeBeacon) advance() error {
 	fb.mu.Lock()
 	if len(fb.history) == 0 {
 		fb.mu.Unlock()
+		// Genesis block
 		return fb.bootstrap()
 	}
-
-	head := fb.head()
-	safe := fb.safe()
-	fin := fb.finalized()
+	// Update and retrieve latest, safe and finalized blocks
+	latest, safe, finalized := fb.updateTags()
 	fb.mu.Unlock()
 
-	beaconRoot := fakeBeaconRoot(head.Time)
-
-	fcState := map[string]string{
-		"headBlockHash":      head.Hash,
-		"safeBlockHash":      safe.Hash,
-		"finalizedBlockHash": fin.Hash,
-	}
-	payloadAttrs := map[string]interface{}{
-		"timestamp":             fmt.Sprintf("0x%x", time.Now().Unix()),
-		"prevRandao":            "0x0000000000000000000000000000000000000000000000000000000000000000",
-		"suggestedFeeRecipient": "0x0000000000000000000000000000000000000000",
-		"withdrawals":           []interface{}{},
-		"parentBeaconBlockRoot": beaconRoot,
-	}
-	var fcResp struct {
-		PayloadStatus struct{ Status string } `json:"payloadStatus"`
-		PayloadID     *string                 `json:"payloadId"`
-	}
-	if err := callRPC(fb.engineURL, fb.secret, "engine_forkchoiceUpdatedV3",
-		[]interface{}{fcState, payloadAttrs}, &fcResp); err != nil {
-		return fmt.Errorf("forkchoiceUpdated: %w", err)
-	}
-	if fcResp.PayloadID == nil {
-		return fmt.Errorf("no payloadId, status=%s", fcResp.PayloadStatus.Status)
+	// Send payload attributes to geth engine to start building a new block.
+	payloadID, err := fb.initiateBlockBuilding(latest, safe, finalized)
+	if err != nil {
+		return err
 	}
 
-	// wait for block time to elapse
+	// wait for block time to elapse before sealing
 	time.Sleep(fb.blockTime)
 
-	var payloadResp struct {
-		ExecutionPayload  json.RawMessage   `json:"executionPayload"`
-		ExecutionRequests []json.RawMessage `json:"executionRequests"`
-	}
-	if err := callRPC(fb.engineURL, fb.secret, "engine_getPayloadV4",
-		[]interface{}{*fcResp.PayloadID}, &payloadResp); err != nil {
-		return fmt.Errorf("error calling rpc: %w", err)
+	// Retrieve built payload from geth engine
+	payload, err := fb.retrievePayload(payloadID)
+	if err != nil {
+		return err
 	}
 
-	var newPayloadStatus struct{ Status string }
-	reqs := make([]json.RawMessage, 0)
-	if payloadResp.ExecutionRequests != nil {
-		reqs = payloadResp.ExecutionRequests
-	}
-	if err := callRPC(fb.engineURL, fb.secret, "engine_newPayloadV4",
-		[]interface{}{json.RawMessage(payloadResp.ExecutionPayload), []interface{}{}, beaconRoot, reqs},
-		&newPayloadStatus); err != nil {
-		return fmt.Errorf("newPayload: %w", err)
-	}
-	if newPayloadStatus.Status != "VALID" && newPayloadStatus.Status != "ACCEPTED" {
-		return fmt.Errorf("newPayload status=%s", newPayloadStatus.Status)
+	// Send payload to geth engine and validate the geth engine accepted the payload
+	newBlock, err := fb.submitPayload(payload)
+	if err != nil {
+		return err
 	}
 
-	var newBlock struct {
-		BlockHash   string `json:"blockHash"`
-		BlockNumber string `json:"blockNumber"`
-		Timestamp   string `json:"timestamp"`
-	}
-	if err := json.Unmarshal(payloadResp.ExecutionPayload, &newBlock); err != nil {
-		return fmt.Errorf("failed to unmarshal execution payload: %w", err)
+	// Let geth engine know we accepted the new block
+	if err := fb.setCanonicalHead(newBlock); err != nil {
+		return err
 	}
 
-	// make canonical
-	canonicalFC := map[string]string{
-		"headBlockHash":      newBlock.BlockHash,
-		"safeBlockHash":      safe.Hash,
-		"finalizedBlockHash": fin.Hash,
-	}
-	if err := callRPC(fb.engineURL, fb.secret, "engine_forkchoiceUpdatedV3",
-		[]interface{}{canonicalFC, nil}, nil); err != nil {
-		return fmt.Errorf("forkchoiceUpdated canonical: %w", err)
+	// Extract block information for our own knowledge
+	block, err := parseBlockInfo(newBlock)
+	if err != nil {
+		return err
 	}
 
-	block := blockInfo{
-		Hash:   newBlock.BlockHash,
-		Number: parseHex(newBlock.BlockNumber),
-		Time:   parseHex(newBlock.Timestamp),
-	}
-	fb.mu.Lock()
-	fb.history = append(fb.history, block)
-	if len(fb.history) > 2000 {
-		fb.history = fb.history[len(fb.history)-2000:]
-	}
-	fb.mu.Unlock()
-
+	fb.recordBlock(block)
 	log.Printf("block %d hash=%s", block.Number, block.Hash[:10])
 	return nil
 }
 
 func (fb *FakeBeacon) fork(blockNumber uint64) error {
 	fb.mu.Lock()
+	// first reset the beacon to the block number
 	var target blockInfo
 	if blockNumber >= uint64(len(fb.history)) {
 		fb.mu.Unlock()
@@ -251,6 +373,7 @@ func (fb *FakeBeacon) fork(blockNumber uint64) error {
 	fb.history = fb.history[:blockNumber+1]
 	fb.mu.Unlock()
 
+	// call geth and tell it to fork back to the block number
 	if err := callRPC(fb.ethURL, nil, "debug_setHead",
 		[]interface{}{fmt.Sprintf("0x%x", target.Number)}, nil); err != nil {
 		return fmt.Errorf("debug_setHead: %w", err)
@@ -272,12 +395,12 @@ func main() {
 	}
 
 	fb := &FakeBeacon{
-		engineURL:     *engineURL,
-		ethURL:        *ethURL,
-		secret:        secret,
-		blockTime:     *blockTimeDur,
-		finalizedDist: *finalizedDist,
-		safeDist:      *safeDist,
+		engineURL:         *engineURL,
+		ethURL:            *ethURL,
+		secret:            secret,
+		blockTime:         *blockTimeDur,
+		finalizedDistance: *finalizedDist,
+		safeDistance:      *safeDist,
 	}
 
 	http.HandleFunc("/fork", func(w http.ResponseWriter, r *http.Request) {
@@ -302,7 +425,7 @@ func main() {
 
 	http.HandleFunc("/eth/v1/node/version", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"data": map[string]string{"version": "fake-beacon/v1.0"},
 		})
 	})

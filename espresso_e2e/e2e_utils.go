@@ -8,8 +8,12 @@ import (
 	"net/http"
 	"os/exec"
 	"proxy/proxy"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
+
+	espressostore "proxy/store"
 
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/require"
@@ -66,6 +70,15 @@ type JSONRPCResponse struct {
 	Error   json.RawMessage `json:"error,omitempty"`
 }
 
+func getBlockNum(t *testing.T, url string) uint64 {
+	latestResult := jsonRPCCall(t, url, "eth_blockNumber", nil)
+	var latestHex string
+	require.NoError(t, json.Unmarshal(latestResult, &latestHex))
+	block, err := strconv.ParseUint(strings.TrimPrefix(latestHex, "0x"), 16, 64)
+	require.NoError(t, err)
+	return block
+}
+
 func jsonRPCCall(t *testing.T, url, method string, params json.RawMessage) json.RawMessage {
 	t.Helper()
 	req := proxy.JSONRPCRequest{
@@ -81,7 +94,7 @@ func jsonRPCCall(t *testing.T, url, method string, params json.RawMessage) json.
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
@@ -93,4 +106,18 @@ func jsonRPCCall(t *testing.T, url, method string, params json.RawMessage) json.
 		t.Fatalf("JSON-RPC call returned error: %s", string(rpcResp.Error))
 	}
 	return rpcResp.Result
+}
+
+func storeBlock(t *testing.T, store *espressostore.EspressoStore) uint64 {
+	t.Helper()
+	state, err := store.GetState()
+	require.NoError(t, err)
+	return state.L2BlockNumber
+}
+
+func jsonMarshal(t *testing.T, v any) json.RawMessage {
+	t.Helper()
+	b, err := json.Marshal(v)
+	require.NoError(t, err)
+	return b
 }

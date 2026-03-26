@@ -49,6 +49,8 @@ services:
       - "${L1_HTTP_PORT}:${L1_HTTP_PORT}"
       - "${L1_ENGINE_PORT}:${L1_ENGINE_PORT}"
 
+  # We are using this service to help us with L1 reorgs
+  # We can call /fork on this and give it a block number to do so
   mock-l1-beacon:
     build:
       context: ../
@@ -64,7 +66,7 @@ services:
       - --engine=http://l1-geth:${L1_ENGINE_PORT}
       - --eth=http://l1-geth:${L1_HTTP_PORT}
       - --jwt=/config/jwt.txt
-      - --block-time=1s
+      - --block-time=2s
       - --finalized-distance=20
       - --safe-distance=10
       - --addr=0.0.0.0:${L1_BEACON_PORT}
@@ -87,6 +89,8 @@ services:
       - --testnet-dir
       - /config
       - --beacon-nodes
+      # Using mock l1 beacon for now
+      # A todo would be for to only have this being used for l1 reorg tests
       - http://mock-l1-beacon:${L1_BEACON_PORT}
       - --init-slashing-protection
       - --datadir
@@ -107,6 +111,7 @@ services:
     environment:
       - MODE=genesis
       - L1_RPC=http://l1-geth:${L1_HTTP_PORT}
+      - HOME=/tmp
     volumes:
       - l2-config:/config
       - deployer:/deployer
@@ -154,30 +159,6 @@ services:
       - "${OP_HTTP_PORT}:${OP_HTTP_PORT}"
       - "${OP_ENGINE_PORT}:${OP_ENGINE_PORT}"
 
-  op-geth-verifier:
-    platform: linux/amd64
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${OP_HTTP_PORT}"]
-      interval: 3s
-      timeout: 2s
-      retries: 40
-    image: ${OP_GETH_IMAGE}
-    depends_on:
-      l2-genesis:
-        condition: service_completed_successfully
-      l1-geth:
-        condition: service_healthy
-    volumes:
-      - l2-config:/config:ro
-      - op-data-verifier:/data
-    environment:
-      L1_RPC: http://l1-geth:${L1_HTTP_PORT}
-      OP_HTTP_PORT: ${OP_HTTP_PORT}
-      OP_ENGINE_PORT: ${OP_ENGINE_PORT}
-    ports:
-      - "8547:${OP_HTTP_PORT}"
-      - "8553:${OP_ENGINE_PORT}"
-
   op-node-sequencer:
     platform: linux/amd64
     healthcheck:
@@ -220,6 +201,8 @@ services:
       - --p2p.listen.udp=9003
       - --p2p.sequencer.key=${OPERATOR_PRIVATE_KEY}
 
+  # On startup sequencer will generate a random p2p peer id
+  # This image helps connect the full node and sequencer
   op-node-peer-connector:
     image: alpine:3.19
     depends_on:
@@ -298,39 +281,6 @@ services:
       - --p2p.listen.tcp=9004
       - --p2p.listen.udp=9004
 
-  op-node-verifier:
-    platform: linux/amd64
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${VERIFIER_PORT}"]
-      interval: 3s
-      timeout: 2s
-      retries: 40
-    image: ${OP_NODE_IMAGE}
-    depends_on:
-      l2-rollup:
-        condition: service_completed_successfully
-      op-geth-verifier:
-        condition: service_started
-      l1-validator:
-        condition: service_started
-    environment:
-      OP_NODE_L1_ETH_RPC: http://l1-geth:${L1_HTTP_PORT}
-      OP_NODE_L1_BEACON: http://mock-l1-beacon:${L1_BEACON_PORT}
-      OP_NODE_L2_ENGINE_RPC: http://op-geth-verifier:${OP_ENGINE_PORT}
-      OP_NODE_RPC_PORT: ${VERIFIER_PORT}
-    ports:
-      - "${VERIFIER_PORT}:${VERIFIER_PORT}"
-    volumes:
-      - l2-config:/config:ro
-    command:
-      - op-node
-      - --l2.jwt-secret=/config/jwt.txt
-      - --rollup.config=/config/rollup.json
-      - --rpc.addr=0.0.0.0
-      - --l1.http-poll-interval=1s
-      - --l1.epoch-poll-interval=1s
-      - --p2p.disable=true
-
   op-batcher:
     platform: linux/amd64
     image: ${OP_BATCHER_IMAGE}
@@ -365,7 +315,6 @@ services:
       - --espresso.light-client-addr=${ESPRESSO_SEQUENCER_LIGHT_CLIENT_PROXY_ADDRESS}
       - --espresso.testing-batcher-private-key=${OPERATOR_PRIVATE_KEY}
       - --private-key=${OPERATOR_PRIVATE_KEY}
-      - --throttle-threshold=0
       - --max-channel-duration=2
       - --target-num-frames=1
       - --max-pending-tx=32
