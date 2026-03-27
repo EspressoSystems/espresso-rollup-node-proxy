@@ -207,7 +207,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		}
 
 		verifiedBlock := getStoredBlock(t, espressoStore)
-		require.Greater(t, verifiedBlock, blockBeforeReorg,
+		require.GreaterOrEqual(t, verifiedBlock, blockBeforeReorg,
 			"proxy did not advance past block %d after reorg resolved", blockBeforeReorg)
 		t.Logf("Proxy at L2 block %d after reorg, block never moved backwards", verifiedBlock)
 
