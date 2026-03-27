@@ -285,8 +285,21 @@ func (v *OPEspressoBatchVerifier) peekNextBatch(ctx context.Context) (*opStreame
 func (v *OPEspressoBatchVerifier) advanceStreamerAndEspressoState(ctx context.Context, blockNumber uint64) error {
 	hotshotFallbackPos := v.streamer.GetFallbackHotshotPos()
 
+	// First get the hotshot height and blockNumber from espressoStore
+	espressoState, err := v.espressoStore.GetState()
+	if err != nil {
+		v.logger.Error("failed to get state from store", "error", err)
+		return err
+
+	}
+	// Only update the store if the blockNumber is greater than the current block number because the espresso tag should never go backwards
+	if espressoState.L2BlockNumber >= blockNumber {
+		v.logger.Warn("not updating espresso state in store because block number is not greater than current block number in store",
+			"current_block_number", espressoState.L2BlockNumber, "new_block_number", blockNumber)
+		return nil
+	}
 	// Update the espresso state in the store to reflect the new batch number
-	err := v.espressoStore.Update(blockNumber, hotshotFallbackPos)
+	err = v.espressoStore.Update(blockNumber, hotshotFallbackPos)
 	if err != nil {
 		v.logger.Error("failed to update espresso state in store", "error", err)
 		return err
