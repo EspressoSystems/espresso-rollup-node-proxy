@@ -133,13 +133,13 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		deadline = time.Now().Add(1 * time.Minute)
 		for {
 			require.True(t, time.Now().Before(deadline), "OP verifier did not reach block 10 within timeout")
-			if storeBlock(t, espressoStore) >= targetBlockNum {
+			if getStoredBlock(t, espressoStore) >= targetBlockNum {
 				break
 			}
 			time.Sleep(time.Second)
 		}
 
-		verifiedBlock := storeBlock(t, espressoStore)
+		verifiedBlock := getStoredBlock(t, espressoStore)
 		t.Logf("Espresso store at block %d", verifiedBlock)
 
 		proxyResult := jsonRPCCall(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{espressoTag, false}))
@@ -150,13 +150,13 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 
 	t.Run("proxy does not go backwords in case of l1 reorg", func(t *testing.T) {
 		// Wait for L1 to advance 10 l1 blocks
-		latestL1BlockNum := getBlockNum(t, l1GethURL)
+		latestL1BlockNum := getBlockByTag(t, l1GethURL, "latest")
 		const reorgTriggerL1Block = uint64(10)
 		t.Logf("Waiting for L1 to reach block %d, currently at %d", latestL1BlockNum+reorgTriggerL1Block, latestL1BlockNum)
 		deadline := time.Now().Add(3 * time.Minute)
 		for {
 			require.True(t, time.Now().Before(deadline), "L1 did not reach block %d within timeout", reorgTriggerL1Block)
-			l1Block := getBlockNum(t, l1GethURL)
+			l1Block := getBlockByTag(t, l1GethURL, "latest")
 			if l1Block >= latestL1BlockNum+reorgTriggerL1Block {
 				break
 			}
@@ -164,10 +164,10 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		}
 
 		// Get the current L1 block number to use as the reorg point
-		latestL1BlockNum = getBlockNum(t, l1GethURL)
+		latestL1BlockNum = getBlockByTag(t, l1GethURL, "latest")
 		t.Logf("L1 latest block before reorg: %d", latestL1BlockNum)
 
-		blockBeforeReorg := storeBlock(t, espressoStore)
+		blockBeforeReorg := getStoredBlock(t, espressoStore)
 		t.Logf("Proxy at L2 block %d before triggering reorg", blockBeforeReorg)
 
 		// Trigger the L1 reorg via the mock beacon
@@ -187,7 +187,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		previous := blockBeforeReorg
 		deadline = time.Now().Add(1 * time.Minute)
 		for {
-			current := storeBlock(t, espressoStore)
+			current := getStoredBlock(t, espressoStore)
 			require.GreaterOrEqual(t, current, previous,
 				"proxy block moved backwards: was %d, now %d", previous, current)
 			if current > previous {
@@ -196,7 +196,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 			}
 
 			// The espresso-tagged block must not be ahead of the OP geth full nodes latest block
-			latestFullNodeBlock := getBlockNum(t, opGethFullNode)
+			latestFullNodeBlock := getBlockByTag(t, opGethFullNode, "latest")
 			require.LessOrEqual(t, current, latestFullNodeBlock,
 				"proxy espresso block %d is ahead of OP geth full nodes latest block %d", current, latestFullNodeBlock)
 
@@ -206,8 +206,8 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 			time.Sleep(time.Second)
 		}
 
-		verifiedBlock := storeBlock(t, espressoStore)
-		require.GreaterOrEqual(t, verifiedBlock, blockBeforeReorg,
+		verifiedBlock := getStoredBlock(t, espressoStore)
+		require.Greater(t, verifiedBlock, blockBeforeReorg,
 			"proxy did not advance past block %d after reorg resolved", blockBeforeReorg)
 		t.Logf("Proxy at L2 block %d after reorg, block never moved backwards", verifiedBlock)
 
@@ -282,7 +282,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		}
 		// freeze store so espresso tag resolves to a stable block
 		v.Stop()
-		verifiedBlock := storeBlock(t, espressoStore)
+		verifiedBlock := getStoredBlock(t, espressoStore)
 		blockHex := fmt.Sprintf("0x%x", verifiedBlock)
 
 		for _, tc := range espressoTagMethods {
@@ -324,6 +324,99 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 				requireJSONRPCEqual(t, directResps[i], proxyResps[i], entry.method)
 			}
 		})
+
+	})
+
+	t.Run("proxy restart resumes from persisted state", func(t *testing.T) {
+		const initialHotshotHeight = uint64(1)
+		const targetBlockNum = uint64(10)
+
+		initialStateFile := t.TempDir() + "/initial-state.json"
+		finalizedL2Block := getBlockByTag(t, opGethFullNode, "finalized")
+		initialStore, err := espressostore.NewEspressoStore(initialStateFile, initialHotshotHeight, finalizedL2Block)
+		require.NoError(t, err)
+
+		firstCapturer := &logCapturer{}
+
+		nodeProxy := proxy.NewProxy(opGethFullNode, initialStore, espressoTag)
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		proxyURL := "http://" + listener.Addr().String()
+		server := &http.Server{Handler: http.HandlerFunc(nodeProxy.Serve)}
+		go func() { _ = server.Serve(listener) }()
+		t.Logf("Proxy listening on %s", proxyURL)
+
+		// Before the verifier starts the streamer, the espresso tag should be initialized to the finalized block
+		proxyResult := jsonRPCCall(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{espressoTag, false}))
+		directResult := jsonRPCCall(t, opGethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{fmt.Sprintf("0x%x", finalizedL2Block), false}))
+		require.JSONEq(t, string(directResult), string(proxyResult), "espresso tag should resolve to preRestartBlock before verifier starts")
+
+		// Now we start the verifier and check if it starts with finalizedL2Block and initialHotshotHeight, and that it advances the store past block 10.
+		verifier := startVerifier(ctx, t, log.NewLogger(firstCapturer), initialStore)
+		requireLogAttrs(t, firstCapturer, "Starting OP Verifier", map[string]uint64{
+			"start block number":               finalizedL2Block,
+			"starting fallback_hotshot_height": initialHotshotHeight,
+		})
+
+		t.Log("Waiting for OP verifer to update espresso store past block 10")
+		deadline := time.Now().Add(2 * time.Minute)
+		for {
+			require.True(t, time.Now().Before(deadline), "OP verifier did not reach block 10 within timeout")
+			if getStoredBlock(t, initialStore) >= finalizedL2Block+targetBlockNum {
+				break
+			}
+			time.Sleep(time.Second)
+		}
+
+		verifier.Stop()
+
+		// After shutting down proxy and verifier, we
+		// retrieve the l2 block and hotshot height from the store
+		// and check that its greater than the values initially supplied
+		preRestartBlock := getStoredBlock(t, initialStore)
+		t.Logf("Espresso store at block %d before restart", preRestartBlock)
+		preRestartHotshotHeight := getStoredHotshotHeight(t, initialStore)
+		t.Logf("Espresso store hotshot height %d before restart", preRestartHotshotHeight)
+
+		proxyResult = jsonRPCCall(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{espressoTag, false}))
+		directResult = jsonRPCCall(t, opGethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{fmt.Sprintf("0x%x", preRestartBlock), false}))
+		require.JSONEq(t, string(directResult), string(proxyResult), "espresso tag should resolve to preRestartBlock before verifier starts")
+
+		require.Greater(t, preRestartHotshotHeight, initialHotshotHeight, "store did not advance past initial hotshot height")
+		require.Greater(t, preRestartBlock, finalizedL2Block, "store did not advance past finalized block")
+		_ = server.Shutdown(ctx)
+		t.Log("proxy and verifier stopped")
+
+		// Now that proxy has advanced to a higher block number and hotshot height,
+		// we will restart the proxy with with the same state file, and assert it resumes from the persisted state correctly.
+		newStore, err := espressostore.NewEspressoStore(initialStateFile, initialHotshotHeight, finalizedL2Block)
+		require.NoError(t, err)
+
+		newProxy := proxy.NewProxy(opGethFullNode, newStore, espressoTag)
+		listener, err = net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		proxyURL = "http://" + listener.Addr().String()
+		server = &http.Server{Handler: http.HandlerFunc(newProxy.Serve)}
+		go func() { _ = server.Serve(listener) }()
+		t.Logf("New proxy listening on %s", proxyURL)
+		defer func() { _ = server.Shutdown(ctx) }()
+
+		resumedBlock := getStoredBlock(t, newStore)
+		require.Equal(t, preRestartBlock, resumedBlock, "new store should resume from persisted block")
+		// Verify that the espresso tag also resolves to the preRestartBlock
+		proxyResult = jsonRPCCall(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{espressoTag, false}))
+		directResult = jsonRPCCall(t, opGethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{fmt.Sprintf("0x%x", preRestartBlock), false}))
+		require.JSONEq(t, string(directResult), string(proxyResult), "espresso tag should resolve to preRestartBlock")
+
+		secondCapturer := &logCapturer{}
+		verifier = startVerifier(ctx, t, log.NewLogger(secondCapturer), newStore)
+		defer verifier.Stop()
+		// Check that the verifier starts with the block number and hotshot height from before the restart
+		requireLogAttrs(t, secondCapturer, "Starting OP Verifier", map[string]uint64{
+			"start block number":               preRestartBlock,
+			"starting fallback_hotshot_height": preRestartHotshotHeight,
+		})
+		t.Log("Verified that verifier and proxy started with correct hotshot height and L2 block number after restart")
 
 	})
 

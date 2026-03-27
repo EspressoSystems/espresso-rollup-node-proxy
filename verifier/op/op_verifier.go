@@ -120,7 +120,7 @@ func (v *OPEspressoBatchVerifier) Start(ctx context.Context) {
 		v.logger.Warn("OP Verifier is already running")
 		return
 	}
-	v.logger.Info("Starting OP Verifier")
+
 	v.running = true
 	ctx, cancel := context.WithCancel(ctx)
 	v.cancel = cancel
@@ -132,6 +132,12 @@ func (v *OPEspressoBatchVerifier) run(ctx context.Context) {
 	defer v.runWg.Done()
 	ticker := time.NewTicker(v.config.VerificationInterval)
 	defer ticker.Stop()
+	espressoState, err := v.espressoStore.GetState()
+	if err != nil {
+		v.logger.Crit("failed to get state from store", "error", err)
+		return
+	}
+	v.logger.Info("Starting OP Verifier", "start block number", espressoState.L2BlockNumber, "starting fallback_hotshot_height", espressoState.FallbackHotshotHeight)
 
 	for {
 		select {
