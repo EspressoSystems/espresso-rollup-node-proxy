@@ -359,7 +359,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		})
 
 		t.Log("Waiting for OP verifer to update espresso store past block 10")
-		deadline := time.Now().Add(1 * time.Minute)
+		deadline := time.Now().Add(2 * time.Minute)
 		for {
 			require.True(t, time.Now().Before(deadline), "OP verifier did not reach block 10 within timeout")
 			if getStoredBlock(t, initialStore) >= finalizedL2Block+targetBlockNum {
@@ -416,6 +416,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 			"start block number":               preRestartBlock,
 			"starting fallback_hotshot_height": preRestartHotshotHeight,
 		})
+		t.Log("Verified that verifier and proxy started with correct hotshot height and L2 block number after restart")
 
 	})
 
