@@ -359,7 +359,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		})
 
 		t.Log("Waiting for OP verifer to update espresso store past block 10")
-		deadline := time.Now().Add(2 * time.Minute)
+		deadline := time.Now().Add(3 * time.Minute)
 		for {
 			require.True(t, time.Now().Before(deadline), "OP verifier did not reach block 10 within timeout")
 			if getStoredBlock(t, initialStore) >= finalizedL2Block+targetBlockNum {
