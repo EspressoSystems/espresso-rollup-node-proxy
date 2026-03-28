@@ -15,7 +15,7 @@ type OPConfig struct {
 	VerificationInterval time.Duration `json:"verification_interval"`
 	QueryServiceURL      string        `json:"query_service_url"`
 	LightClientAddress   string        `json:"light_client_address"`
-	BatcherAddress       string        `json:"batcher_address"`
+	BatcherAddresses     []string      `json:"batcher_addresses"`
 }
 
 type Config struct {
@@ -73,7 +73,7 @@ func parseConfig() *Config {
 	pflag.DurationVar(&cfg.OPConfig.VerificationInterval, "op.verification-interval", cfg.OPConfig.VerificationInterval, "OP verification interval")
 	pflag.StringVar(&cfg.OPConfig.QueryServiceURL, "op.query-service-url", cfg.OPConfig.QueryServiceURL, "Espresso query service URL")
 	pflag.StringVar(&cfg.OPConfig.LightClientAddress, "op.light-client-address", cfg.OPConfig.LightClientAddress, "Espresso light client contract address")
-	pflag.StringVar(&cfg.OPConfig.BatcherAddress, "op.batcher-address", cfg.OPConfig.BatcherAddress, "OP batcher address")
+	pflag.StringArrayVar(&cfg.OPConfig.BatcherAddresses, "op.batcher-addresses", cfg.OPConfig.BatcherAddresses, "comma-separated list of batcher addresses")
 
 	pflag.Parse()
 	return cfg
@@ -86,6 +86,6 @@ func (c *Config) toOPVerifierConfig() *verifier.OPEspressoBatchVerifierConfig {
 		FullNodeConsensusRPC: c.OPConfig.FullNodeConsensusRPC,
 		VerificationInterval: c.OPConfig.VerificationInterval,
 		QueryServiceURL:      c.OPConfig.QueryServiceURL,
-		BatcherAddress:       c.OPConfig.BatcherAddress,
+		BatcherAddresses:     c.OPConfig.BatcherAddresses,
 	}
 }

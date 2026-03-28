@@ -27,7 +27,7 @@ type OPEspressoBatchVerifierConfig struct {
 	FullNodeConsensusRPC string        `json:"full_node_consensus_rpc"`
 	VerificationInterval time.Duration `json:"verification_interval"`
 	QueryServiceURL      string        `json:"query_service_url"`
-	BatcherAddress       string        `json:"batcher_address"`
+	BatcherAddresses     []string      `json:"batcher_addresses"`
 }
 
 // OPEspressoBatchVerifier is responsible for verifying that the batches produced by the OP full node match what the OP streamer has in its buffer.
@@ -86,7 +86,11 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 		return nil
 	}
 
-	batcherAddr := common.HexToAddress(opVerifierConfig.BatcherAddress)
+	// Convert batcher addresses from string to common.Address
+	batcherAddresses := make([]common.Address, len(opVerifierConfig.BatcherAddresses))
+	for i, addr := range opVerifierConfig.BatcherAddresses {
+		batcherAddresses[i] = common.HexToAddress(addr)
+	}
 	espressoState, err := store.GetState()
 	if err != nil {
 		logger.Crit("failed to get state from store", "error", err)
@@ -99,7 +103,7 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 		espressoClient,
 		espressoLightClient,
 		logger,
-		opStreamer.CreateEspressoBatchUnmarshaler(batcherAddr),
+		opStreamer.CreateEspressoBatchUnmarshaler(batcherAddresses),
 		espressoState.FallbackHotshotHeight,
 		espressoState.L2BlockNumber,
 	)

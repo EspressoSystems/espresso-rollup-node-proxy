@@ -72,8 +72,7 @@ func startVerifier(ctx context.Context, t *testing.T, logger log.Logger, store *
 			FullNodeConsensusRPC: opNodeFullNode,
 			VerificationInterval: time.Second,
 			QueryServiceURL:      espressoURL,
-			BatcherAddress:       "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-		},
+			BatcherAddresses:     []string{"0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"}},
 	)
 	v.Start(ctx)
 	return v
