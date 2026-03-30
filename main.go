@@ -69,7 +69,7 @@ func main() {
 		logger.Crit("failed to create OP verifier")
 	}
 
-	go fullNodeVerifier.Start(ctx)
+	fullNodeVerifier.Start(ctx)
 	logger.Info("OP Verifier Started")
 	fullNodeProxy := proxy.NewProxy(cfg.FullNodeExecutionRPC, espressoStore, cfg.EspressoTag)
 	mux := http.NewServeMux()
