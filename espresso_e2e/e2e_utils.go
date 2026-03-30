@@ -226,6 +226,48 @@ func requireLogAttrs(t *testing.T, capturer *logCapturer, msg string, expected m
 	t.Fatalf("expected log record %q with attrs %v not found in captured logs", msg, expected)
 }
 
+func requireLogStringAttrs(t *testing.T, capturer *logCapturer, msg string, expected map[string]string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if matchLogStringAttrs(capturer, msg, expected) {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("expected log record %q with attrs %v not found in captured logs", msg, expected)
+}
+
+func matchLogStringAttrs(capturer *logCapturer, msg string, expected map[string]string) bool {
+	capturer.mu.Lock()
+	defer capturer.mu.Unlock()
+	for _, r := range capturer.records {
+		if r.Message != msg {
+			continue
+		}
+		actual := make(map[string]string)
+		r.Attrs(func(a slog.Attr) bool {
+			if _, ok := expected[a.Key]; ok {
+				actual[a.Key] = a.Value.String()
+			}
+			return true
+		})
+		allMatch := len(actual) == len(expected)
+		if allMatch {
+			for k, v := range expected {
+				if actual[k] != v {
+					allMatch = false
+					break
+				}
+			}
+		}
+		if allMatch {
+			return true
+		}
+	}
+	return false
+}
+
 func matchLogAttrs(capturer *logCapturer, msg string, expected map[string]uint64) bool {
 	capturer.mu.Lock()
 	defer capturer.mu.Unlock()
