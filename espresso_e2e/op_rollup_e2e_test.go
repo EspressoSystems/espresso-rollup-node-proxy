@@ -239,7 +239,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		// Wait for L2 to reach malicious block
 		t.Logf("Waiting for L2 to reach malicious block: %d", maliciousBlockNum)
 		deadline := time.Now().Add(3 * time.Minute)
-		blockBeforeReorg := getStoredBlock(t, espressoStore)
+		var blockBeforeReorg uint64
 		for {
 			blockBeforeReorg = getStoredBlock(t, espressoStore)
 			require.True(t, time.Now().Before(deadline), "L2 did not reach block %d within timeout", maliciousBlockNum-1)
