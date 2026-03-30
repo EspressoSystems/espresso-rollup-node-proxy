@@ -260,10 +260,12 @@ services:
         condition: service_started
       mock-l1-beacon:
         condition: service_started
+      mock-engine:
+        condition: service_started
     environment:
       OP_NODE_L1_ETH_RPC: http://l1-geth:${L1_HTTP_PORT}
       OP_NODE_L1_BEACON: http://mock-l1-beacon:${L1_BEACON_PORT}
-      OP_NODE_L2_ENGINE_RPC: http://op-geth-fullnode:8552
+      OP_NODE_L2_ENGINE_RPC: http://mock-engine:8080
       OP_NODE_RPC_PORT: "9548"
     ports:
       - "9548:9548"
@@ -280,6 +282,21 @@ services:
       - --p2p.listen.ip=0.0.0.0
       - --p2p.listen.tcp=9004
       - --p2p.listen.udp=9004
+
+  mock-engine:
+    build:
+      context: ../
+      dockerfile: mock-engine/Dockerfile
+    depends_on:
+      op-geth-fullnode:
+        condition: service_healthy
+    ports:
+      - "${MOCK_ENGINE_PORT}:8080"
+    volumes:
+      - l2-config:/config:ro
+    command:
+      - --upstream=http://op-geth-fullnode:${OP_ENGINE_PORT}
+      - --jwt-secret=/config/jwt.txt
 
   op-batcher:
     platform: linux/amd64
@@ -313,8 +330,8 @@ services:
       - --espresso.poll-interval=1s
       - --espresso.espresso-attestation-service=http://attestation-service-zk:${ESPRESSO_ATTESTATION_VERIFIER_PORT}
       - --espresso.light-client-addr=${ESPRESSO_SEQUENCER_LIGHT_CLIENT_PROXY_ADDRESS}
-      - --espresso.testing-batcher-private-key=${OPERATOR_PRIVATE_KEY}
-      - --private-key=${OPERATOR_PRIVATE_KEY}
+      - --espresso.testing-batcher-private-key=${OP_TESTING_BATCHER_PRIVATE_KEY:-$OPERATOR_PRIVATE_KEY}
+      - --private-key=${OP_BATCHER_PRIVATE_KEY:-$TEE_BATCHER_PRIVATE_KEY}
       - --max-channel-duration=2
       - --target-num-frames=1
       - --max-pending-tx=32
