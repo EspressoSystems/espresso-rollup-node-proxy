@@ -107,7 +107,9 @@ func (i *Interceptor) handleMaliciousBlock(
 	rawPayload map[string]json.RawMessage) ([]byte, error) {
 
 	var blockHash string
-	json.Unmarshal(rawPayload["blockHash"], &blockHash)
+if err := json.Unmarshal(rawPayload["blockHash"], &blockHash); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal blockHash: %v", err)
+	}
 	log.Printf("intercepted engine_newPayloadV4 for block %d (hash %s), building replacement", blockNum, blockHash)
 
 	// Build a replacement block on the same parent with only the L1 deposit tx
