@@ -36,7 +36,10 @@ func (m *mockLightClient) FinalizedState(_ *bind.CallOpts) (opStreamer.Finalized
 	result := m.last
 	if err == nil {
 		// Make sure finalized state is back enough blocks
-		m.last = max(current-finalizedBlocks, 0)
+		m.last = 0
+		if current > finalizedBlocks {
+			m.last = current - finalizedBlocks
+		}
 	}
 	return opStreamer.FinalizedState{
 		BlockHeight:   result,
@@ -56,7 +59,7 @@ const (
 	mockBeaconURL    = "http://127.0.0.1:5052"
 	L2_CHAIN_ID      = 22266222
 	espressoTag      = "espresso"
-	finalizedBlocks  = 30
+	finalizedBlocks  = 60
 )
 
 func startVerifier(ctx context.Context, t *testing.T, logger log.Logger, store *espressostore.EspressoStore) *verifier.OPEspressoBatchVerifier {
@@ -73,8 +76,8 @@ func startVerifier(ctx context.Context, t *testing.T, logger log.Logger, store *
 			FullNodeConsensusRPC:      opNodeFullNode,
 			VerificationInterval:      time.Second,
 			QueryServiceURL:           espressoURL,
-			BatcherAddress:            "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-			BatchAuthenticatorAddress: "0x0000000000000000000000000000000000000001",
+			BatcherAddress:            "0x976EA74026E726554dB657fA54763abd0C3a0aa9",
+			BatchAuthenticatorAddress: "0x9d4454b023096f34b160d6b654540c56a1f81688",
 		},
 	)
 	v.Start(ctx)
