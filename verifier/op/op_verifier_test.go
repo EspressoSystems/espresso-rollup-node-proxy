@@ -9,7 +9,9 @@ import (
 	"time"
 
 	espressoStore "proxy/store"
-	opStreamer "proxy/streamer/op"
+
+	opStreamer "github.com/EspressoSystems/espresso-streamers/op"
+	"github.com/EspressoSystems/espresso-streamers/op/derivation"
 
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"github.com/ethereum-optimism/optimism/op-service/dial"
@@ -57,12 +59,12 @@ func (m *mockStreamer) Reset() {
 	m.Called()
 }
 
-func (m *mockStreamer) UnmarshalBatch(b []byte) (*opStreamer.EspressoBatch, error) {
+func (m *mockStreamer) UnmarshalBatch(b []byte) (*derivation.EspressoBatch, error) {
 	args := m.Called(b)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*opStreamer.EspressoBatch), args.Error(1)
+	return args.Get(0).(*derivation.EspressoBatch), args.Error(1)
 }
 
 func (m *mockStreamer) HasNext(ctx context.Context) bool {
@@ -70,26 +72,28 @@ func (m *mockStreamer) HasNext(ctx context.Context) bool {
 	return args.Bool(0)
 }
 
-func (m *mockStreamer) Next(ctx context.Context) *opStreamer.EspressoBatch {
+func (m *mockStreamer) Next(ctx context.Context) *derivation.EspressoBatch {
 	args := m.Called(ctx)
 	if args.Get(0) == nil {
 		return nil
 	}
-	return args.Get(0).(*opStreamer.EspressoBatch)
+	return args.Get(0).(*derivation.EspressoBatch)
 }
 
-func (m *mockStreamer) Peek(ctx context.Context) *opStreamer.EspressoBatch {
+func (m *mockStreamer) Peek(ctx context.Context) *derivation.EspressoBatch {
 	args := m.Called(ctx)
 	if args.Get(0) == nil {
 		return nil
 	}
-	return args.Get(0).(*opStreamer.EspressoBatch)
+	return args.Get(0).(*derivation.EspressoBatch)
 }
 
 func (m *mockStreamer) GetFallbackHotshotPos() uint64 {
 	args := m.Called()
 	return args.Get(0).(uint64)
 }
+
+var _ opStreamer.EspressoStreamer[derivation.EspressoBatch] = (*mockStreamer)(nil)
 
 type mockEndpointProvider struct {
 	mock.Mock
@@ -227,7 +231,7 @@ func TestAdvanceStreamerAndEspressoState(t *testing.T) {
 func TestPeekNextBatch(t *testing.T) {
 	h := newTestHarness(t, nil)
 	ctx := context.Background()
-	batch := &opStreamer.EspressoBatch{
+	batch := &derivation.EspressoBatch{
 		BatchHeader: &types.Header{Number: big.NewInt(100)},
 	}
 	syncStatus := &eth.SyncStatus{
@@ -276,7 +280,7 @@ func TestVerify(t *testing.T) {
 	})
 
 	// Derive the expected EspressoBatch from the block so the RLP comparison in verify() passes
-	batch, err := opStreamer.BlockToEspressoBatch(h.verifier.rollupConfig, block)
+	batch, err := derivation.BlockToEspressoBatch(h.verifier.rollupConfig, block)
 	require.NoError(t, err)
 
 	syncStatus := &eth.SyncStatus{

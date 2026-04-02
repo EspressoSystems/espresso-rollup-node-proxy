@@ -11,10 +11,11 @@ import (
 	"os"
 	"proxy/proxy"
 	espressostore "proxy/store"
-	opStreamer "proxy/streamer/op"
 	verifier "proxy/verifier/op"
 	"testing"
 	"time"
+
+	opStreamer "github.com/EspressoSystems/espresso-streamers/op"
 
 	espressoClient "github.com/EspressoSystems/espresso-network/sdks/go/client"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -68,11 +69,12 @@ func startVerifier(ctx context.Context, t *testing.T, logger log.Logger, store *
 		l1Client,
 		&mockLightClient{client: espressoClient.NewClient(espressoURL)},
 		&verifier.OPEspressoBatchVerifierConfig{
-			FullNodeExecutionRPC: opGethFullNode,
-			FullNodeConsensusRPC: opNodeFullNode,
-			VerificationInterval: time.Second,
-			QueryServiceURL:      espressoURL,
-			BatcherAddress:       "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+			FullNodeExecutionRPC:      opGethFullNode,
+			FullNodeConsensusRPC:      opNodeFullNode,
+			VerificationInterval:      time.Second,
+			QueryServiceURL:           espressoURL,
+			BatcherAddress:            "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+			BatchAuthenticatorAddress: "0x0000000000000000000000000000000000000001",
 		},
 	)
 	v.Start(ctx)
