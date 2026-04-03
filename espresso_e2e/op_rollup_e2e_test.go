@@ -57,7 +57,7 @@ const (
 	opNodeSeqURL     = "http://127.0.0.1:9545"
 	opNodeFullNode   = "http://127.0.0.1:9548"
 	mockBeaconURL    = "http://127.0.0.1:5052"
-	mockEngineURL    = "http://127.0.0.1:8561"
+	p2pAttackUrl     = "http://127.0.0.1:8560"
 	L2_CHAIN_ID      = 22266222
 	espressoTag      = "espresso"
 	finalizedBlocks  = 60
@@ -232,7 +232,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		// First send malicious block number to engine
 		reorgBody, err := json.Marshal(map[string]uint64{"blockNumber": maliciousBlockNum})
 		require.NoError(t, err)
-		resp, err := http.Post(mockEngineURL+"/create-malicious-block", "application/json", bytes.NewReader(reorgBody))
+		resp, err := http.Post(p2pAttackUrl+"/create-malicious-block", "application/json", bytes.NewReader(reorgBody))
 		require.NoError(t, err)
 		_ = resp.Body.Close()
 		require.Equal(t, http.StatusOK, resp.StatusCode, "mock engine request failed with status %d", resp.StatusCode)
