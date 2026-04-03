@@ -18,7 +18,7 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 )
 
-func fetchSequencerAddrInfo(rpcURL, p2pAddr string) (*peer.AddrInfo, error) {
+func fetchSequencerPeerAddressInfo(rpcURL, p2pAddr string) (*peer.AddrInfo, error) {
 	body, _ := json.Marshal(map[string]any{
 		"jsonrpc": "2.0",
 		"method":  "opp2p_self",
@@ -43,11 +43,11 @@ func fetchSequencerAddrInfo(rpcURL, p2pAddr string) (*peer.AddrInfo, error) {
 		return nil, fmt.Errorf("empty peerID in response")
 	}
 
-	fullMA, err := ma.NewMultiaddr(fmt.Sprintf("%s/p2p/%s", p2pAddr, result.Result.PeerID))
+	multiAddress, err := ma.NewMultiaddr(fmt.Sprintf("%s/p2p/%s", p2pAddr, result.Result.PeerID))
 	if err != nil {
 		return nil, err
 	}
-	return peer.AddrInfoFromP2pAddr(fullMA)
+	return peer.AddrInfoFromP2pAddr(multiAddress)
 }
 
 func main() {
@@ -83,19 +83,19 @@ func main() {
 		log.Fatalf("invalid --chain-id: %s", *chainIDStr)
 	}
 
-	seqAddrInfo, err := fetchSequencerAddrInfo(*seqRPC, *seqP2PAddr)
+	seqAddrInfo, err := fetchSequencerPeerAddressInfo(*seqRPC, *seqP2PAddr)
 	if err != nil {
 		log.Fatalf("failed to fetch sequencer addr info: %v", err)
 	}
 	log.Printf("discovered sequencer peer ID: %s", seqAddrInfo.ID)
 
-	p2p := NewP2PEngine(*engineRPC, jwtSecret, signerKey, *listenAddr, chainId, seqAddrInfo)
+	p2p := NewP2P(*engineRPC, jwtSecret, signerKey, *listenAddr, chainId, seqAddrInfo)
 
 	http.HandleFunc("/peer-id", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, p2p.serverHost.ID().String())
+		fmt.Fprint(w, p2p.libp2pServer.ID().String())
 	})
 
-	http.HandleFunc("/create-malicious-block", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/create-fork-at-block", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 
 		type Request struct {
@@ -109,8 +109,7 @@ func main() {
 			return
 		}
 
-		// TODO: wire up block number trigger
-		log.Printf("create-malicious-block requested for block %d", req.BlockNumber)
+		log.Printf("create-fork-at-block requested for block %d", req.BlockNumber)
 		p2p.SetForkBlock(req.BlockNumber)
 
 		w.WriteHeader(http.StatusOK)

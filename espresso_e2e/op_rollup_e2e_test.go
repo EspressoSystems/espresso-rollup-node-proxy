@@ -232,7 +232,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		// First send malicious block number to engine
 		reorgBody, err := json.Marshal(map[string]uint64{"blockNumber": maliciousBlockNum})
 		require.NoError(t, err)
-		resp, err := http.Post(p2pAttackUrl+"/create-malicious-block", "application/json", bytes.NewReader(reorgBody))
+		resp, err := http.Post(p2pAttackUrl+"/create-fork-at-block", "application/json", bytes.NewReader(reorgBody))
 		require.NoError(t, err)
 		_ = resp.Body.Close()
 		require.Equal(t, http.StatusOK, resp.StatusCode, "mock engine request failed with status %d", resp.StatusCode)
