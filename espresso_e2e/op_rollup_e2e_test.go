@@ -11,10 +11,11 @@ import (
 	"os"
 	"proxy/proxy"
 	espressostore "proxy/store"
-	opStreamer "proxy/streamer/op"
 	verifier "proxy/verifier/op"
 	"testing"
 	"time"
+
+	opStreamer "github.com/EspressoSystems/espresso-streamers/op"
 
 	espressoClient "github.com/EspressoSystems/espresso-network/sdks/go/client"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -59,7 +60,7 @@ const (
 	mockEngineURL    = "http://127.0.0.1:8561"
 	L2_CHAIN_ID      = 22266222
 	espressoTag      = "espresso"
-	finalizedBlocks  = 50
+	finalizedBlocks  = 60
 )
 
 func startVerifier(ctx context.Context, t *testing.T, logger log.Logger, store *espressostore.EspressoStore) *verifier.OPEspressoBatchVerifier {
@@ -72,11 +73,12 @@ func startVerifier(ctx context.Context, t *testing.T, logger log.Logger, store *
 		l1Client,
 		&mockLightClient{client: espressoClient.NewClient(espressoURL)},
 		&verifier.OPEspressoBatchVerifierConfig{
-			FullNodeExecutionRPC: opGethFullNode,
-			FullNodeConsensusRPC: opNodeFullNode,
-			VerificationInterval: time.Second,
-			QueryServiceURL:      espressoURL,
-			BatcherAddress:       "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+			FullNodeExecutionRPC:      opGethFullNode,
+			FullNodeConsensusRPC:      opNodeFullNode,
+			VerificationInterval:      time.Second,
+			QueryServiceURL:           espressoURL,
+			BatcherAddress:            "0x976EA74026E726554dB657fA54763abd0C3a0aa9",
+			BatchAuthenticatorAddress: "0x9d4454b023096f34b160d6b654540c56a1f81688",
 		},
 	)
 	v.Start(ctx)

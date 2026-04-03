@@ -11,11 +11,12 @@ import (
 )
 
 type OPConfig struct {
-	FullNodeConsensusRPC string        `json:"full_node_consensus_rpc"`
-	VerificationInterval time.Duration `json:"verification_interval"`
-	QueryServiceURL      string        `json:"query_service_url"`
-	LightClientAddress   string        `json:"light_client_address"`
-	BatcherAddress       string        `json:"batcher_address"`
+	FullNodeConsensusRPC      string        `json:"full_node_consensus_rpc"`
+	VerificationInterval      time.Duration `json:"verification_interval"`
+	QueryServiceURL           string        `json:"query_service_url"`
+	LightClientAddress        string        `json:"light_client_address"`
+	BatcherAddress            string        `json:"batcher_address"`
+	BatchAuthenticatorAddress string        `json:"batch_authenticator_address"`
 }
 
 type Config struct {
@@ -74,6 +75,7 @@ func parseConfig() *Config {
 	pflag.StringVar(&cfg.OPConfig.QueryServiceURL, "op.query-service-url", cfg.OPConfig.QueryServiceURL, "Espresso query service URL")
 	pflag.StringVar(&cfg.OPConfig.LightClientAddress, "op.light-client-address", cfg.OPConfig.LightClientAddress, "Espresso light client contract address")
 	pflag.StringVar(&cfg.OPConfig.BatcherAddress, "op.batcher-address", cfg.OPConfig.BatcherAddress, "OP batcher address")
+	pflag.StringVar(&cfg.OPConfig.BatchAuthenticatorAddress, "op.batch-authenticator-address", cfg.OPConfig.BatchAuthenticatorAddress, "Espresso batch authenticator contract address")
 
 	pflag.Parse()
 	return cfg
@@ -82,10 +84,11 @@ func parseConfig() *Config {
 
 func (c *Config) toOPVerifierConfig() *verifier.OPEspressoBatchVerifierConfig {
 	return &verifier.OPEspressoBatchVerifierConfig{
-		FullNodeExecutionRPC: c.FullNodeExecutionRPC,
-		FullNodeConsensusRPC: c.OPConfig.FullNodeConsensusRPC,
-		VerificationInterval: c.OPConfig.VerificationInterval,
-		QueryServiceURL:      c.OPConfig.QueryServiceURL,
-		BatcherAddress:       c.OPConfig.BatcherAddress,
+		FullNodeExecutionRPC:      c.FullNodeExecutionRPC,
+		FullNodeConsensusRPC:      c.OPConfig.FullNodeConsensusRPC,
+		VerificationInterval:      c.OPConfig.VerificationInterval,
+		QueryServiceURL:           c.OPConfig.QueryServiceURL,
+		BatcherAddress:            c.OPConfig.BatcherAddress,
+		BatchAuthenticatorAddress: c.OPConfig.BatchAuthenticatorAddress,
 	}
 }
