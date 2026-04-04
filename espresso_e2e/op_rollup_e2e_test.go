@@ -100,7 +100,8 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 
 	stateFile := t.TempDir() + "/espresso-state.json"
 	espressoStore, err := espressostore.NewEspressoStore(stateFile, 1)
-	espressoStore.Update(1, 1)
+	require.NoError(t, err)
+	err = espressoStore.Update(1, 1)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -157,7 +158,8 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		t.Log("Starting OP Verifier")
 		logger := log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stdout, log.LevelInfo, true))
 		log.SetDefault(logger)
-		espressoStore.Update(0, 1)
+		err := espressoStore.Update(0, 1)
+		require.NoError(t, err)
 
 		v := startVerifier(ctx, t, logger, espressoStore)
 		defer v.Stop()
@@ -360,7 +362,8 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		initialStateFile := t.TempDir() + "/initial-proxy-state.json"
 		finalizedL2Block := getBlockByTag(t, opGethFullNode, "finalized")
 		initialStore, err := espressostore.NewEspressoStore(initialStateFile, initialHotshotHeight)
-		initialStore.Update(finalizedL2Block, initialHotshotHeight)
+		require.NoError(t, err)
+		err = initialStore.Update(finalizedL2Block, initialHotshotHeight)
 		require.NoError(t, err)
 
 		firstCapturer := &logCapturer{}

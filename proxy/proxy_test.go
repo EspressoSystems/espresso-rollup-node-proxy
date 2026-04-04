@@ -17,7 +17,8 @@ func newTestProxy(t *testing.T, upstreamURL string, l2BlockNumber uint64, espres
 	t.Helper()
 	fp := filepath.Join(t.TempDir(), "state.json")
 	store, err := espressoStore.NewEspressoStore(fp, 1)
-	store.Update(l2BlockNumber, 1)
+	require.NoError(t, err)
+	err = store.Update(l2BlockNumber, 1)
 	require.NoError(t, err)
 	return NewProxy(upstreamURL, store, espressoTag)
 }

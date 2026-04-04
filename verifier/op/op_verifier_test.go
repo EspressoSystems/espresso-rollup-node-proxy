@@ -189,7 +189,8 @@ func newTestHarness(t *testing.T, logger log.Logger) *testHarness {
 	rollupClient := new(mockRollupClient)
 	ethClient := new(mockEthClient)
 	store, err := espressoStore.NewEspressoStore(tempFilePath(t), 1)
-	store.Update(1, 1)
+	require.NoError(t, err)
+	err = store.Update(1, 1)
 	require.NoError(t, err)
 	verifier := &OPEspressoBatchVerifier{
 		streamer:      streamer,

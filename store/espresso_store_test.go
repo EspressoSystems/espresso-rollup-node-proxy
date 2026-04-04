@@ -17,7 +17,8 @@ func TestEspressoStore(t *testing.T) {
 	t.Run("Test initialization with non-existent file", func(t *testing.T) {
 		fp := tempFilePath(t)
 		store, err := NewEspressoStore(fp, 1)
-		store.Update(1, 1)
+		require.NoError(t, err)
+		err = store.Update(1, 1)
 		require.NoError(t, err)
 		require.NotNil(t, store)
 		require.Equal(t, uint64(1), store.state.L2BlockNumber)
@@ -47,7 +48,8 @@ func TestEspressoStore(t *testing.T) {
 	t.Run("Test GetState", func(t *testing.T) {
 		fp := tempFilePath(t)
 		store, err := NewEspressoStore(fp, 1)
-		store.Update(1, 1)
+		require.NoError(t, err)
+		err = store.Update(1, 1)
 		require.NoError(t, err)
 		state := store.GetState()
 		require.Equal(t, uint64(1), state.L2BlockNumber)
@@ -58,7 +60,8 @@ func TestEspressoStore(t *testing.T) {
 	t.Run("Test Update", func(t *testing.T) {
 		fp := tempFilePath(t)
 		store, err := NewEspressoStore(fp, 1)
-		store.Update(1, 1)
+		require.NoError(t, err)
+		err = store.Update(1, 1)
 		require.NoError(t, err)
 
 		err = store.Update(10, 20)
