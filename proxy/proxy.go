@@ -81,5 +81,3 @@ func writeJSONRPCError(w http.ResponseWriter, id json.RawMessage, code int, msg 
 		log.Error("failed to encode json rpc error", "error", err)
 	}
 }
-
-// TODO: add test cases for writeJSONRPC error

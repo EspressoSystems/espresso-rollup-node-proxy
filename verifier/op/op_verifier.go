@@ -107,11 +107,13 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 		espressoState.L2BlockNumber,
 		batchAuthenticatorAddr,
 	)
-	bufferedStreamer := opStreamer.NewBufferedEspressoStreamer(streamer)
+
 	if err != nil {
 		logger.Crit("failed to create OP streamer", "error", err)
 		return nil
 	}
+
+	bufferedStreamer := opStreamer.NewBufferedEspressoStreamer(streamer)
 
 	return &OPEspressoBatchVerifier{
 		streamer:         bufferedStreamer,
@@ -164,7 +166,12 @@ func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 	var espressoBatch *derivation.EspressoBatch
 	var err error
 	if espressoBatch, err = v.VerifyNextBatch(ctx); err != nil {
-		v.logger.Debug("batch verification failed", "error", err)
+		if err.Error() == "not found" {
+			v.logger.Debug("batch not found on OP node yet, will try again on next interval")
+			return
+		} else {
+			v.logger.Error("batch verification failed", "error", err)
+		}
 		return
 	}
 	if espressoBatch == nil {
