@@ -188,7 +188,8 @@ func newTestHarness(t *testing.T, logger log.Logger) *testHarness {
 	endpointProvider := new(mockEndpointProvider)
 	rollupClient := new(mockRollupClient)
 	ethClient := new(mockEthClient)
-	store, err := espressoStore.NewEspressoStore(tempFilePath(t), 1, 1)
+	store, err := espressoStore.NewEspressoStore(tempFilePath(t), 1)
+	store.Update(1, 1)
 	require.NoError(t, err)
 	verifier := &OPEspressoBatchVerifier{
 		streamer:      streamer,
@@ -220,8 +221,7 @@ func TestAdvanceStreamerAndEspressoState(t *testing.T) {
 	err := h.verifier.advanceStreamerAndEspressoState(ctx, 100)
 	require.NoError(t, err)
 
-	state, err := h.store.GetState()
-	require.NoError(t, err)
+	state := h.store.GetState()
 	require.Equal(t, uint64(2), state.FallbackHotshotHeight)
 	require.Equal(t, uint64(100), state.L2BlockNumber)
 	h.streamer.AssertCalled(t, "Next", mock.Anything)
@@ -304,8 +304,7 @@ func TestVerify(t *testing.T) {
 
 	require.False(t, capturer.hadError, "verifyAndAdvance() should not produce error logs on success")
 
-	state, err := h.store.GetState()
-	require.NoError(t, err)
+	state := h.store.GetState()
 	require.Equal(t, uint64(2), state.FallbackHotshotHeight)
 	require.Equal(t, uint64(100), state.L2BlockNumber)
 }

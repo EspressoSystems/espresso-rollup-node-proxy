@@ -29,7 +29,7 @@ type EspressoStore struct {
 	state    EspressoState
 }
 
-func NewEspressoStore(filePath string, hotshotHeight uint64, finalizedL2BlockNumber uint64) (*EspressoStore, error) {
+func NewEspressoStore(filePath string, hotshotHeight uint64) (*EspressoStore, error) {
 	store := &EspressoStore{filePath: filePath}
 
 	// Check if the file exists, if so load the state from the disk
@@ -43,9 +43,8 @@ func NewEspressoStore(filePath string, hotshotHeight uint64, finalizedL2BlockNum
 	}
 
 	// If the file doesnt exist, initialize the state
-	// with the provided hotshot height and finalized L2 block number
+	// with the provided hotshot height
 	store.state = EspressoState{
-		L2BlockNumber:         finalizedL2BlockNumber,
 		FallbackHotshotHeight: hotshotHeight,
 		UpdatedAt:             time.Now(),
 	}
@@ -56,10 +55,10 @@ func NewEspressoStore(filePath string, hotshotHeight uint64, finalizedL2BlockNum
 }
 
 // GetBlockNumber returns the current L2 block number stored in the state
-func (es *EspressoStore) GetState() (EspressoState, error) {
+func (es *EspressoStore) GetState() EspressoState {
 	es.mu.RLock()
 	defer es.mu.RUnlock()
-	return es.state, nil
+	return es.state
 }
 
 // Update updates the L2 block number and fallback hotshot height in the state
@@ -68,12 +67,17 @@ func (es *EspressoStore) GetState() (EspressoState, error) {
 func (es *EspressoStore) Update(l2BlockNumber uint64, fallbackHotshotHeight uint64) error {
 	es.mu.Lock()
 	defer es.mu.Unlock()
-
+	originalState := es.state
 	es.state.L2BlockNumber = l2BlockNumber
 	es.state.FallbackHotshotHeight = fallbackHotshotHeight
 	es.state.UpdatedAt = time.Now()
 
-	return es.writeToDisk()
+	if err := es.writeToDisk(); err != nil {
+		// If writing to disk fails, we revert the in-memory state to the original state
+		es.state = originalState
+		return fmt.Errorf("failed to write updated state to disk: %w", err)
+	}
+	return nil
 }
 
 func (es *EspressoStore) loadFromDisk() error {

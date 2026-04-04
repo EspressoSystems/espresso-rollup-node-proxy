@@ -89,11 +89,7 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 		return nil
 	}
 
-	espressoState, err := store.GetState()
-	if err != nil {
-		logger.Crit("failed to get state from store", "error", err)
-		return nil
-	}
+	espressoState := store.GetState()
 
 	batchAuthenticatorAddr := common.HexToAddress(opVerifierConfig.BatchAuthenticatorAddress)
 	l1Adapter := NewAdaptL1BlockRefClient(l1Client)
@@ -111,13 +107,14 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 		espressoState.L2BlockNumber,
 		batchAuthenticatorAddr,
 	)
+	bufferedStreamer := opStreamer.NewBufferedEspressoStreamer(streamer)
 	if err != nil {
 		logger.Crit("failed to create OP streamer", "error", err)
 		return nil
 	}
 
 	return &OPEspressoBatchVerifier{
-		streamer:         streamer,
+		streamer:         bufferedStreamer,
 		espressoStore:    store,
 		config:           opVerifierConfig,
 		endpointProvider: endpointProvider,
@@ -144,11 +141,8 @@ func (v *OPEspressoBatchVerifier) run(ctx context.Context) {
 	defer v.runWg.Done()
 	ticker := time.NewTicker(v.config.VerificationInterval)
 	defer ticker.Stop()
-	espressoState, err := v.espressoStore.GetState()
-	if err != nil {
-		v.logger.Crit("failed to get state from store", "error", err)
-		return
-	}
+	espressoState := v.espressoStore.GetState()
+
 	v.logger.Info("Starting OP Verifier", "start block number", espressoState.L2BlockNumber, "starting fallback_hotshot_height", espressoState.FallbackHotshotHeight)
 
 	for {
@@ -165,22 +159,22 @@ func (v *OPEspressoBatchVerifier) run(ctx context.Context) {
 // If verification succeeds, it advances the OP streamer and updates the espresso state in the store to reflect the new batch number.
 // If verification fails, it logs an error and will try again on the next interval.
 func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
-	v.logger.Info("Starting OP batch verification")
+	v.logger.Debug("Starting OP batch verification")
 
 	var espressoBatch *derivation.EspressoBatch
 	var err error
 	if espressoBatch, err = v.VerifyNextBatch(ctx); err != nil {
-		v.logger.Error("batch verification failed", "error", err)
+		v.logger.Debug("batch verification failed", "error", err)
 		return
 	}
 	if espressoBatch == nil {
-		v.logger.Info("no new batches to verify")
+		v.logger.Debug("no new batches to verify")
 		return
 	}
 
 	batchNumber := espressoBatch.Number()
 	if err := v.advanceStreamerAndEspressoState(ctx, batchNumber); err != nil {
-		v.logger.Error("failed to advance streamer and espresso state", "error", err, "batch_number", batchNumber)
+		v.logger.Debug("failed to advance streamer and espresso state", "error", err, "batch_number", batchNumber)
 		return
 	}
 
@@ -304,12 +298,7 @@ func (v *OPEspressoBatchVerifier) advanceStreamerAndEspressoState(ctx context.Co
 	hotshotFallbackPos := v.streamer.GetFallbackHotshotPos()
 
 	// First get the hotshot height and blockNumber from espressoStore
-	espressoState, err := v.espressoStore.GetState()
-	if err != nil {
-		v.logger.Error("failed to get state from store", "error", err)
-		return err
-
-	}
+	espressoState := v.espressoStore.GetState()
 	// Only update the store if the blockNumber is greater than the current block number because the espresso tag should never go backwards
 	if espressoState.L2BlockNumber >= blockNumber {
 		v.logger.Warn("not updating espresso state in store because block number is not greater than current block number in store",
@@ -317,7 +306,7 @@ func (v *OPEspressoBatchVerifier) advanceStreamerAndEspressoState(ctx context.Co
 		return nil
 	}
 	// Update the espresso state in the store to reflect the new batch number
-	err = v.espressoStore.Update(blockNumber, hotshotFallbackPos)
+	err := v.espressoStore.Update(blockNumber, hotshotFallbackPos)
 	if err != nil {
 		v.logger.Error("failed to update espresso state in store", "error", err)
 		return err
