@@ -9,7 +9,7 @@ COPY . .
 RUN CGO_ENABLED=1 go build -ldflags="-s -w" -trimpath -o espresso-rollup-node-proxy .
 
 FROM alpine:3.21
-RUN apk add --no-cache ca-certificates && adduser -D -u 1000 proxyuser
+RUN apk add --no-cache ca-certificates curl jq && adduser -D -u 1000 proxyuser
 WORKDIR /home/proxyuser
 COPY --from=builder /app/espresso-rollup-node-proxy /usr/local/bin/
 USER proxyuser
