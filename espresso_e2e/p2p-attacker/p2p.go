@@ -34,7 +34,10 @@ type P2P struct {
 	maliciousChain     map[common.Hash]common.Hash
 }
 
-var blockTopic = "/optimism/%s/3/blocks"
+var (
+	blockTopic        = "/optimism/%d/3/blocks"
+	requestResponseId = "/opstack/req/payload_by_number/%d/0"
+)
 
 func NewP2P(gethEngineRpc string, jwtSecret []byte, privateKey *ecdsa.PrivateKey, addr string, chainId *big.Int, seqAddrInfo *peer.AddrInfo) *P2P {
 	rpcClient, err := client.NewRPC(context.Background(), nil, gethEngineRpc, client.WithGethRPCOptions(
@@ -94,6 +97,8 @@ func initLibP2PServer(ctx context.Context, listenerAddress string, topicName str
 // Creates the attacker's client-side libp2p host that connects to the sequencer.
 // It subscribes to the gossip topic so we can intercept blocks before gossiping them further.
 func initLibP2PClient(ctx context.Context, seqAddrInfo *peer.AddrInfo, topicName string, pubSubOpts []pubsub.Option) (host.Host, *pubsub.Subscription) {
+	// Since we connect to the sequencers gossip, we dont care about which port we bind it to
+	// We set it to port 0, so the host OS chooses a random open port
 	libP2PClient, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/0.0.0.0/tcp/0"))
 	if err != nil {
 		log.Fatalf("failed to create client host: %v", err)
@@ -129,13 +134,11 @@ func initP2P(listenerAddress string, chainId *big.Int, seqAddrInfo *peer.AddrInf
 
 	pubSubOpts := []pubsub.Option{
 		pubsub.WithNoAuthor(),
-		pubsub.WithMessageSignaturePolicy(pubsub.StrictNoSign),
-		pubsub.WithStrictSignatureVerification(false),
 		pubsub.WithFloodPublish(true),
 		pubsub.WithMessageIdFn(msgIDFn),
 	}
 
-	topicName := fmt.Sprintf(blockTopic, chainId.String())
+	topicName := fmt.Sprintf(blockTopic, chainId)
 
 	ctx := context.Background()
 
@@ -152,7 +155,9 @@ func initP2P(listenerAddress string, chainId *big.Int, seqAddrInfo *peer.AddrInf
 // What is does in our scenario is forwards requests from the fullnode to the sequencer and sends the response back.
 // see https://github.com/EspressoSystems/optimism-espresso-integration/blob/4c769c98c924cb840d6d0bcc34fdeca910e5d030/op-node/p2p/node.go#L156
 func (p *P2P) registerRequestResponse(ctx context.Context, seqID peer.ID) {
-	protoID := protocol.ID(fmt.Sprintf("/opstack/req/payload_by_number/%s/0", p.engine.chainId.String()))
+	protoID := protocol.ID(fmt.Sprintf(requestResponseId, p.engine.chainId))
+
+	// The server listens for request response messages from the fullnode
 	p.libp2pServer.SetStreamHandler(protoID, func(inStream network.Stream) {
 		defer inStream.Close()
 
@@ -218,7 +223,7 @@ func (p *P2P) run() {
 			log.Fatalf("subscription error: %v", err)
 		}
 
-		// Decode and unmarshal to get `ExecutionPayload`
+		// Decode and unmarshal to get `ExecutionPayloadEnvelope`
 		decodedData, err := snappy.Decode(nil, msg.Data)
 		if err != nil {
 			log.Printf("snappy decode failed: %v", err)

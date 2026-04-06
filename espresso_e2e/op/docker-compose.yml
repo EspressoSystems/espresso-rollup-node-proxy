@@ -215,14 +215,6 @@ services:
       - "${P2P_ATTACKER_PORT}:8080"
     volumes:
       - l2-config:/config:ro
-    command:
-      - --listen=/ip4/0.0.0.0/tcp/9005
-      - --sequencer-rpc=http://op-node-sequencer:${ROLLUP_PORT}
-      - --sequencer=/dns4/op-node-sequencer/tcp/9003
-      - --chain-id=${L2_CHAIN_ID}
-      - --signer-key=${OPERATOR_PRIVATE_KEY}
-      - --engine-rpc=http://op-geth-fullnode:${OP_ENGINE_PORT}
-      - --engine-jwt=/config/jwt.txt
 
   # This image helps connect the full node and p2p attacker
   op-node-peer-connector:
