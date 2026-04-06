@@ -78,7 +78,7 @@ func startVerifier(ctx context.Context, t *testing.T, logger log.Logger, store *
 			VerificationInterval:      time.Second,
 			QueryServiceURL:           espressoURL,
 			BatcherAddress:            "0x976EA74026E726554dB657fA54763abd0C3a0aa9",
-			BatchAuthenticatorAddress: "0x9d4454b023096f34b160d6b654540c56a1f81688",
+			BatchAuthenticatorAddress: "0x4826533b4897376654bb4d4ad88b7fafd0c98528",
 		},
 	)
 	v.Start(ctx)
