@@ -77,21 +77,21 @@ func main() {
 
 	signerKey, err := gethcrypto.HexToECDSA(strings.TrimPrefix(sequencerPrivateKey, "0x"))
 	if err != nil {
-		log.Fatalf("invalid --signer-key: %v", err)
+		log.Fatalf("invalid signer-key: %v", err)
 	}
 
 	jwtBytes, err := os.ReadFile(jwtPath)
 	if err != nil {
-		log.Fatalf("read --engine-jwt: %v", err)
+		log.Fatalf("invalid jwt path: %v", err)
 	}
 	jwtSecret, err := hex.DecodeString(strings.TrimSpace(strings.TrimPrefix(string(jwtBytes), "0x")))
 	if err != nil {
-		log.Fatalf("decode jwt secret: %v", err)
+		log.Fatalf("error decoding jwt secret: %v", err)
 	}
 
 	seqAddrInfo, err := fetchSequencerPeerAddressInfo()
 	if err != nil {
-		log.Fatalf("failed to fetch sequencer addr info: %v", err)
+		log.Fatalf("failed to fetch sequencer address info: %v", err)
 	}
 	log.Printf("discovered sequencer peer ID: %s", seqAddrInfo.ID)
 
