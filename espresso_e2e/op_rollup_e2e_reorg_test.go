@@ -118,7 +118,11 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 		t.Logf("Proxy at L2 block %d after reorg, block never moved backwards", verifiedBlock)
 
 		proxyResult := jsonRPCCall(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{espressoTag, false}))
-		directResult := jsonRPCCall(t, opGethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{fmt.Sprintf("0x%x", verifiedBlock), false}))
+		var proxyBlock struct {
+			Number string `json:"number"`
+		}
+		require.NoError(t, json.Unmarshal(proxyResult, &proxyBlock))
+		directResult := jsonRPCCall(t, opGethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{proxyBlock.Number, false}))
 		require.JSONEq(t, string(directResult), string(proxyResult))
 		t.Log("Proxy espresso tag response matches direct OP geth full node response after reorg")
 	})
