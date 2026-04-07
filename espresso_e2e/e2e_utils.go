@@ -71,7 +71,7 @@ func startVerifier(ctx context.Context, t *testing.T, logger log.Logger, store *
 	t.Helper()
 	l1Client, err := ethclient.DialContext(ctx, l1GethURL)
 	if err != nil {
-		logger.Crit("failed to create L1 client", "error", err)
+		t.Fatalf("failed to create L1 client: %v", err)
 	}
 	v := verifier.NewOPEspressoBatchVerifier(ctx, logger, store,
 		l1Client,
