@@ -57,6 +57,7 @@ const (
 	opNodeSeqURL     = "http://127.0.0.1:9545"
 	opNodeFullNode   = "http://127.0.0.1:9548"
 	mockBeaconURL    = "http://127.0.0.1:5052"
+	p2pAttackUrl     = "http://127.0.0.1:8560"
 	L2_CHAIN_ID      = 22266222
 	espressoTag      = "espresso"
 	finalizedBlocks  = 60
@@ -77,7 +78,7 @@ func startVerifier(ctx context.Context, t *testing.T, logger log.Logger, store *
 			VerificationInterval:      time.Second,
 			QueryServiceURL:           espressoURL,
 			BatcherAddress:            "0x976EA74026E726554dB657fA54763abd0C3a0aa9",
-			BatchAuthenticatorAddress: "0x9d4454b023096f34b160d6b654540c56a1f81688",
+			BatchAuthenticatorAddress: "0x4826533b4897376654bb4d4ad88b7fafd0c98528",
 		},
 	)
 	v.Start(ctx)
@@ -117,7 +118,8 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 	logger := log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stdout, log.LevelInfo, true))
 	log.SetDefault(logger)
 
-	v := startVerifier(ctx, t, logger, espressoStore)
+	defaultCapturer := &logCapturer{}
+	v := startVerifier(ctx, t, log.NewLogger(defaultCapturer), espressoStore)
 	defer v.Stop()
 
 	t.Run("basic proxy advances", func(t *testing.T) {
@@ -220,6 +222,98 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		directResult := jsonRPCCall(t, opGethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{fmt.Sprintf("0x%x", verifiedBlock), false}))
 		require.JSONEq(t, string(directResult), string(proxyResult))
 		t.Log("Proxy espresso tag response matches direct OP geth full node response after reorg")
+	})
+
+	t.Run("proxy does not go backwords in case of l2 reorg", func(t *testing.T) {
+		const reorgBlockOffset = uint64(5)
+		currentL2 := getBlockByTag(t, opGethFullNode, "latest")
+		maliciousBlockNum := currentL2 + reorgBlockOffset
+
+		// First send malicious block number to engine
+		reorgBody, err := json.Marshal(map[string]uint64{"blockNumber": maliciousBlockNum})
+		require.NoError(t, err)
+		resp, err := http.Post(p2pAttackUrl+"/create-fork-at-block", "application/json", bytes.NewReader(reorgBody))
+		require.NoError(t, err)
+		_ = resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode, "mock engine request failed with status %d", resp.StatusCode)
+		t.Logf("L2 reorg ready at block %d", maliciousBlockNum)
+
+		// Wait for L2 to reach malicious block
+		t.Logf("Waiting for L2 to reach malicious block: %d", maliciousBlockNum)
+		deadline := time.Now().Add(3 * time.Minute)
+		var blockBeforeReorg uint64
+		for {
+			blockBeforeReorg = getStoredBlock(t, espressoStore)
+			require.True(t, time.Now().Before(deadline), "L2 did not reach block %d within timeout", maliciousBlockNum-1)
+			if getBlockByTag(t, opGethFullNode, "latest") >= maliciousBlockNum {
+				break
+			}
+			time.Sleep(time.Second)
+		}
+		t.Logf("Proxy at L2 block %d before triggering reorg", blockBeforeReorg)
+
+		// Ensure full node block hash and sequencer block hash mismatch
+		maliciousBlockHex := fmt.Sprintf("0x%x", maliciousBlockNum)
+		fullNodeBlock := jsonRPCCall(t, opGethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{maliciousBlockHex, false}))
+		seqBlock := jsonRPCCall(t, opGethSeqURL, "eth_getBlockByNumber", jsonMarshal(t, []any{maliciousBlockHex, false}))
+		var fullNodeHash, seqHash struct {
+			Hash string `json:"hash"`
+		}
+		require.NoError(t, json.Unmarshal(fullNodeBlock, &fullNodeHash))
+		require.NoError(t, json.Unmarshal(seqBlock, &seqHash))
+		require.NotEqual(t, fullNodeHash.Hash, seqHash.Hash,
+			"expected different hashes at block %d: full node=%s sequencer=%s", maliciousBlockNum, fullNodeHash.Hash, seqHash.Hash)
+		t.Logf("Block %d hash differs as expected: full node=%s sequencer=%s", maliciousBlockNum, fullNodeHash.Hash, seqHash.Hash)
+
+		// Make sure we never go backwards
+		t.Log("Monitoring proxy block number for backwards movement during and after reorg")
+		previous := blockBeforeReorg
+		deadline = time.Now().Add(45 * time.Second)
+		for {
+			current := getStoredBlock(t, espressoStore)
+			require.GreaterOrEqual(t, current, previous,
+				"proxy block moved backwards: was %d, now %d", previous, current)
+			if current > previous {
+				t.Logf("Proxy advanced to L2 block %d", current)
+				previous = current
+			}
+
+			// The espresso-tagged block must not be ahead of the OP geth full nodes latest block
+			latestFullNodeBlock := getBlockByTag(t, opGethFullNode, "latest")
+			require.LessOrEqual(t, current, latestFullNodeBlock,
+				"proxy espresso block %d is ahead of OP geth full nodes latest block %d", current, latestFullNodeBlock)
+
+			if time.Now().After(deadline) {
+				break
+			}
+			time.Sleep(time.Second)
+		}
+
+		// Verify we advanced after reorg
+		verifiedBlock := getStoredBlock(t, espressoStore)
+		require.Greater(t, verifiedBlock, blockBeforeReorg,
+			"proxy did not advance past block %d after reorg resolved", blockBeforeReorg)
+		t.Logf("Proxy at L2 block %d after reorg before was at %d, block never moved backwards", verifiedBlock, blockBeforeReorg)
+
+		proxyResult := jsonRPCCall(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{espressoTag, false}))
+		var proxyBlock struct {
+			Number string `json:"number"`
+		}
+		require.NoError(t, json.Unmarshal(proxyResult, &proxyBlock))
+		directResult := jsonRPCCall(t, opGethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{proxyBlock.Number, false}))
+		require.JSONEq(t, string(directResult), string(proxyResult))
+		t.Log("Proxy espresso tag response matches direct OP geth full node response after reorg")
+
+		requireLogStringAttrs(t, defaultCapturer, "batch verification failed", map[string]string{
+			"error": fmt.Sprintf("batch verification failed for batch number %d: espresso batch does not match full node batch", maliciousBlockNum),
+		})
+		t.Logf("Succesfully discarded verification of bad block hash")
+		// Make sure hashes are now correct at the malicious block as well
+		proxyMaliciousBlock := jsonRPCCall(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{maliciousBlockHex, false}))
+		seqMaliciousBlock := jsonRPCCall(t, opGethSeqURL, "eth_getBlockByNumber", jsonMarshal(t, []any{maliciousBlockHex, false}))
+		require.JSONEq(t, string(seqMaliciousBlock), string(proxyMaliciousBlock),
+			"proxy block at %d should match sequencer after reorg resolved", maliciousBlockNum)
+		t.Logf("Proxy block %d matches sequencer after reorg resolved", maliciousBlockNum)
 	})
 
 	t.Run("rpc compatibility", func(t *testing.T) {

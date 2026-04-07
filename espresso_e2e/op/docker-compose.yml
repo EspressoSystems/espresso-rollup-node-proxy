@@ -201,13 +201,27 @@ services:
       - --p2p.listen.udp=9003
       - --p2p.sequencer.key=${OPERATOR_PRIVATE_KEY}
 
-  # On startup sequencer will generate a random p2p peer id
-  # This image helps connect the full node and sequencer
-  op-node-peer-connector:
-    image: alpine:3.19
+  p2p-attacker:
+    build:
+      context: ../
+      dockerfile: p2p-attacker/Dockerfile
     depends_on:
       op-node-sequencer:
         condition: service_healthy
+      op-geth-fullnode:
+        condition: service_healthy
+    ports:
+      - "9005:9005"
+      - "${P2P_ATTACKER_PORT}:8080"
+    volumes:
+      - l2-config:/config:ro
+
+  # This image helps connect the full node and p2p attacker
+  op-node-peer-connector:
+    image: alpine:3.19
+    depends_on:
+      p2p-attacker:
+        condition: service_started
       op-node-fullnode:
         condition: service_started
     restart: "no"
@@ -217,12 +231,9 @@ services:
       - |
         apk add --no-cache curl jq > /dev/null
         sleep 5
-        PEER_ID=$$(curl -sf -X POST http://op-node-sequencer:${ROLLUP_PORT} \
-          -H 'Content-Type: application/json' \
-          -d '{"jsonrpc":"2.0","method":"opp2p_self","params":[],"id":1}' \
-          | jq -r '.result.peerID')
-        MULTIADDR="/dns4/op-node-sequencer/tcp/9003/p2p/$$PEER_ID"
-        echo "Connecting fullnode to sequencer p2p: $$MULTIADDR"
+        PEER_ID=$$(curl -sf http://p2p-attacker:8080/peer-id)
+        MULTIADDR="/dns4/p2p-attacker/tcp/9005/p2p/$$PEER_ID"
+        echo "Connecting fullnode to proxy: $$MULTIADDR"
         curl -sf -X POST http://op-node-fullnode:9548 \
           -H 'Content-Type: application/json' \
           -d "{\"jsonrpc\":\"2.0\",\"method\":\"opp2p_connectPeer\",\"params\":[\"$$MULTIADDR\"],\"id\":1}"
@@ -263,7 +274,7 @@ services:
     environment:
       OP_NODE_L1_ETH_RPC: http://l1-geth:${L1_HTTP_PORT}
       OP_NODE_L1_BEACON: http://mock-l1-beacon:${L1_BEACON_PORT}
-      OP_NODE_L2_ENGINE_RPC: http://op-geth-fullnode:8552
+      OP_NODE_L2_ENGINE_RPC: http://op-geth-fullnode:${OP_ENGINE_PORT}
       OP_NODE_RPC_PORT: "9548"
     ports:
       - "9548:9548"
@@ -280,6 +291,8 @@ services:
       - --p2p.listen.ip=0.0.0.0
       - --p2p.listen.tcp=9004
       - --p2p.listen.udp=9004
+      - --p2p.no-discovery
+      - --p2p.sync.req-resp=true
 
   op-batcher:
     platform: linux/amd64
