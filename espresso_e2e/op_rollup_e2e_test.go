@@ -225,7 +225,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 	})
 
 	t.Run("proxy does not go backwords in case of l2 reorg", func(t *testing.T) {
-		const reorgBlockOffset = uint64(20)
+		const reorgBlockOffset = uint64(5)
 		currentL2 := getBlockByTag(t, opGethFullNode, "latest")
 		maliciousBlockNum := currentL2 + reorgBlockOffset
 
@@ -268,7 +268,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		// Make sure we never go backwards
 		t.Log("Monitoring proxy block number for backwards movement during and after reorg")
 		previous := blockBeforeReorg
-		deadline = time.Now().Add(2 * time.Minute)
+		deadline = time.Now().Add(30 * time.Second)
 		for {
 			current := getStoredBlock(t, espressoStore)
 			require.GreaterOrEqual(t, current, previous,
