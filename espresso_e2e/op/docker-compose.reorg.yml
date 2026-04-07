@@ -48,41 +48,28 @@ services:
     ports:
       - "${L1_HTTP_PORT}:${L1_HTTP_PORT}"
       - "${L1_ENGINE_PORT}:${L1_ENGINE_PORT}"
-  l1-beacon:
-    image: ${LIGHTHOUSE_IMAGE}
+
+  # We are using this service to help us with L1 reorgs
+  # We can call /fork on this and give it a block number to do so
+  mock-l1-beacon:
+    build:
+      context: ../
+      dockerfile: mock-l1-beacon/Dockerfile
     depends_on:
-      l1-genesis:
-        condition: service_completed_successfully
       l1-geth:
-        condition: service_started
+        condition: service_healthy
     volumes:
-      - l1-data:/data
       - l1-config:/config:ro
-    command:
-      - lighthouse
-      - --datadir
-      - /data/lighthouse-beacon
-      - beacon_node
-      - --testnet-dir
-      - /config
-      - --execution-endpoint
-      - http://l1-geth:${L1_ENGINE_PORT}
-      - --execution-jwt
-      - /config/jwt.txt
-      - --http
-      - --http-address
-      - 0.0.0.0
-      - --http-port
-      - ${L1_BEACON_PORT}
-      - --http-allow-origin
-      - "*"
-      - --allow-insecure-genesis-sync
-      - --target-peers
-      - "0"
-      - --disable-deposit-contract-sync
-      - --disable-upnp
     ports:
       - "${L1_BEACON_PORT}:${L1_BEACON_PORT}"
+    command:
+      - --engine=http://l1-geth:${L1_ENGINE_PORT}
+      - --eth=http://l1-geth:${L1_HTTP_PORT}
+      - --jwt=/config/jwt.txt
+      - --block-time=2s
+      - --finalized-distance=20
+      - --safe-distance=10
+      - --addr=0.0.0.0:${L1_BEACON_PORT}
 
   l1-validator:
     image: ${LIGHTHOUSE_IMAGE}
@@ -91,7 +78,7 @@ services:
         condition: service_completed_successfully
       l1-geth:
         condition: service_started
-      l1-beacon:
+      mock-l1-beacon:
         condition: service_started
     volumes:
       - l1-data:/data
@@ -102,7 +89,9 @@ services:
       - --testnet-dir
       - /config
       - --beacon-nodes
-      - http://l1-beacon:${L1_BEACON_PORT}
+      # Using mock l1 beacon for now
+      # A todo would be for to only have this being used for l1 reorg tests
+      - http://mock-l1-beacon:${L1_BEACON_PORT}
       - --init-slashing-protection
       - --datadir
       - /data/lighthouse-validator
@@ -187,7 +176,7 @@ services:
         condition: service_started
     environment:
       OP_NODE_L1_ETH_RPC: http://l1-geth:${L1_HTTP_PORT}
-      OP_NODE_L1_BEACON: http://l1-beacon:${L1_BEACON_PORT}
+      OP_NODE_L1_BEACON: http://mock-l1-beacon:${L1_BEACON_PORT}
       OP_NODE_L2_ENGINE_RPC: http://op-geth-sequencer:${OP_ENGINE_PORT}
       OP_NODE_RPC_PORT: ${ROLLUP_PORT}
       OP_NODE_SAFEDB_PATH: /data/safedb
@@ -212,10 +201,27 @@ services:
       - --p2p.listen.udp=9003
       - --p2p.sequencer.key=${OPERATOR_PRIVATE_KEY}
 
+  p2p-attacker:
+    build:
+      context: ../
+      dockerfile: p2p-attacker/Dockerfile
+    depends_on:
+      op-node-sequencer:
+        condition: service_healthy
+      op-geth-fullnode:
+        condition: service_healthy
+    ports:
+      - "9005:9005"
+      - "${P2P_ATTACKER_PORT}:8080"
+    volumes:
+      - l2-config:/config:ro
+
   # This image helps connect the full node and p2p attacker
   op-node-peer-connector:
     image: alpine:3.19
     depends_on:
+      p2p-attacker:
+        condition: service_started
       op-node-fullnode:
         condition: service_started
     restart: "no"
@@ -225,12 +231,9 @@ services:
       - |
         apk add --no-cache curl jq > /dev/null
         sleep 5
-        PEER_ID=$$(curl -sf -X POST http://op-node-sequencer:${ROLLUP_PORT} \
-          -H 'Content-Type: application/json' \
-          -d '{"jsonrpc":"2.0","method":"opp2p_self","params":[],"id":1}' \
-          | jq -r '.result.peerID')
-        MULTIADDR="/dns4/op-node-sequencer/tcp/9003/p2p/$$PEER_ID"
-        echo "Connecting fullnode to sequencer p2p: $$MULTIADDR"
+        PEER_ID=$$(curl -sf http://p2p-attacker:8080/peer-id)
+        MULTIADDR="/dns4/p2p-attacker/tcp/9005/p2p/$$PEER_ID"
+        echo "Connecting fullnode to proxy: $$MULTIADDR"
         curl -sf -X POST http://op-node-fullnode:9548 \
           -H 'Content-Type: application/json' \
           -d "{\"jsonrpc\":\"2.0\",\"method\":\"opp2p_connectPeer\",\"params\":[\"$$MULTIADDR\"],\"id\":1}"
@@ -266,11 +269,11 @@ services:
         condition: service_completed_successfully
       op-geth-fullnode:
         condition: service_started
-      l1-beacon:
+      mock-l1-beacon:
         condition: service_started
     environment:
       OP_NODE_L1_ETH_RPC: http://l1-geth:${L1_HTTP_PORT}
-      OP_NODE_L1_BEACON: http://l1-beacon:${L1_BEACON_PORT}
+      OP_NODE_L1_BEACON: http://mock-l1-beacon:${L1_BEACON_PORT}
       OP_NODE_L2_ENGINE_RPC: http://op-geth-fullnode:${OP_ENGINE_PORT}
       OP_NODE_RPC_PORT: "9548"
     ports:
