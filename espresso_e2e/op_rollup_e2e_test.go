@@ -268,7 +268,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		// Make sure we never go backwards
 		t.Log("Monitoring proxy block number for backwards movement during and after reorg")
 		previous := blockBeforeReorg
-		deadline = time.Now().Add(30 * time.Second)
+		deadline = time.Now().Add(45 * time.Second)
 		for {
 			current := getStoredBlock(t, espressoStore)
 			require.GreaterOrEqual(t, current, previous,
