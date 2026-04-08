@@ -64,7 +64,7 @@ const (
 	p2pAttackUrl     = "http://127.0.0.1:8560"
 	L2_CHAIN_ID      = 22266222
 	espressoTag      = "espresso"
-	finalizedBlocks  = 60
+	finalizedBlocks  = 100
 )
 
 func startVerifier(ctx context.Context, t *testing.T, logger log.Logger, store *espressostore.EspressoStore) *verifier.OPEspressoBatchVerifier {

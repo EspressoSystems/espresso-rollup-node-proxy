@@ -74,7 +74,7 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 
 		// Trigger the L1 reorg via the mock beacon
 		const reorgBlocks = 5
-		t.Logf("Triggering L1 reorg at block %d", latestL1BlockNum-reorgBlocks)
+		t.Logf("Triggering L1 reorg at block %d, current l1 block %d", latestL1BlockNum-reorgBlocks, latestL1BlockNum)
 		forkBody, err := json.Marshal(map[string]uint64{"blockNum": latestL1BlockNum - reorgBlocks})
 		require.NoError(t, err)
 		resp, err := http.Post(mockBeaconURL+"/fork", "application/json", bytes.NewReader(forkBody))
