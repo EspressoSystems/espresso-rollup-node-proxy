@@ -55,11 +55,23 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 	defer v.Stop()
 
 	t.Run("proxy does not go backwords in case of l1 reorg", func(t *testing.T) {
-		// Wait for proxy to start processing blocks
-		startDeadline := time.Now().Add(time.Minute)
+		const targetBlockNum = uint64(10)
+		t.Log("Waiting for block 10 to be produced on OP Geth full node")
+		deadline := time.Now().Add(2 * time.Minute)
 		for {
-			require.True(t, time.Now().Before(startDeadline), "proxy did not start processing blocks within timeout")
-			if getStoredBlock(t, espressoStore) > 0 {
+			require.True(t, time.Now().Before(deadline), "block 10 not produced within timeout")
+			result := jsonRPCCall(t, opGethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{"0xa", false}))
+			if string(result) != "null" {
+				break
+			}
+			time.Sleep(time.Second)
+		}
+
+		t.Log("Waiting for OP verifer to update espresso store past block 10")
+		deadline = time.Now().Add(1 * time.Minute)
+		for {
+			require.True(t, time.Now().Before(deadline), "OP verifier did not reach block 10 within timeout")
+			if getStoredBlock(t, espressoStore) >= targetBlockNum {
 				break
 			}
 			time.Sleep(time.Second)
@@ -87,7 +99,7 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 		// and that the espresso-tagged block never exceeds the OP geth full nodes latest block.
 		t.Log("Monitoring proxy block number for backwards movement during and after reorg")
 		previous := blockBeforeReorg
-		deadline := time.Now().Add(1 * time.Minute)
+		deadline = time.Now().Add(1 * time.Minute)
 		for {
 			current := getStoredBlock(t, espressoStore)
 			require.GreaterOrEqual(t, current, previous,
