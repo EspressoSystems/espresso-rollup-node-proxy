@@ -127,7 +127,7 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 		t.Log("Proxy espresso tag response matches direct OP geth full node response after reorg")
 	})
 
-	t.Run("proxy does not go backwords in case of l2 reorg", func(t *testing.T) {
+	t.Run("proxy does not advance if full node has incorrect state", func(t *testing.T) {
 		const reorgBlockOffset = uint64(5)
 		currentL2 := getBlockByTag(t, opGethFullNode, "latest")
 		maliciousBlockNum := currentL2 + reorgBlockOffset
