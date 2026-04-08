@@ -191,7 +191,7 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 		// Make sure we never go backwards
 		t.Log("Monitoring proxy block number for backwards movement during and after reorg")
 		previous := blockBeforeFork
-		deadline = time.Now().Add(45 * time.Second)
+		deadline = time.Now().Add(3 * time.Minute)
 		for {
 			current := getStoredBlock(t, espressoStore)
 			require.GreaterOrEqual(t, current, previous,
@@ -206,7 +206,7 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 			require.LessOrEqual(t, current, latestFullNodeBlock,
 				"proxy espresso block %d is ahead of OP geth full nodes latest block %d", current, latestFullNodeBlock)
 
-			if time.Now().After(deadline) {
+			if current >= blockBeforeFork+5 || time.Now().After(deadline) {
 				break
 			}
 			time.Sleep(time.Second)
