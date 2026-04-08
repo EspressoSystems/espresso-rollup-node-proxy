@@ -65,29 +65,15 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 			time.Sleep(time.Second)
 		}
 
-		// Wait for L1 to advance 10 l1 blocks
-		latestL1BlockNum := getBlockByTag(t, l1GethURL, "latest")
-		const reorgTriggerL1Block = uint64(10)
-		t.Logf("Waiting for L1 to reach block %d, currently at %d", latestL1BlockNum+reorgTriggerL1Block, latestL1BlockNum)
-		deadline := time.Now().Add(3 * time.Minute)
-		for {
-			require.True(t, time.Now().Before(deadline), "L1 did not reach block %d within timeout", reorgTriggerL1Block)
-			l1Block := getBlockByTag(t, l1GethURL, "latest")
-			if l1Block >= latestL1BlockNum+reorgTriggerL1Block {
-				break
-			}
-			time.Sleep(time.Second)
-		}
-
 		// Get the current L1 block number to use as the reorg point
-		latestL1BlockNum = getBlockByTag(t, l1GethURL, "latest")
+		latestL1BlockNum := getBlockByTag(t, l1GethURL, "latest")
 		t.Logf("L1 latest block before reorg: %d", latestL1BlockNum)
 
 		blockBeforeReorg := getStoredBlock(t, espressoStore)
 		t.Logf("Proxy at L2 block %d before triggering reorg", blockBeforeReorg)
 
 		// Trigger the L1 reorg via the mock beacon
-		const reorgBlocks = 3
+		const reorgBlocks = 5
 		t.Logf("Triggering L1 reorg at block %d", latestL1BlockNum-reorgBlocks)
 		forkBody, err := json.Marshal(map[string]uint64{"blockNum": latestL1BlockNum - reorgBlocks})
 		require.NoError(t, err)
@@ -101,7 +87,7 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 		// and that the espresso-tagged block never exceeds the OP geth full nodes latest block.
 		t.Log("Monitoring proxy block number for backwards movement during and after reorg")
 		previous := blockBeforeReorg
-		deadline = time.Now().Add(1 * time.Minute)
+		deadline := time.Now().Add(1 * time.Minute)
 		for {
 			current := getStoredBlock(t, espressoStore)
 			require.GreaterOrEqual(t, current, previous,
