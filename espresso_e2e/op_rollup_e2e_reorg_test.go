@@ -55,6 +55,16 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 	defer v.Stop()
 
 	t.Run("proxy does not go backwords in case of l1 reorg", func(t *testing.T) {
+		// Wait for proxy to start processing blocks
+		startDeadline := time.Now().Add(time.Minute)
+		for {
+			require.True(t, time.Now().Before(startDeadline), "proxy did not start processing blocks within timeout")
+			if getStoredBlock(t, espressoStore) > 0 {
+				break
+			}
+			time.Sleep(time.Second)
+		}
+
 		// Wait for L1 to advance 10 l1 blocks
 		latestL1BlockNum := getBlockByTag(t, l1GethURL, "latest")
 		const reorgTriggerL1Block = uint64(10)
@@ -112,10 +122,9 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 			time.Sleep(time.Second)
 		}
 
-		verifiedBlock := getStoredBlock(t, espressoStore)
-		require.GreaterOrEqual(t, verifiedBlock, blockBeforeReorg,
-			"proxy did not advance past block %d after reorg resolved", blockBeforeReorg)
-		t.Logf("Proxy at L2 block %d after reorg, block never moved backwards", verifiedBlock)
+		require.Greater(t, previous, blockBeforeReorg,
+			"proxy did not advance past block %d during monitoring", blockBeforeReorg)
+		t.Logf("Proxy at L2 block %d after reorg, block never moved backwards", previous)
 
 		proxyResult := jsonRPCCall(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{espressoTag, false}))
 		var proxyBlock struct {
@@ -142,7 +151,7 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 		t.Logf("Full node fork ready at block %d", maliciousBlockNum)
 
 		// Wait for L2 to reach malicious block
-		t.Logf("Waiting for L2 to reach malicious block: %d", maliciousBlockNum)
+		t.Logf("Waiting for stored block to reach full node malicious block: %d", maliciousBlockNum)
 		deadline := time.Now().Add(3 * time.Minute)
 		var blockBeforeFork uint64
 		for {
@@ -150,6 +159,7 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 			require.True(t, time.Now().Before(deadline), "L2 did not reach block %d within timeout", maliciousBlockNum)
 			require.LessOrEqual(t, blockBeforeFork, maliciousBlockNum-1,
 				"proxy passed malicious block %d without stopping", maliciousBlockNum)
+			t.Logf("Waiting for L2 block %d, currently at %d", maliciousBlockNum-1, blockBeforeFork)
 			if blockBeforeFork == maliciousBlockNum-1 {
 				break
 			}
