@@ -165,8 +165,18 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 		}
 		t.Logf("Proxy at L2 block %d before triggering fork on full node", blockBeforeFork)
 
-		// Ensure full node block hash and sequencer block hash mismatch
+		// Wait for both full node and sequencer to produce the malicious block
 		maliciousBlockHex := fmt.Sprintf("0x%x", maliciousBlockNum)
+		for {
+			require.True(t, time.Now().Before(deadline), "full node did not produce block %d within timeout", maliciousBlockNum)
+			if getBlockByTag(t, opGethFullNode, "latest") >= maliciousBlockNum &&
+				getBlockByTag(t, opGethSeqURL, "latest") >= maliciousBlockNum {
+				break
+			}
+			time.Sleep(time.Second)
+		}
+
+		// Ensure full node block hash and sequencer block hash mismatch
 		fullNodeBlock := jsonRPCCall(t, opGethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{maliciousBlockHex, false}))
 		seqBlock := jsonRPCCall(t, opGethSeqURL, "eth_getBlockByNumber", jsonMarshal(t, []any{maliciousBlockHex, false}))
 		var fullNodeHash, seqHash struct {

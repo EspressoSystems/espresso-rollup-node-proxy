@@ -79,7 +79,7 @@ func startVerifier(ctx context.Context, t *testing.T, logger log.Logger, store *
 		&verifier.OPEspressoBatchVerifierConfig{
 			FullNodeExecutionRPC:      opGethFullNode,
 			FullNodeConsensusRPC:      opNodeFullNode,
-			VerificationInterval:      time.Second,
+			VerificationInterval:      250 * time.Millisecond,
 			QueryServiceURL:           espressoURL,
 			BatcherAddress:            "0x976EA74026E726554dB657fA54763abd0C3a0aa9",
 			BatchAuthenticatorAddress: "0x4826533b4897376654bb4d4ad88b7fafd0c98528",
