@@ -310,6 +310,7 @@ func (v *OPEspressoBatchVerifier) advanceStreamerAndEspressoState(ctx context.Co
 	if espressoState.L2BlockNumber >= blockNumber {
 		v.logger.Warn("not updating espresso state in store because block number is not greater than current block number in store",
 			"current_block_number", espressoState.L2BlockNumber, "new_block_number", blockNumber)
+		v.streamer.Next(ctx)
 		return nil
 	}
 	// Update the espresso state in the store to reflect the new batch number
