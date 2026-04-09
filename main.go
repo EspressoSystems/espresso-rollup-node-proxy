@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"log/slog"
-	"math/big"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,7 +16,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/rpc"
 )
 
 func main() {
@@ -39,14 +37,7 @@ func main() {
 	}
 	defer client.Close()
 
-	header, err := client.HeaderByNumber(ctx, big.NewInt(int64(rpc.FinalizedBlockNumber)))
-	if err != nil {
-		logger.Crit("failed to fetch finalized block from full node", "error", err)
-	}
-
-	logger.Info("fetched finalized block number", "number", header.Number.String())
-
-	espressoStore, err := store.NewEspressoStore(cfg.StoreFilePath, cfg.InitialHotshotHeight, header.Number.Uint64())
+	espressoStore, err := store.NewEspressoStore(cfg.StoreFilePath, cfg.InitialHotshotHeight)
 	if err != nil {
 		logger.Crit("failed to create espresso store", "error", err)
 	}

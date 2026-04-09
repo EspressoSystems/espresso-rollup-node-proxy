@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httputil"
@@ -9,6 +10,11 @@ import (
 	espressoStore "proxy/store"
 
 	"github.com/ethereum/go-ethereum/log"
+)
+
+const (
+	PARSE_ERROR_CODE    = -32700
+	INTERNAL_ERROR_CODE = -32603
 )
 
 type Proxy struct {
@@ -40,18 +46,38 @@ func (p *Proxy) Serve(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Error("failed to read request body", "error", err)
-		http.Error(w, "failed to read request body", http.StatusBadRequest)
+		writeJSONRPCError(w, nil, PARSE_ERROR_CODE, "failed to read request body")
 		return
 	}
 
 	interceptedBody, err := p.interceptor.Intercept(body)
 	if err != nil {
 		log.Error("failed to intercept request", "error", err)
-		http.Error(w, "failed to intercept request", http.StatusInternalServerError)
+		writeJSONRPCError(w, nil, INTERNAL_ERROR_CODE, "failed to intercept request")
 		return
 	}
 
 	r.Body = io.NopCloser(bytes.NewReader(interceptedBody))
 	r.ContentLength = int64(len(interceptedBody))
 	p.reverseProxy.ServeHTTP(w, r)
+}
+
+// writeJSONRPCError writes a JSON-RPC error response with the given id, code, and message.
+// If the id is nil, it defaults to "null" as per the JSON-RPC specification
+// https://www.jsonrpc.org/specification#error_object
+func writeJSONRPCError(w http.ResponseWriter, id json.RawMessage, code int, msg string) {
+	if id == nil {
+		id = json.RawMessage("null")
+	}
+	resp := JSONRPCResponse{
+		Version: "2.0",
+		ID:      id,
+		Error:   &JSONRPCError{Code: code, Message: msg},
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	err := json.NewEncoder(w).Encode(resp)
+	if err != nil {
+		log.Error("failed to encode json rpc error", "error", err)
+	}
 }

@@ -259,15 +259,13 @@ func jsonRPCBatchCallRaw(t *testing.T, url string, entries []batchEntry) []JSONR
 
 func getStoredBlock(t *testing.T, store *espressostore.EspressoStore) uint64 {
 	t.Helper()
-	state, err := store.GetState()
-	require.NoError(t, err)
+	state := store.GetState()
 	return state.L2BlockNumber
 }
 
 func getStoredHotshotHeight(t *testing.T, store *espressostore.EspressoStore) uint64 {
 	t.Helper()
-	state, err := store.GetState()
-	require.NoError(t, err)
+	state := store.GetState()
 	return state.FallbackHotshotHeight
 }
 

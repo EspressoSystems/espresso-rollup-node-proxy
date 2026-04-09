@@ -37,7 +37,7 @@ func defaultConfig() *Config {
 		StoreFilePath: "espresso_store.json",
 		LogLevel:      "info",
 		OPConfig: OPConfig{
-			VerificationInterval: 5 * time.Second,
+			VerificationInterval: 1 * time.Millisecond,
 		},
 	}
 }

@@ -18,6 +18,21 @@ type JSONRPCRequest struct {
 	Params  json.RawMessage `json:"params,omitempty"`
 }
 
+// JSONRPCError represents a JSON-RPC 2.0 error object
+// https://www.jsonrpc.org/specification#error_object
+type JSONRPCError struct {
+	Code    int             `json:"code"`
+	Message string          `json:"message"`
+	Data    json.RawMessage `json:"data,omitempty"`
+}
+
+type JSONRPCResponse struct {
+	Version string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id"`
+	Result  json.RawMessage `json:"result,omitempty"`
+	Error   *JSONRPCError   `json:"error,omitempty"`
+}
+
 // Interceptor is responsible for intercepting JSON-RPC requests with
 // the specified espresso tag and replacing the tag with a block number
 // finalized by Espresso. Note: the espreso tag can be "finalized", "espresso" etc
@@ -56,9 +71,10 @@ func (i *Interceptor) interceptBatch(rawRequest []byte) ([]byte, error) {
 		return nil, fmt.Errorf("failed to parse batch JSON-RPC request: %w", err)
 	}
 
-	state, err := i.store.GetState()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get block number from store: %w", err)
+	state := i.store.GetState()
+	if state.FallbackHotshotHeight == 0 || state.L2BlockNumber == 0 || state.UpdatedAt.IsZero() {
+		log.Warn("espresso state is empty, sending rawRequest to the full node")
+		return rawRequest, nil
 	}
 
 	changed := false
@@ -88,10 +104,12 @@ func (i *Interceptor) interceptBatch(rawRequest []byte) ([]byte, error) {
 }
 
 func (i *Interceptor) interceptSingle(rawRequest []byte) ([]byte, bool, error) {
-	state, err := i.store.GetState()
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to get block number from store: %w", err)
+	state := i.store.GetState()
+	if state.FallbackHotshotHeight == 0 || state.L2BlockNumber == 0 || state.UpdatedAt.IsZero() {
+		log.Warn("espresso state is empty, sending rawRequest to the full node")
+		return rawRequest, false, nil
 	}
+
 	return i.replaceEspressoTag(rawRequest, state.L2BlockNumber)
 }
 

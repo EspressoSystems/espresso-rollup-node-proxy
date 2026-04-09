@@ -16,10 +16,16 @@ import (
 func newTestProxy(t *testing.T, upstreamURL string, l2BlockNumber uint64, espressoTag string) *Proxy {
 	t.Helper()
 	fp := filepath.Join(t.TempDir(), "state.json")
-	store, err := espressoStore.NewEspressoStore(fp, 1, l2BlockNumber)
+	store, err := espressoStore.NewEspressoStore(fp, 1)
+	require.NoError(t, err)
+	err = store.Update(l2BlockNumber, 1)
 	require.NoError(t, err)
 	return NewProxy(upstreamURL, store, espressoTag)
 }
+
+type errReader struct{}
+
+func (errReader) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
 
 func TestServe(t *testing.T) {
 	t.Run("doesnt replace requests without espresso tag", func(t *testing.T) {
@@ -84,6 +90,46 @@ func TestServe(t *testing.T) {
 		proxy.Serve(rec, req)
 
 		require.Equal(t, http.StatusOK, rec.Code)
+	})
+
+	t.Run("returns parse error when body read fails", func(t *testing.T) {
+		proxy := newTestProxy(t, "http://unused", 100, "espresso")
+
+		req := httptest.NewRequest(http.MethodPost, "/", &errReader{})
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		proxy.Serve(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+
+		var resp JSONRPCResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		require.NotNil(t, resp.Error)
+		require.Equal(t, PARSE_ERROR_CODE, resp.Error.Code)
+		require.Equal(t, "failed to read request body", resp.Error.Message)
+		require.JSONEq(t, "null", string(resp.ID))
+	})
+
+	t.Run("returns internal error when intercept fails", func(t *testing.T) {
+		proxy := newTestProxy(t, "http://unused", 100, "espresso")
+
+		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString("not valid json"))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		proxy.Serve(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+
+		var resp JSONRPCResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		require.NotNil(t, resp.Error)
+		require.Equal(t, INTERNAL_ERROR_CODE, resp.Error.Code)
+		require.Equal(t, "failed to intercept request", resp.Error.Message)
+		require.JSONEq(t, "null", string(resp.ID))
 	})
 
 	t.Run("replaces finalized tag when configured", func(t *testing.T) {

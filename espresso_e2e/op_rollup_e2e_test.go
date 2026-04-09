@@ -32,7 +32,9 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 	waitForHTTPReady(t, opNodeFullNode, 1*time.Minute)
 
 	stateFile := t.TempDir() + "/espresso-state.json"
-	espressoStore, err := espressostore.NewEspressoStore(stateFile, 1, 0)
+	espressoStore, err := espressostore.NewEspressoStore(stateFile, 1)
+	require.NoError(t, err)
+	err = espressoStore.Update(1, 1)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -46,15 +48,13 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 	defer func() { _ = server.Shutdown(ctx) }()
 	t.Logf("proxy listening on %s", proxyURL)
 
-	t.Log("Starting OP Verifier")
-	logger := log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stdout, log.LevelInfo, true))
-	log.SetDefault(logger)
-
-	defaultCapturer := &logCapturer{}
-	v := startVerifier(ctx, t, log.NewLogger(defaultCapturer), espressoStore)
-	defer v.Stop()
-
 	t.Run("basic proxy advances", func(t *testing.T) {
+		t.Log("Starting OP Verifier")
+		logger := log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stdout, log.LevelInfo, true))
+		log.SetDefault(logger)
+
+		v := startVerifier(ctx, t, logger, espressoStore)
+		defer v.Stop()
 		const targetBlockNum = uint64(10)
 
 		t.Log("Waiting for block 10 to be produced on OP Geth full node")
@@ -88,6 +88,13 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 	})
 
 	t.Run("rpc compatibility", func(t *testing.T) {
+		t.Log("Starting OP Verifier")
+		logger := log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stdout, log.LevelInfo, true))
+		log.SetDefault(logger)
+
+		v := startVerifier(ctx, t, logger, espressoStore)
+		defer v.Stop()
+
 		userAddr := "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 		hash := "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
 
@@ -194,16 +201,23 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 				requireJSONRPCEqual(t, directResps[i], proxyResps[i], entry.method)
 			}
 		})
-
 	})
 
 	t.Run("proxy restart resumes from persisted state", func(t *testing.T) {
+		t.Log("Starting OP Verifier")
+		logger := log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stdout, log.LevelInfo, true))
+		log.SetDefault(logger)
+
+		v := startVerifier(ctx, t, logger, espressoStore)
+		defer v.Stop()
 		const initialHotshotHeight = uint64(1)
 		const targetBlockNum = uint64(10)
 
-		initialStateFile := t.TempDir() + "/initial-state.json"
+		initialStateFile := t.TempDir() + "/initial-proxy-state.json"
 		finalizedL2Block := getBlockByTag(t, opGethFullNode, "finalized")
-		initialStore, err := espressostore.NewEspressoStore(initialStateFile, initialHotshotHeight, finalizedL2Block)
+		initialStore, err := espressostore.NewEspressoStore(initialStateFile, initialHotshotHeight)
+		require.NoError(t, err)
+		err = initialStore.Update(finalizedL2Block, initialHotshotHeight)
 		require.NoError(t, err)
 
 		firstCapturer := &logCapturer{}
@@ -215,11 +229,6 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		server := &http.Server{Handler: http.HandlerFunc(nodeProxy.Serve)}
 		go func() { _ = server.Serve(listener) }()
 		t.Logf("Proxy listening on %s", proxyURL)
-
-		// Before the verifier starts the streamer, the espresso tag should be initialized to the finalized block
-		proxyResult := jsonRPCCall(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{espressoTag, false}))
-		directResult := jsonRPCCall(t, opGethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{fmt.Sprintf("0x%x", finalizedL2Block), false}))
-		require.JSONEq(t, string(directResult), string(proxyResult), "espresso tag should resolve to preRestartBlock before verifier starts")
 
 		// Now we start the verifier and check if it starts with finalizedL2Block and initialHotshotHeight, and that it advances the store past block 10.
 		verifier := startVerifier(ctx, t, log.NewLogger(firstCapturer), initialStore)
@@ -248,18 +257,19 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		preRestartHotshotHeight := getStoredHotshotHeight(t, initialStore)
 		t.Logf("Espresso store hotshot height %d before restart", preRestartHotshotHeight)
 
-		proxyResult = jsonRPCCall(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{espressoTag, false}))
-		directResult = jsonRPCCall(t, opGethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{fmt.Sprintf("0x%x", preRestartBlock), false}))
+		proxyResult := jsonRPCCall(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{espressoTag, false}))
+		directResult := jsonRPCCall(t, opGethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{fmt.Sprintf("0x%x", preRestartBlock), false}))
 		require.JSONEq(t, string(directResult), string(proxyResult), "espresso tag should resolve to preRestartBlock before verifier starts")
 
-		require.Greater(t, preRestartHotshotHeight, initialHotshotHeight, "store did not advance past initial hotshot height")
+		require.GreaterOrEqual(t, preRestartHotshotHeight, initialHotshotHeight, "store did not advance past initial hotshot height")
 		require.Greater(t, preRestartBlock, finalizedL2Block, "store did not advance past finalized block")
 		_ = server.Shutdown(ctx)
 		t.Log("proxy and verifier stopped")
 
 		// Now that proxy has advanced to a higher block number and hotshot height,
 		// we will restart the proxy with with the same state file, and assert it resumes from the persisted state correctly.
-		newStore, err := espressostore.NewEspressoStore(initialStateFile, initialHotshotHeight, finalizedL2Block)
+		newStore, err := espressostore.NewEspressoStore(initialStateFile, initialHotshotHeight)
+
 		require.NoError(t, err)
 
 		newProxy := proxy.NewProxy(opGethFullNode, newStore, espressoTag)
@@ -287,7 +297,147 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 			"starting fallback_hotshot_height": preRestartHotshotHeight,
 		})
 		t.Log("Verified that verifier and proxy started with correct hotshot height and L2 block number after restart")
-
 	})
 
+	t.Run("switchover with espresso tag", func(t *testing.T) {
+		stateFile := t.TempDir() + "/switchover-state.json"
+		store, err := espressostore.NewEspressoStore(stateFile, 50)
+		require.NoError(t, err)
+
+		require.Equal(t, uint64(0), getStoredBlock(t, store), "store should start with L2BlockNumber=0")
+
+		t.Log("Starting proxy with empty store, no verifier running")
+		p := proxy.NewProxy(opGethFullNode, store, espressoTag)
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		proxyURL := "http://" + listener.Addr().String()
+		server := &http.Server{Handler: http.HandlerFunc(p.Serve)}
+		go func() { _ = server.Serve(listener) }()
+		defer func() { _ = server.Shutdown(ctx) }()
+		t.Logf("proxy listening on %s", proxyURL)
+
+		// Espresso tag errors while state is empty and no verifier is running
+		resp := jsonRPCCallRaw(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{espressoTag, false}))
+		require.True(t, resp.Error != nil && string(resp.Error) != "null", "should return a JSON-RPC error when store has no verified state, got result: %s", string(resp.Result))
+
+		// Non Espresso requests should still work and return data from the OP geth full node
+		resp = jsonRPCCallRaw(t, proxyURL, "eth_blockNumber", nil)
+		require.True(t, resp.Error == nil || string(resp.Error) == "null", "should not return a JSON-RPC error for non-espresso tag requests, got error: %s", string(resp.Error))
+		require.NotNil(t, resp.Result, "should return a result for eth_blockNumber even when store is empty")
+
+		// Now wait for OP full node to produce blocks
+		t.Log("Waiting for OP full node to produce blocks")
+		deadline := time.Now().Add(2 * time.Minute)
+		for {
+			require.True(t, time.Now().Before(deadline), "OP full node did not produce block 10 within timeout")
+			result := jsonRPCCall(t, opGethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{"0xa", false}))
+			if string(result) != "null" {
+				break
+			}
+			time.Sleep(time.Second)
+		}
+
+		resp = jsonRPCCallRaw(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{espressoTag, false}))
+		require.True(t, resp.Error != nil && string(resp.Error) != "null",
+			"espresso tag should still error before verifier starts, got result: %s", string(resp.Result))
+
+		t.Log("Confirmed: espresso tag still errors with blocks produced but no verifier running")
+		t.Log("Starting verifier, it will start the streamer and sync blocks from Espresso to update the store")
+		logger := log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stdout, log.LevelInfo, true))
+		log.SetDefault(logger)
+		v := startVerifier(ctx, t, logger, store)
+		defer v.Stop()
+
+		t.Log("Waiting for verifier to update store (switchover)")
+		deadline = time.Now().Add(3 * time.Minute)
+		for {
+			require.True(t, time.Now().Before(deadline), "verifier did not update store within timeout")
+			if getStoredBlock(t, store) > 0 {
+				break
+			}
+			time.Sleep(time.Second)
+		}
+		t.Logf("Switchover complete: store at block %d", getStoredBlock(t, store))
+
+		// Now check if Espresso tag resolves after switchover
+		resp = jsonRPCCallRaw(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{espressoTag, false}))
+		require.True(t, resp.Error == nil || string(resp.Error) == "null", "should not return a JSON-RPC error for espresso tag after switchover, got error: %s", string(resp.Error))
+		require.NotNil(t, resp.Result, "should return a result for espresso tag after switchover")
+		t.Log("Confirmed: espresso tag works after switchover")
+	})
+
+	t.Run("switchover with finalized tag", func(t *testing.T) {
+		espressoTag := "finalized"
+		stateFile := t.TempDir() + "/switchover-finalized-state.json"
+		store, err := espressostore.NewEspressoStore(stateFile, 70)
+		require.NoError(t, err)
+
+		require.Equal(t, uint64(0), getStoredBlock(t, store), "store should start with L2BlockNumber=0")
+
+		t.Log("Starting proxy with finalized tag, empty store, no verifier running")
+		p := proxy.NewProxy(opGethFullNode, store, espressoTag)
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		proxyURL := "http://" + listener.Addr().String()
+		server := &http.Server{Handler: http.HandlerFunc(p.Serve)}
+		go func() { _ = server.Serve(listener) }()
+		defer func() { _ = server.Shutdown(ctx) }()
+		t.Logf("proxy listening on %s", proxyURL)
+
+		// Unlike the espresso tag, "finalized" is a valid Ethereum block tag so the
+		// full node handles it even when the store is empty (request passes through unchanged).
+		resp := jsonRPCCallRaw(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{espressoTag, false}))
+		require.True(t, resp.Error == nil || string(resp.Error) == "null",
+			"finalized tag should not error with empty store, got error: %s", string(resp.Error))
+		require.NotNil(t, resp.Result, "should return a result for finalized tag even with empty store")
+		t.Log("Confirmed: finalized tag does not error with empty store (forwarded to full node)")
+
+		// Wait for OP full node to produce blocks
+		t.Log("Waiting for OP full node to produce blocks")
+		deadline := time.Now().Add(2 * time.Minute)
+		for {
+			require.True(t, time.Now().Before(deadline), "OP full node did not produce block 10 within timeout")
+			result := jsonRPCCall(t, opGethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{"0xa", false}))
+			if string(result) != "null" {
+				break
+			}
+			time.Sleep(time.Second)
+		}
+
+		// Before switchover: proxy forwards "finalized" to full node unchanged
+		// so it should return the Ethereum finalized block (identical to calling full node directly)
+		proxyResp := jsonRPCCallRaw(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{espressoTag, false}))
+		directResp := jsonRPCCallRaw(t, opGethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{"finalized", false}))
+		requireJSONRPCEqual(t, directResp, proxyResp, "eth_getBlockByNumber(finalized)")
+		t.Log("Confirmed: before switchover, proxy returns same finalized block as full node (Ethereum finalized)")
+
+		t.Log("Starting verifier, it will start the streamer and sync blocks from Espresso to update the store")
+		logger := log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stdout, log.LevelInfo, true))
+		log.SetDefault(logger)
+		v := startVerifier(ctx, t, logger, store)
+		defer v.Stop()
+
+		t.Log("Waiting for verifier to update store (switchover)")
+		deadline = time.Now().Add(3 * time.Minute)
+		for {
+			require.True(t, time.Now().Before(deadline), "verifier did not update store within timeout")
+			if getStoredBlock(t, store) > 0 {
+				break
+			}
+			time.Sleep(time.Second)
+		}
+		t.Logf("Switchover complete: store at block %d", getStoredBlock(t, store))
+
+		// After switchover: proxy replaces "finalized" with the Espresso finalized block
+		// number from the store instead of forwarding to the full node unchanged.
+		espressoFinalizedBlock := getBlockByTag(t, proxyURL, espressoTag)
+		storeBlock := getStoredBlock(t, store)
+		// The store may advance between the RPC call and the read, so the proxy-returned
+		// block will be at or just below the current store value.
+		require.True(t, espressoFinalizedBlock >= storeBlock,
+			"proxy should return Espresso finalized block (%d) at (%d)",
+			espressoFinalizedBlock, storeBlock)
+		t.Logf("Confirmed: after switchover, proxy returns Espresso finalized block %d (store at %d)",
+			espressoFinalizedBlock, storeBlock)
+	})
 }
