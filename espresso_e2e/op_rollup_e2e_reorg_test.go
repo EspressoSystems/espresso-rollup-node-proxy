@@ -32,7 +32,7 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 	waitForHTTPReady(t, opNodeFullNode, 1*time.Minute)
 
 	stateFile := t.TempDir() + "/espresso-state.json"
-	espressoStore, err := espressostore.NewEspressoStore(stateFile, 1, 0)
+	espressoStore, err := espressostore.NewEspressoStore(stateFile, 1)
 	require.NoError(t, err)
 
 	ctx := context.Background()
