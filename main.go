@@ -64,6 +64,13 @@ func main() {
 	logger.Info("OP Verifier Started")
 	fullNodeProxy := proxy.NewProxy(cfg.FullNodeExecutionRPC, espressoStore, cfg.EspressoTag)
 	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, err := w.Write([]byte("OK"))
+		if err != nil {
+			logger.Error("failed to write health response", "error", err)
+		}
+	})
 	mux.HandleFunc("/", fullNodeProxy.Serve)
 
 	server := &http.Server{
