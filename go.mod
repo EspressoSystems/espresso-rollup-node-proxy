@@ -4,7 +4,7 @@ go 1.25.1
 
 require (
 	github.com/EspressoSystems/espresso-network/sdks/go v0.3.4
-	github.com/EspressoSystems/espresso-streamers v1.0.2-0.20260409070221-db7a9e354066
+	github.com/EspressoSystems/espresso-streamers v1.0.2-0.20260410064427-6d666f9bed79
 	github.com/ccoveille/go-safecast v1.1.0
 	github.com/ethereum-optimism/optimism v1.16.7
 	github.com/ethereum/go-ethereum v1.17.1
@@ -140,3 +140,5 @@ require (
 replace github.com/ethereum-optimism/optimism => github.com/EspressoSystems/optimism-espresso-integration v0.0.0-20260320193702-1e85078aed7b
 
 replace github.com/ethereum/go-ethereum => github.com/celo-org/op-geth v1.101411.1-0.20260316145005-3a40c398c038
+
+replace github.com/EspressoSystems/espresso-streamers => ../espresso-streamers

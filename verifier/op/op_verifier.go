@@ -31,6 +31,7 @@ type OPEspressoBatchVerifierConfig struct {
 	QueryServiceURL           string        `json:"query_service_url"`
 	BatcherAddress            string        `json:"batcher_address"`
 	BatchAuthenticatorAddress string        `json:"batch_authenticator_address"`
+	LogBatchLatency           bool          `json:"log_batch_latency"`
 }
 
 // OPEspressoBatchVerifier is responsible for verifying that the batches produced by the OP full node match what the OP streamer has in its buffer.
@@ -40,16 +41,18 @@ type OPEspressoBatchVerifierConfig struct {
 // If they dont match, it logs an error and tries again on the next interval. Eventually the tag will be advanced after
 // a batch is posted to Ethereum and it finalizes because Ethereum will only finalize data that matches the data finalized by Espresso.
 type OPEspressoBatchVerifier struct {
-	streamer         opStreamer.EspressoStreamer[derivation.EspressoBatch]
-	espressoStore    *espressoStore.EspressoStore
-	config           *OPEspressoBatchVerifierConfig
-	endpointProvider dial.L2EndpointProvider
-	rollupConfig     *rollup.Config
-	logger           log.Logger
-	l1Client         *ethclient.Client
-	cancel           context.CancelFunc
-	runWg            sync.WaitGroup
-	running          bool
+	streamer          opStreamer.EspressoStreamer[derivation.EspressoBatch]
+	espressoStore     *espressoStore.EspressoStore
+	config            *OPEspressoBatchVerifierConfig
+	endpointProvider  dial.L2EndpointProvider
+	rollupConfig      *rollup.Config
+	logger            log.Logger
+	l1Client          *ethclient.Client
+	cancel            context.CancelFunc
+	runWg             sync.WaitGroup
+	running           bool
+	totalBatchLatency time.Duration
+	batchCount        uint64
 }
 
 func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *espressoStore.EspressoStore, l1Client *ethclient.Client, espressoLightClient opStreamer.LightClientCallerInterface, opVerifierConfig *OPEspressoBatchVerifierConfig) *OPEspressoBatchVerifier {
@@ -106,6 +109,7 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 		espressoState.FallbackHotshotHeight,
 		espressoState.L2BlockNumber,
 		batchAuthenticatorAddr,
+		opVerifierConfig.LogBatchLatency,
 	)
 
 	if err != nil {
@@ -180,9 +184,32 @@ func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 	}
 
 	batchNumber := espressoBatch.Number()
+
+	// Capture the HotShot finalization timestamp before advancing,
+	// because Next() inside advanceStreamerAndEspressoState deletes it.
+	var hotshotTimestamp uint64
+	var hasTimestamp bool
+	if v.config.LogBatchLatency {
+		hotshotTimestamp, hasTimestamp = v.streamer.GetBatchTimestamp(espressoBatch.Hash())
+	}
+
 	if err := v.advanceStreamerAndEspressoState(ctx, batchNumber); err != nil {
 		v.logger.Debug("failed to advance streamer and espresso state", "error", err, "batch_number", batchNumber)
 		return
+	}
+
+	if v.config.LogBatchLatency && hasTimestamp {
+		batchTime := time.Unix(int64(hotshotTimestamp), 0)
+		latency := time.Since(batchTime)
+		v.totalBatchLatency += latency
+		v.batchCount++
+		avgLatency := v.totalBatchLatency / time.Duration(v.batchCount)
+		v.logger.Info("Batch latency",
+			"batch_number", batchNumber,
+			"latency", latency,
+			"average_latency", avgLatency,
+			"total_batches_tracked", v.batchCount,
+		)
 	}
 
 	v.logger.Info("Successfully verified and advanced OP batch", "batch_number", batchNumber)
