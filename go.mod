@@ -140,5 +140,3 @@ require (
 replace github.com/ethereum-optimism/optimism => github.com/EspressoSystems/optimism-espresso-integration v0.0.0-20260320193702-1e85078aed7b
 
 replace github.com/ethereum/go-ethereum => github.com/celo-org/op-geth v1.101411.1-0.20260316145005-3a40c398c038
-
-replace github.com/EspressoSystems/espresso-streamers => ../espresso-streamers
