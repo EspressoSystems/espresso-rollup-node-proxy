@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/big"
 	espressoStore "proxy/store"
+	"strings"
 	"sync"
 	"time"
 
@@ -173,6 +174,9 @@ func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 		if err.Error() == "not found" {
 			v.logger.Debug("batch not found on OP node yet, will try again on next interval")
 			return
+		} else if strings.Contains(err.Error(), "retryable") {
+			v.logger.Debug("espresso has not finalized the batch yet", "error", err)
+			return
 		} else {
 			v.logger.Error("batch verification failed", "error", err)
 		}
@@ -188,7 +192,7 @@ func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 	var hotshotTimestamp uint64
 	var hashTimestamp bool
 	if v.config.TrackBatchLatency {
-		hotshotTimestamp, hashTimestamp = v.streamer.GetBatchTimestamp(espressoBatch.Hash())
+		hotshotTimestamp, hashTimestamp = v.streamer.GetBatchFinalizationTimestamp(espressoBatch.Hash())
 	}
 
 	if err := v.advanceStreamerAndEspressoState(ctx, batchNumber); err != nil {
@@ -306,7 +310,6 @@ func (v *OPEspressoBatchVerifier) peekNextBatch(ctx context.Context) (*derivatio
 	if !v.streamer.HasNext(ctx) {
 		err := v.streamer.Update(ctx)
 		if err != nil {
-			v.logger.Error("failed to update OP streamer", "error", err)
 			return nil, err
 		}
 	}

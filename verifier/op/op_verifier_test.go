@@ -93,7 +93,7 @@ func (m *mockStreamer) GetFallbackHotshotPos() uint64 {
 	return args.Get(0).(uint64)
 }
 
-func (m *mockStreamer) GetBatchTimestamp(hash common.Hash) (uint64, bool) {
+func (m *mockStreamer) GetBatchFinalizationTimestamp(hash common.Hash) (uint64, bool) {
 	args := m.Called(hash)
 	return args.Get(0).(uint64), args.Bool(1)
 }
