@@ -16,9 +16,7 @@ then the request is forwarded transparently.
 
 **Verifier** — A background loop continuously compares the next batch produced
 by the Espresso streamer against the corresponding block on the OP full node.
-On a match the loop
-advances the streamer and persists the new L2 block number to disk; on a
-mismatch it retries at the next interval.
+On a match, the loop advances the streamer and persists the new L2 block number to disk; on a mismatch, it retries at the next interval.
 
 **Store** — Persists the Espresso-finalized L2 block number and HotShot fallback
 position to a JSON file so state survives restarts.
@@ -35,11 +33,11 @@ nix develop
 
 ```
 
-Run `just` with no arguments to list all available recipes.
+Run just test to execute the tests, or run just with no arguments to list all available recipes.
 
 ## License
 Copyright
-(c) 2022 Espresso Systems espresso-network was developed by Espresso Systems. While we plan to adopt an open source license, we have not yet selected one. As such, all rights are reserved for the time being. Please reach out to us if you have thoughts on licensing.
+(c) 2022 Espresso Systems. The Espresso Rollup Node Proxy was developed by Espresso Systems. While we plan to adopt an open source license, we have not yet selected one. As such, all rights are reserved for the time being. Please reach out to us if you have thoughts on licensing.
 
 ## Disclaimer
 DISCLAIMER: This software is provided "as is" and its security has not been externally audited. Use at your own risk.
