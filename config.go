@@ -28,6 +28,7 @@ type Config struct {
 	InitialHotshotHeight uint64   `json:"initial_hotshot_height"`
 	OPConfig             OPConfig `json:"op"`
 	LogLevel             string   `json:"log_level"`
+	TrackBatchLatency    bool     `json:"track_batch_latency"`
 }
 
 func defaultConfig() *Config {
@@ -68,6 +69,7 @@ func parseConfig() *Config {
 	pflag.StringVar(&cfg.EspressoTag, "espresso-tag", cfg.EspressoTag, "espresso tag")
 	pflag.StringVar(&cfg.StoreFilePath, "store-file-path", cfg.StoreFilePath, "path to state persistence file")
 	pflag.Uint64Var(&cfg.InitialHotshotHeight, "initial-hotshot-height", cfg.InitialHotshotHeight, "initial hotshot height")
+	pflag.BoolVar(&cfg.TrackBatchLatency, "track-batch-latency", cfg.TrackBatchLatency, "whether to track batch latency")
 
 	// Optimism specific config
 	pflag.StringVar(&cfg.OPConfig.FullNodeConsensusRPC, "op.full-node-consensus-rpc", cfg.OPConfig.FullNodeConsensusRPC, "OP full node consensus RPC URL")
@@ -90,5 +92,6 @@ func (c *Config) toOPVerifierConfig() *verifier.OPEspressoBatchVerifierConfig {
 		QueryServiceURL:           c.OPConfig.QueryServiceURL,
 		BatcherAddress:            c.OPConfig.BatcherAddress,
 		BatchAuthenticatorAddress: c.OPConfig.BatchAuthenticatorAddress,
+		TrackBatchLatency:         c.TrackBatchLatency,
 	}
 }
