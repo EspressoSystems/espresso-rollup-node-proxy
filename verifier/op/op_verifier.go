@@ -205,7 +205,7 @@ func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 		v.totalBatchLatency += latency
 		v.batchCount++
 		averageLatency := v.totalBatchLatency / time.Duration(v.batchCount)
-		v.logger.Info("Batch latency", "batch_number", batchNumber, "latency", latency, "average_latency", averageLatency, "total batches", v.batchCount)
+		v.logger.Info("Batch latency", "batch_number", batchNumber, "latency", latency, "average_latency", averageLatency, "total batches", v.batchCount, "hotshot_timestamp", hotshotTimestamp, "batch_hash", espressoBatch.Hash())
 	}
 
 	v.logger.Info("Successfully verified and advanced OP batch", "batch_number", batchNumber)
