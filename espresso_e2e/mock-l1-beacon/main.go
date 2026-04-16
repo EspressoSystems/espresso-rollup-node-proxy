@@ -371,6 +371,14 @@ func (fb *FakeBeacon) fork(blockNumber uint64) error {
 
 	target = fb.history[blockNumber]
 	fb.history = fb.history[:blockNumber+1]
+
+	// Reset finalized and safe to match the truncated history so we don't
+	// send stale hashes (from blocks that no longer exist) in
+	// forkchoiceUpdated after the fork.
+	fb.finalized = fb.getBlockByTag(Finalized)
+	fb.safe = fb.getBlockByTag(Safe)
+	log.Printf("fork: reset finalized to block %d, safe to block %d", fb.finalized.Number, fb.safe.Number)
+
 	fb.mu.Unlock()
 
 	// call geth and tell it to fork back to the block number

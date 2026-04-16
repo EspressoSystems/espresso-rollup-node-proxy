@@ -354,38 +354,6 @@ services:
       ESPRESSO_DEV_NODE_EPOCH_HEIGHT: "4294967295"
       ESPRESSO_SEQUENCER_ETH_MNEMONIC: "giant issue aisle success illegal bike spike question tent bar rely arctic volcano long crawl hungry vocal artwork sniff fantasy very lucky have athlete"
 
-  espresso-rollup-node-proxy:
-    platform: linux/amd64
-    build:
-      context: ../..
-      dockerfile: Dockerfile
-    depends_on:
-      op-geth-fullnode:
-        condition: service_healthy
-      op-node-fullnode:
-        condition: service_started
-      l1-geth:
-        condition: service_healthy
-      espresso-dev-node:
-        condition: service_started
-    ports:
-      - "${PROXY_PORT}:8080"
-    volumes:
-      - deployer:/deployer:ro
-    command:
-      - --listen-addr=:8080
-      - --full-node-execution-rpc=http://op-geth-fullnode:${OP_HTTP_PORT}
-      - --l1-rpc=http://l1-geth:${L1_HTTP_PORT}
-      - --initial-hotshot-height=${ESPRESSO_ORIGIN_HEIGHT:-0}
-      - --op.full-node-consensus-rpc=http://op-node-fullnode:9548
-      - --op.query-service-url=http://espresso-dev-node:${ESPRESSO_SEQUENCER_API_PORT}
-      - --op.light-client-address=${ESPRESSO_SEQUENCER_LIGHT_CLIENT_PROXY_ADDRESS}
-      - --op.batcher-address=${TEE_BATCHER_ADDRESS}
-      - --op.verification-interval=10ms
-      - --op.batch-authenticator-address=0x4826533b4897376654bb4d4ad88b7fafd0c98528
-      - --log-level=info
-      - --track-batch-latency=true
-
   attestation-service-zk:
     image: ghcr.io/espressosystems/attestation-verifier-zk:sha-0e987c3
     platform: linux/amd64
