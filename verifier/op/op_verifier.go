@@ -169,8 +169,13 @@ func (v *OPEspressoBatchVerifier) run(ctx context.Context) {
 func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 	v.logger.Debug("Starting OP batch verification")
 
+	ethFinalizedBlockNumber, err := v.getEthereumFinalizedBlockNumber(ctx)
+	if err != nil {
+		v.logger.Error("failed to fetch ethereum finalized block for verifier", "error", err)
+		return
+	}
+
 	var espressoBatch *derivation.EspressoBatch
-	var err error
 	if espressoBatch, err = v.VerifyNextBatch(ctx); err != nil {
 		if err.Error() == "not found" {
 			v.logger.Debug("batch not found on OP node yet, will try again on next interval")
@@ -184,6 +189,9 @@ func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 		return
 	}
 	if espressoBatch == nil {
+		if err := v.syncEspressoStateWithEthereumFinality(ethFinalizedBlockNumber); err != nil {
+			v.logger.Error("failed to update espresso state to ethereum finalized block", "error", err, "eth_finalized_block", ethFinalizedBlockNumber)
+		}
 		v.logger.Debug("no new batches to verify")
 		return
 	}
@@ -196,7 +204,7 @@ func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 		hotshotTimestamp, hashTimestamp = v.streamer.GetBatchFinalizationTimestamp(espressoBatch.Hash())
 	}
 
-	if err := v.advanceStreamerAndEspressoState(ctx, batchNumber); err != nil {
+	if err := v.advanceStreamerAndEspressoState(ctx, batchNumber, ethFinalizedBlockNumber); err != nil {
 		v.logger.Debug("failed to advance streamer and espresso state", "error", err, "batch_number", batchNumber)
 		return
 	}
@@ -210,6 +218,46 @@ func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 	}
 
 	v.logger.Info("Successfully verified and advanced OP batch", "batch_number", batchNumber)
+}
+
+func (v *OPEspressoBatchVerifier) getEthereumFinalizedBlockNumber(ctx context.Context) (uint64, error) {
+	ethClient, err := v.endpointProvider.EthClient(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get eth client for finalized block check: %w", err)
+	}
+	defer ethClient.Close()
+
+	ethFinalizedBlock, err := ethClient.BlockByNumber(ctx, big.NewInt(int64(rpc.FinalizedBlockNumber)))
+	if err != nil {
+		return 0, fmt.Errorf("failed to fetch ethereum finalized block: %w", err)
+	}
+	if ethFinalizedBlock == nil {
+		return 0, fmt.Errorf("ethereum finalized block not found")
+	}
+
+	return ethFinalizedBlock.NumberU64(), nil
+}
+
+func (v *OPEspressoBatchVerifier) syncEspressoStateWithEthereumFinality(ethFinalizedBlockNumber uint64) error {
+	espressoState := v.espressoStore.GetState()
+	blockNumberToStore := v.blockNumberToStore(espressoState.L2BlockNumber, ethFinalizedBlockNumber)
+	if blockNumberToStore <= espressoState.L2BlockNumber {
+		return nil
+	}
+
+	return v.espressoStore.Update(blockNumberToStore, v.streamer.GetFallbackHotshotPos())
+}
+
+func (v *OPEspressoBatchVerifier) blockNumberToStore(espressoFinalizedBlockNumber uint64, ethFinalizedBlockNumber uint64) uint64 {
+	blockNumberToStore := espressoFinalizedBlockNumber
+	if ethFinalizedBlockNumber > espressoFinalizedBlockNumber {
+		v.logger.Error("ethereum finalized block is ahead of espresso finalized block",
+			"eth_finalized_block", ethFinalizedBlockNumber,
+			"espresso_finalized_block", espressoFinalizedBlockNumber)
+		blockNumberToStore = ethFinalizedBlockNumber
+	}
+
+	return blockNumberToStore
 }
 
 // VerifyNextBatch peeks the next batch from the OP streamer, fetches the corresponding block from the OP node,
@@ -324,50 +372,24 @@ func (v *OPEspressoBatchVerifier) peekNextBatch(ctx context.Context) (*derivatio
 // advanceStreamerAndEspressoState advances the OP streamer to the next batch
 // and updates the espresso state in the store to reflect the new batch number.
 // This is called after a successful verification to move on to the next batch.
-func (v *OPEspressoBatchVerifier) advanceStreamerAndEspressoState(ctx context.Context, blockNumber uint64) error {
+func (v *OPEspressoBatchVerifier) advanceStreamerAndEspressoState(ctx context.Context, blockNumber uint64, ethFinalizedBlockNumber uint64) error {
 	hotshotFallbackPos := v.streamer.GetFallbackHotshotPos()
+	blockNumberToStore := v.blockNumberToStore(blockNumber, ethFinalizedBlockNumber)
 
-	// First get the hotshot height and blockNumber from espressoStore
 	espressoState := v.espressoStore.GetState()
-	// Only update the store if the blockNumber is greater than the current block number because the espresso tag should never go backwards
-	if espressoState.L2BlockNumber >= blockNumber {
+	if espressoState.L2BlockNumber >= blockNumberToStore {
 		v.logger.Warn("not updating espresso state in store because block number is not greater than current block number in store",
-			"current_block_number", espressoState.L2BlockNumber, "new_block_number", blockNumber)
+			"current_block_number", espressoState.L2BlockNumber, "new_block_number", blockNumberToStore)
 		v.streamer.Next(ctx)
 		return nil
 	}
 
-	ethClient, err := v.endpointProvider.EthClient(ctx)
-	if err != nil {
-		v.logger.Error("failed to get eth client for finalized block check", "error", err)
-		return err
-	}
-	defer ethClient.Close()
-
-	// Fetch the ethereum finalized block to ensure espresso hasn't fallen behind ethereum finality
-	ethFinalizedBlock, err := ethClient.BlockByNumber(ctx, big.NewInt(int64(rpc.FinalizedBlockNumber)))
-	if err != nil {
-		v.logger.Error("failed to fetch ethereum finalized block from full node", "error", err)
-		return err
-	}
-	ethFinalizedBlockNumber := ethFinalizedBlock.NumberU64()
-
-	blockNumberToStore := blockNumber
-	if ethFinalizedBlockNumber > blockNumber {
-		v.logger.Error("ethereum finalized block is ahead of espresso finalized block",
-			"eth_finalized_block", ethFinalizedBlockNumber,
-			"espresso_finalized_block", blockNumber)
-		blockNumberToStore = ethFinalizedBlockNumber
-	}
-
-	// Update the espresso state in the store to reflect the new batch number
-	err = v.espressoStore.Update(blockNumberToStore, hotshotFallbackPos)
+	err := v.espressoStore.Update(blockNumberToStore, hotshotFallbackPos)
 	if err != nil {
 		v.logger.Error("failed to update espresso state in store", "error", err)
 		return err
 	}
 
-	// Advance the streamer to the next batch
 	v.streamer.Next(ctx)
 
 	return nil

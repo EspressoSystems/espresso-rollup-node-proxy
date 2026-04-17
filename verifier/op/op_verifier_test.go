@@ -26,13 +26,13 @@ import (
 )
 
 type logCapturer struct {
-	hadError bool
+	errorMessages []string
 }
 
 func (c *logCapturer) Enabled(_ context.Context, _ slog.Level) bool { return true }
 func (c *logCapturer) Handle(_ context.Context, r slog.Record) error {
 	if r.Level >= slog.LevelError {
-		c.hadError = true
+		c.errorMessages = append(c.errorMessages, r.Message)
 	}
 	return nil
 }
@@ -227,36 +227,13 @@ func TestAdvanceStreamerAndEspressoState(t *testing.T) {
 
 	h.streamer.On("GetFallbackHotshotPos").Return(uint64(2))
 	h.streamer.On("Next", mock.Anything).Return(nil)
-	h.endpointProv.On("EthClient", mock.Anything).Return(h.ethClient, nil)
-	h.ethClient.On("BlockByNumber", mock.Anything, big.NewInt(int64(rpc.FinalizedBlockNumber))).Return(newBlockWithNumber(99), nil)
 
-	err := h.verifier.advanceStreamerAndEspressoState(ctx, 100)
+	err := h.verifier.advanceStreamerAndEspressoState(ctx, 100, 99)
 	require.NoError(t, err)
 
 	state := h.store.GetState()
 	require.Equal(t, uint64(2), state.FallbackHotshotHeight)
 	require.Equal(t, uint64(100), state.L2BlockNumber)
-	h.streamer.AssertCalled(t, "Next", mock.Anything)
-	h.streamer.AssertExpectations(t)
-}
-
-func TestAdvanceStreamerAndEspressoStateStoresEthereumFinalizedBlockWhenAhead(t *testing.T) {
-	capturer := &logCapturer{}
-	h := newTestHarness(t, log.NewLogger(capturer))
-	ctx := context.Background()
-
-	h.streamer.On("GetFallbackHotshotPos").Return(uint64(2))
-	h.streamer.On("Next", mock.Anything).Return(nil)
-	h.endpointProv.On("EthClient", mock.Anything).Return(h.ethClient, nil)
-	h.ethClient.On("BlockByNumber", mock.Anything, big.NewInt(int64(rpc.FinalizedBlockNumber))).Return(newBlockWithNumber(105), nil)
-
-	err := h.verifier.advanceStreamerAndEspressoState(ctx, 100)
-	require.NoError(t, err)
-	require.True(t, capturer.hadError, "expected an error log when ethereum finalized block is ahead")
-
-	state := h.store.GetState()
-	require.Equal(t, uint64(2), state.FallbackHotshotHeight)
-	require.Equal(t, uint64(105), state.L2BlockNumber)
 	h.streamer.AssertCalled(t, "Next", mock.Anything)
 	h.streamer.AssertExpectations(t)
 }
@@ -324,8 +301,9 @@ func TestVerify(t *testing.T) {
 		},
 	}
 	h.endpointProv.On("RollupClient", mock.Anything).Return(h.rollupClient, nil)
+	h.ethClient.On("BlockByNumber", mock.Anything, big.NewInt(int64(rpc.FinalizedBlockNumber))).Return(newBlockWithNumber(1), nil)
 	h.endpointProv.On("EthClient", mock.Anything).Return(h.ethClient, nil)
-	h.ethClient.On("BlockByNumber", mock.Anything, mock.Anything).Return(block, nil)
+	h.ethClient.On("BlockByNumber", mock.Anything, new(big.Int).SetUint64(100)).Return(block, nil)
 	h.rollupClient.On("SyncStatus", mock.Anything).Return(syncStatus, nil)
 	h.streamer.On("Refresh", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	h.streamer.On("HasNext", mock.Anything).Return(true)
@@ -335,9 +313,68 @@ func TestVerify(t *testing.T) {
 
 	h.verifier.verifyAndAdvance(ctx)
 
-	require.False(t, capturer.hadError, "verifyAndAdvance() should not produce error logs on success")
+	require.Empty(t, capturer.errorMessages, "verifyAndAdvance() should not produce error logs on success")
 
 	state := h.store.GetState()
 	require.Equal(t, uint64(2), state.FallbackHotshotHeight)
 	require.Equal(t, uint64(100), state.L2BlockNumber)
+}
+
+func TestStoresEthereumFinalizedBlockWhenAhead(t *testing.T) {
+	assertEthereumFinalizedBlockStored := func(t *testing.T, h *testHarness, capturer *logCapturer, expectedFallbackPos uint64, expectNextCalled bool) {
+		t.Helper()
+
+		require.Contains(t, capturer.errorMessages, "ethereum finalized block is ahead of espresso finalized block")
+
+		state := h.store.GetState()
+		require.Equal(t, expectedFallbackPos, state.FallbackHotshotHeight)
+		require.Equal(t, uint64(105), state.L2BlockNumber)
+
+		if expectNextCalled {
+			h.streamer.AssertCalled(t, "Next", mock.Anything)
+		} else {
+			h.streamer.AssertNotCalled(t, "Next", mock.Anything)
+		}
+	}
+
+	t.Run("verify and advance with no batches", func(t *testing.T) {
+		capturer := &logCapturer{}
+		h := newTestHarness(t, log.NewLogger(capturer))
+		ctx := context.Background()
+		syncStatus := &eth.SyncStatus{
+			FinalizedL1: eth.L1BlockRef{Number: 10, Hash: common.Hash{1}},
+			SafeL2: eth.L2BlockRef{
+				Number:   5,
+				L1Origin: eth.BlockID{Number: 10, Hash: common.Hash{1}},
+			},
+		}
+
+		h.streamer.On("GetFallbackHotshotPos").Return(uint64(1))
+		h.endpointProv.On("EthClient", mock.Anything).Return(h.ethClient, nil)
+		h.endpointProv.On("RollupClient", mock.Anything).Return(h.rollupClient, nil)
+		h.ethClient.On("BlockByNumber", mock.Anything, big.NewInt(int64(rpc.FinalizedBlockNumber))).Return(newBlockWithNumber(105), nil)
+		h.rollupClient.On("SyncStatus", mock.Anything).Return(syncStatus, nil)
+		h.streamer.On("Refresh", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		h.streamer.On("HasNext", mock.Anything).Return(false)
+		h.streamer.On("Update", mock.Anything).Return(nil)
+		h.streamer.On("Peek", mock.Anything).Return(nil)
+
+		h.verifier.verifyAndAdvance(ctx)
+
+		assertEthereumFinalizedBlockStored(t, h, capturer, 1, false)
+	})
+
+	t.Run("advance streamer and store state", func(t *testing.T) {
+		capturer := &logCapturer{}
+		h := newTestHarness(t, log.NewLogger(capturer))
+		ctx := context.Background()
+
+		h.streamer.On("GetFallbackHotshotPos").Return(uint64(2))
+		h.streamer.On("Next", mock.Anything).Return(nil)
+
+		err := h.verifier.advanceStreamerAndEspressoState(ctx, 100, 105)
+		require.NoError(t, err)
+
+		assertEthereumFinalizedBlockStored(t, h, capturer, 2, true)
+	})
 }
