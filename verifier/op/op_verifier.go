@@ -20,6 +20,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ethereum/go-ethereum/rpc"
 
 	espressoClient "github.com/EspressoSystems/espresso-network/sdks/go/client"
 )
@@ -335,8 +336,32 @@ func (v *OPEspressoBatchVerifier) advanceStreamerAndEspressoState(ctx context.Co
 		v.streamer.Next(ctx)
 		return nil
 	}
+
+	ethClient, err := v.endpointProvider.EthClient(ctx)
+	if err != nil {
+		v.logger.Error("failed to get eth client for finalized block check", "error", err)
+		return err
+	}
+	defer ethClient.Close()
+
+	// Fetch the ethereum finalized block to ensure espresso hasn't fallen behind ethereum finality
+	ethFinalizedBlock, err := ethClient.BlockByNumber(ctx, big.NewInt(int64(rpc.FinalizedBlockNumber)))
+	if err != nil {
+		v.logger.Error("failed to fetch ethereum finalized block from full node", "error", err)
+		return err
+	}
+	ethFinalizedBlockNumber := ethFinalizedBlock.NumberU64()
+
+	blockNumberToStore := blockNumber
+	if ethFinalizedBlockNumber > blockNumber {
+		v.logger.Error("ethereum finalized block is ahead of espresso finalized block",
+			"eth_finalized_block", ethFinalizedBlockNumber,
+			"espresso_finalized_block", blockNumber)
+		blockNumberToStore = ethFinalizedBlockNumber
+	}
+
 	// Update the espresso state in the store to reflect the new batch number
-	err := v.espressoStore.Update(blockNumber, hotshotFallbackPos)
+	err = v.espressoStore.Update(blockNumberToStore, hotshotFallbackPos)
 	if err != nil {
 		v.logger.Error("failed to update espresso state in store", "error", err)
 		return err
