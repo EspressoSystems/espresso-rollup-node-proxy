@@ -371,6 +371,7 @@ func (fb *FakeBeacon) fork(blockNumber uint64) error {
 
 	target = fb.history[blockNumber]
 	fb.history = fb.history[:blockNumber+1]
+
 	fb.mu.Unlock()
 
 	// call geth and tell it to fork back to the block number

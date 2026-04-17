@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/big"
 	espressoStore "proxy/store"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,6 +32,7 @@ type OPEspressoBatchVerifierConfig struct {
 	QueryServiceURL           string        `json:"query_service_url"`
 	BatcherAddress            string        `json:"batcher_address"`
 	BatchAuthenticatorAddress string        `json:"batch_authenticator_address"`
+	TrackBatchLatency         bool          `json:"track_batch_latency"`
 }
 
 // OPEspressoBatchVerifier is responsible for verifying that the batches produced by the OP full node match what the OP streamer has in its buffer.
@@ -40,16 +42,18 @@ type OPEspressoBatchVerifierConfig struct {
 // If they dont match, it logs an error and tries again on the next interval. Eventually the tag will be advanced after
 // a batch is posted to Ethereum and it finalizes because Ethereum will only finalize data that matches the data finalized by Espresso.
 type OPEspressoBatchVerifier struct {
-	streamer         opStreamer.EspressoStreamer[derivation.EspressoBatch]
-	espressoStore    *espressoStore.EspressoStore
-	config           *OPEspressoBatchVerifierConfig
-	endpointProvider dial.L2EndpointProvider
-	rollupConfig     *rollup.Config
-	logger           log.Logger
-	l1Client         *ethclient.Client
-	cancel           context.CancelFunc
-	runWg            sync.WaitGroup
-	running          bool
+	streamer          opStreamer.EspressoStreamer[derivation.EspressoBatch]
+	espressoStore     *espressoStore.EspressoStore
+	config            *OPEspressoBatchVerifierConfig
+	endpointProvider  dial.L2EndpointProvider
+	rollupConfig      *rollup.Config
+	logger            log.Logger
+	l1Client          *ethclient.Client
+	cancel            context.CancelFunc
+	runWg             sync.WaitGroup
+	running           bool
+	totalBatchLatency time.Duration
+	batchCount        uint64
 }
 
 func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *espressoStore.EspressoStore, l1Client *ethclient.Client, espressoLightClient opStreamer.LightClientCallerInterface, opVerifierConfig *OPEspressoBatchVerifierConfig) *OPEspressoBatchVerifier {
@@ -106,6 +110,7 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 		espressoState.FallbackHotshotHeight,
 		espressoState.L2BlockNumber,
 		batchAuthenticatorAddr,
+		opVerifierConfig.TrackBatchLatency,
 	)
 
 	if err != nil {
@@ -169,6 +174,9 @@ func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 		if err.Error() == "not found" {
 			v.logger.Debug("batch not found on OP node yet, will try again on next interval")
 			return
+		} else if strings.Contains(err.Error(), "retryable") {
+			v.logger.Debug("espresso has not finalized the batch yet", "error", err)
+			return
 		} else {
 			v.logger.Error("batch verification failed", "error", err)
 		}
@@ -180,9 +188,24 @@ func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 	}
 
 	batchNumber := espressoBatch.Number()
+
+	var hotshotTimestamp uint64
+	var hashTimestamp bool
+	if v.config.TrackBatchLatency {
+		hotshotTimestamp, hashTimestamp = v.streamer.GetBatchFinalizationTimestamp(espressoBatch.Hash())
+	}
+
 	if err := v.advanceStreamerAndEspressoState(ctx, batchNumber); err != nil {
 		v.logger.Debug("failed to advance streamer and espresso state", "error", err, "batch_number", batchNumber)
 		return
+	}
+
+	if v.config.TrackBatchLatency && hashTimestamp {
+		latency := time.Since(time.Unix(int64(hotshotTimestamp), 0))
+		v.totalBatchLatency += latency
+		v.batchCount++
+		averageLatency := v.totalBatchLatency / time.Duration(v.batchCount)
+		v.logger.Info("Batch latency", "batch_number", batchNumber, "latency", latency, "average_latency", averageLatency, "total batches", v.batchCount, "hotshot_timestamp", hotshotTimestamp, "batch_hash", espressoBatch.Hash())
 	}
 
 	v.logger.Info("Successfully verified and advanced OP batch", "batch_number", batchNumber)
@@ -287,7 +310,6 @@ func (v *OPEspressoBatchVerifier) peekNextBatch(ctx context.Context) (*derivatio
 	if !v.streamer.HasNext(ctx) {
 		err := v.streamer.Update(ctx)
 		if err != nil {
-			v.logger.Error("failed to update OP streamer", "error", err)
 			return nil, err
 		}
 	}
