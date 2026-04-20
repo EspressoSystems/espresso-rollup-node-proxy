@@ -23,6 +23,9 @@ import (
 	espressoClient "github.com/EspressoSystems/espresso-network/sdks/go/client"
 	opStreamer "github.com/EspressoSystems/espresso-streamers/op"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/require"
@@ -91,6 +94,16 @@ func startVerifier(ctx context.Context, t *testing.T, logger log.Logger, store *
 
 func runDockerCompose(workingDir string, services ...string) func() {
 	return runDockerComposeFile(workingDir, "", services...)
+}
+
+func dockerComposeExec(t *testing.T, workingDir, composeFile, action, service string) {
+	t.Helper()
+	args := []string{"compose", "-f", composeFile, action, service}
+	cmd := exec.Command("docker", args...)
+	cmd.Dir = workingDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("docker compose %s %s failed: %v\n%s", action, service, err, out)
+	}
 }
 
 func runDockerComposeFile(workingDir string, composeFile string, services ...string) func() {
@@ -373,4 +386,65 @@ func matchLogAttrs(capturer *logCapturer, msg string, expected map[string]uint64
 		}
 	}
 	return false
+}
+
+func startLoadGen(ctx context.Context, t *testing.T, rpcURL string) func() {
+	t.Helper()
+	const loadGenKey = "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+	privateKey, err := crypto.HexToECDSA(loadGenKey)
+	require.NoError(t, err)
+
+	client, err := ethclient.DialContext(ctx, rpcURL)
+	require.NoError(t, err)
+
+	sender := crypto.PubkeyToAddress(privateKey.PublicKey)
+	to := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	chainID := big.NewInt(L2_CHAIN_ID)
+
+	stopCh := make(chan struct{})
+	var once sync.Once
+	go func() {
+		nonce, err := client.PendingNonceAt(ctx, sender)
+		if err != nil {
+			t.Logf("load gen: failed to get nonce: %v", err)
+			return
+		}
+		t.Logf("load gen: starting from nonce %d", nonce)
+		for {
+			select {
+			case <-stopCh:
+				t.Logf("load gen: stopped")
+				return
+			case <-ctx.Done():
+				return
+			default:
+			}
+			tx := types.NewTx(&types.DynamicFeeTx{
+				ChainID:   chainID,
+				Nonce:     nonce,
+				To:        &to,
+				Value:     big.NewInt(1),
+				Gas:       21000,
+				GasTipCap: big.NewInt(1),
+				GasFeeCap: big.NewInt(1),
+			})
+			signed, err := types.SignTx(tx, types.NewLondonSigner(chainID), privateKey)
+			if err != nil {
+				time.Sleep(50 * time.Millisecond)
+				continue
+			}
+			if err := client.SendTransaction(ctx, signed); err != nil {
+				t.Logf("load gen: tx nonce=%d failed: %v — re-querying nonce", nonce, err)
+				if n, err := client.PendingNonceAt(ctx, sender); err == nil {
+					nonce = n
+				}
+			} else {
+				// t.Logf("load gen: tx nonce=%d hash=%s sent", nonce, signed.Hash())
+				nonce++
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+
+	return func() { once.Do(func() { close(stopCh) }) }
 }
