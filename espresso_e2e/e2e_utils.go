@@ -3,6 +3,7 @@ package espresso_e2e
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -22,6 +23,7 @@ import (
 
 	espressoClient "github.com/EspressoSystems/espresso-network/sdks/go/client"
 	opStreamer "github.com/EspressoSystems/espresso-streamers/op"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
@@ -53,18 +55,20 @@ func (m *mockLightClient) FinalizedState(_ *bind.CallOpts) (opStreamer.Finalized
 }
 
 const (
-	rollupWorkingDir = "./op"
-	l1GethURL        = "http://127.0.0.1:8545"
-	espressoURL      = "http://127.0.0.1:24000"
-	opGethSeqURL     = "http://127.0.0.1:8546"
-	opGethFullNode   = "http://127.0.0.1:8555"
-	opNodeSeqURL     = "http://127.0.0.1:9545"
-	opNodeFullNode   = "http://127.0.0.1:9548"
-	mockBeaconURL    = "http://127.0.0.1:5052"
-	p2pAttackUrl     = "http://127.0.0.1:8560"
-	L2_CHAIN_ID      = 22266222
-	espressoTag      = "espresso"
-	finalizedBlocks  = 100
+	rollupWorkingDir               = "./op"
+	l1GethURL                      = "http://127.0.0.1:8545"
+	espressoURL                    = "http://127.0.0.1:24000"
+	opGethSeqURL                   = "http://127.0.0.1:8546"
+	opGethFullNode                 = "http://127.0.0.1:8555"
+	opNodeSeqURL                   = "http://127.0.0.1:9545"
+	opNodeFullNode                 = "http://127.0.0.1:9548"
+	mockBeaconURL                  = "http://127.0.0.1:5052"
+	p2pAttackUrl                   = "http://127.0.0.1:8560"
+	L2_CHAIN_ID                    = 22266222
+	espressoTag                    = "espresso"
+	finalizedBlocks                = 100
+	batchAuthenticatorAddress      = "0x4826533b4897376654bb4d4ad88b7fafd0c98528"
+	batchAuthenticatorOwnerAddress = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
 )
 
 func startVerifier(ctx context.Context, t *testing.T, logger log.Logger, store *espressostore.EspressoStore) *verifier.OPEspressoBatchVerifier {
@@ -82,7 +86,7 @@ func startVerifier(ctx context.Context, t *testing.T, logger log.Logger, store *
 			VerificationInterval:      250 * time.Millisecond,
 			QueryServiceURL:           espressoURL,
 			BatcherAddress:            "0x976EA74026E726554dB657fA54763abd0C3a0aa9",
-			BatchAuthenticatorAddress: "0x4826533b4897376654bb4d4ad88b7fafd0c98528",
+			BatchAuthenticatorAddress: batchAuthenticatorAddress,
 		},
 	)
 	v.Start(ctx)
@@ -101,7 +105,7 @@ func runDockerComposeFile(workingDir string, composeFile string, services ...str
 
 	shutdown := func() {
 		args := append([]string{"compose"}, fileArgs...)
-		args = append(args, "down", "--volumes", "--remove-orphans")
+		args = append(args, "--profile", "fallback", "down", "--volumes", "--remove-orphans")
 		p := exec.Command("docker", args...)
 		p.Dir = workingDir
 		if out, err := p.CombinedOutput(); err != nil {
@@ -124,6 +128,78 @@ func runDockerComposeFile(workingDir string, composeFile string, services ...str
 	}
 
 	return shutdown
+}
+
+func dockerComposeStop(t *testing.T, workingDir string, service string) {
+	t.Helper()
+	cmd := exec.Command("docker", "compose", "stop", service)
+	cmd.Dir = workingDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker compose stop %s failed: %v\n%s", service, err, string(out))
+	}
+}
+
+func dockerComposeStart(t *testing.T, workingDir string, profiles []string, services ...string) {
+	t.Helper()
+	args := []string{"compose"}
+	for _, p := range profiles {
+		args = append(args, "--profile", p)
+	}
+	args = append(args, "up", "-d")
+	args = append(args, services...)
+	cmd := exec.Command("docker", args...)
+	cmd.Dir = workingDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker compose start %v failed: %v\n%s", services, err, string(out))
+	}
+}
+
+func switchBatcher(t *testing.T) {
+	t.Helper()
+	batchAuthenticatorABI, err := abi.JSON(strings.NewReader(`[{"inputs":[],"name":"switchBatcher","outputs":[],"stateMutability":"nonpayable","type":"function"}]`))
+	require.NoError(t, err)
+	callData, err := batchAuthenticatorABI.Pack("switchBatcher")
+	require.NoError(t, err)
+
+	txHashRaw := jsonRPCCall(t, l1GethURL, "eth_sendTransaction", jsonMarshal(t, []map[string]string{{
+		"from": batchAuthenticatorOwnerAddress,
+		"to":   batchAuthenticatorAddress,
+		"data": "0x" + hex.EncodeToString(callData),
+	}}))
+
+	var txHash string
+	require.NoError(t, json.Unmarshal(txHashRaw, &txHash))
+
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		require.True(t, time.Now().Before(deadline), "switchBatcher transaction was not mined within timeout")
+		receiptResp := jsonRPCCallRaw(t, l1GethURL, "eth_getTransactionReceipt", jsonMarshal(t, []any{txHash}))
+		if receiptResp.Result == nil || string(receiptResp.Result) == "null" {
+			time.Sleep(250 * time.Millisecond)
+			continue
+		}
+
+		var receipt struct {
+			Status string `json:"status"`
+		}
+		require.NoError(t, json.Unmarshal(receiptResp.Result, &receipt))
+		require.Equal(t, "0x1", receipt.Status, "switchBatcher transaction failed")
+		return
+	}
+}
+
+func getHotshotHeight(t *testing.T) uint64 {
+	t.Helper()
+	resp, err := http.Get(espressoURL + "/v0/status/block-height")
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	var height uint64
+	require.NoError(t, json.Unmarshal(body, &height))
+	return height
 }
 
 func waitForHTTPReady(t *testing.T, url string, timeout time.Duration) {
