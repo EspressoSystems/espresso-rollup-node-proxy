@@ -3,175 +3,91 @@ services:
     image: busybox
     command: >
       sh -c '
-        mkdir -p /l1-config /l2-config /deployer
-        mkdir -p /data/lighthouse-validator /data/lighthouse-beacon
-        chown -R ${U_ID:-1000}:${GID:-1000} /l1-config /l2-config /deployer /data
-      '
+        mkdir -p /deployment/l1-config /deployment/deployer
+        chown -R ${U_ID:-1000}:${GID:-1000} /deployment
+        '
     volumes:
-      - l1-config:/l1-config
-      - l2-config:/l2-config
-      - deployer:/deployer
-      - l1-data:/data
+      - ./deployment:/deployment
 
-  l1-genesis:
-    platform: linux/amd64
-    user: ${U_ID:-1000}:${GID:-1000}
-    restart: on-failure
-    depends_on:
-      l1-data-init:
-        condition: service_completed_successfully
-    image: ${L1_GETH_IMAGE}
-    environment:
-      - MODE=genesis
-    volumes:
-      - l1-config:/config
-      - l1-data:/data
-
-  l1-geth:
-    platform: linux/amd64
-    depends_on:
-      l1-genesis:
-        condition: service_completed_successfully
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${L1_HTTP_PORT}"]
-      interval: 3s
-      timeout: 2s
-      retries: 40
-    image: ${L1_GETH_IMAGE}
-    environment:
-      L1_HTTP_PORT: ${L1_HTTP_PORT}
-      L1_ENGINE_PORT: ${L1_ENGINE_PORT}
-      L1_CHAIN_ID: ${L1_CHAIN_ID}
-    volumes:
-      - l1-config:/config:ro
-      - l1-data:/data
-    ports:
-      - "${L1_HTTP_PORT}:${L1_HTTP_PORT}"
-      - "${L1_ENGINE_PORT}:${L1_ENGINE_PORT}"
-  l1-beacon:
-    image: ${LIGHTHOUSE_IMAGE}
-    depends_on:
-      l1-genesis:
-        condition: service_completed_successfully
-      l1-geth:
-        condition: service_started
-    volumes:
-      - l1-data:/data
-      - l1-config:/config:ro
-    command:
-      - lighthouse
-      - --datadir
-      - /data/lighthouse-beacon
-      - beacon_node
-      - --testnet-dir
-      - /config
-      - --execution-endpoint
-      - http://l1-geth:${L1_ENGINE_PORT}
-      - --execution-jwt
-      - /config/jwt.txt
-      - --http
-      - --http-address
-      - 0.0.0.0
-      - --http-port
-      - ${L1_BEACON_PORT}
-      - --http-allow-origin
-      - "*"
-      - --allow-insecure-genesis-sync
-      - --target-peers
-      - "0"
-      - --disable-deposit-contract-sync
-      - --disable-upnp
-    ports:
-      - "${L1_BEACON_PORT}:${L1_BEACON_PORT}"
-
-  l1-validator:
-    image: ${LIGHTHOUSE_IMAGE}
-    depends_on:
-      l1-genesis:
-        condition: service_completed_successfully
-      l1-geth:
-        condition: service_started
-      l1-beacon:
-        condition: service_started
-    volumes:
-      - l1-data:/data
-      - l1-config:/config:ro
-    command:
-      - lighthouse
-      - validator_client
-      - --testnet-dir
-      - /config
-      - --beacon-nodes
-      - http://l1-beacon:${L1_BEACON_PORT}
-      - --init-slashing-protection
-      - --datadir
-      - /data/lighthouse-validator
-      - --suggested-fee-recipient
-      - ${OPERATOR_ADDRESS}
-
-  l2-genesis:
-    platform: linux/amd64
-    user: "${U_ID:-1000}:${GID:-1000}"
-    restart: on-failure
-    depends_on:
-      l1-data-init:
-        condition: service_completed_successfully
-      l1-geth:
-        condition: service_healthy
-    image: ${OP_GETH_IMAGE}
-    environment:
-      - MODE=genesis
-      - L1_RPC=http://l1-geth:${L1_HTTP_PORT}
-      - HOME=/tmp
-    volumes:
-      - l2-config:/config
-      - deployer:/deployer
+  l1-anvil:
+      depends_on:
+        l1-data-init:
+          condition: service_completed_successfully
+      healthcheck:
+        test:
+          [
+            "CMD-SHELL",
+            "cast bn --rpc-url http://localhost:${L1_HTTP_PORT} > /dev/null 2>&1 || exit 1",
+          ]
+        interval: 3s
+        timeout: 2s
+        retries: 40
+      image: ghcr.io/foundry-rs/foundry:v1.5.1
+      entrypoint: ["sh", "-c"]
+      command:
+        - |
+          anvil \
+            --silent \
+            --host 0.0.0.0 \
+            --port ${L1_HTTP_PORT} \
+            --chain-id ${L1_CHAIN_ID} \
+            --block-time 3 \
+            --slots-in-an-epoch 1 \
+            --init /config/genesis.json \
+            --timestamp $$(date +%s) \
+            --disable-code-size-limit \
+            --base-fee 1000000000 \
+            --gas-limit 45000000
+      volumes:
+        - ./deployment/l1-config:/config:ro
+      ports:
+        - "${L1_HTTP_PORT}:${L1_HTTP_PORT}"
 
   l2-rollup:
-    platform: linux/amd64
     restart: on-failure
+    pull_policy: never
     image: ${OP_GETH_IMAGE}
     environment:
       - MODE=rollup
-      - L1_RPC=http://l1-geth:${L1_HTTP_PORT}
+      - L1_RPC=http://l1-anvil:${L1_HTTP_PORT:?err}
       - OP_RPC=http://op-geth-sequencer:${OP_HTTP_PORT}
     depends_on:
-      l1-geth:
+      l1-anvil:
         condition: service_healthy
-      l1-genesis:
-        condition: service_completed_successfully
       op-geth-sequencer:
         condition: service_healthy
     volumes:
       - l2-config:/config
-      - deployer:/deployer
+      - ./deployment/deployer:/deployer:ro
+
+  l2-genesis:
+    restart: on-failure
+    depends_on:
+      l1-data-init:
+        condition: service_completed_successfully
+      l1-anvil:
+              condition: service_healthy
+    image: ${OP_GETH_IMAGE}
+    pull_policy: never # built by op-geth-sequencer
+    environment:
+      - MODE=genesis
+      - L1_RPC=http://l1-anvil:${L1_HTTP_PORT}
+      - HOME=/tmp
+    volumes:
+      - l2-config:/config
+      - ./deployment/deployer:/deployer:ro
 
   op-geth-sequencer:
-    platform: linux/amd64
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${OP_HTTP_PORT}"]
-      interval: 3s
-      timeout: 2s
-      retries: 40
-    image: ${OP_GETH_IMAGE}
-    depends_on:
-      l2-genesis:
-        condition: service_completed_successfully
-      l1-geth:
-        condition: service_healthy
+    extends:
+      file: docker-compose-op-geth.yml
+      service: op-geth
     volumes:
-      - l2-config:/config:ro
       - op-data-seq:/data
-    environment:
-      L1_RPC: http://l1-geth:${L1_HTTP_PORT}
-      OP_HTTP_PORT: ${OP_HTTP_PORT}
-      OP_ENGINE_PORT: ${OP_ENGINE_PORT}
     ports:
       - "${OP_HTTP_PORT}:${OP_HTTP_PORT}"
       - "${OP_ENGINE_PORT}:${OP_ENGINE_PORT}"
 
   op-node-sequencer:
-    platform: linux/amd64
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:${ROLLUP_PORT}"]
       interval: 3s
@@ -183,11 +99,11 @@ services:
         condition: service_completed_successfully
       op-geth-sequencer:
         condition: service_healthy
-      l1-validator:
-        condition: service_started
+      l1-anvil:
+        condition: service_healthy
     environment:
-      OP_NODE_L1_ETH_RPC: http://l1-geth:${L1_HTTP_PORT}
-      OP_NODE_L1_BEACON: http://l1-beacon:${L1_BEACON_PORT}
+      OP_NODE_L1_ETH_RPC: http://l1-anvil:${L1_HTTP_PORT}
+      OP_NODE_L1_BEACON: http://l1-anvil:${L1_HTTP_PORT}
       OP_NODE_L2_ENGINE_RPC: http://op-geth-sequencer:${OP_ENGINE_PORT}
       OP_NODE_RPC_PORT: ${ROLLUP_PORT}
       OP_NODE_SAFEDB_PATH: /data/safedb
@@ -197,6 +113,7 @@ services:
       - "9003:9003/udp"
     volumes:
       - l2-config:/config:ro
+      - /etc/localtime:/etc/localtime:ro
       - op-node-seq:/data
     command:
       - op-node
@@ -207,15 +124,17 @@ services:
       - --rpc.addr=0.0.0.0
       - --l1.http-poll-interval=1s
       - --l1.epoch-poll-interval=1s
+      - --l1.beacon.ignore
       - --p2p.listen.ip=0.0.0.0
       - --p2p.listen.tcp=9003
       - --p2p.listen.udp=9003
       - --p2p.sequencer.key=${OPERATOR_PRIVATE_KEY}
 
-  # This image helps connect the full node and p2p attacker
   op-node-peer-connector:
     image: alpine:3.19
     depends_on:
+      op-node-sequencer:
+        condition: service_healthy
       op-node-fullnode:
         condition: service_started
     restart: "no"
@@ -225,36 +144,17 @@ services:
       - |
         apk add --no-cache curl jq > /dev/null
         sleep 5
-        PEER_ID=$$(curl -sf -X POST http://op-node-sequencer:${ROLLUP_PORT} \
-          -H 'Content-Type: application/json' \
-          -d '{"jsonrpc":"2.0","method":"opp2p_self","params":[],"id":1}' \
-          | jq -r '.result.peerID')
+        PEER_ID=$$(curl -sf -X POST http://op-node-sequencer:${ROLLUP_PORT}           -H 'Content-Type: application/json'           -d '{"jsonrpc":"2.0","method":"opp2p_self","params":[],"id":1}'           | jq -r '.result.peerID')
         MULTIADDR="/dns4/op-node-sequencer/tcp/9003/p2p/$$PEER_ID"
         echo "Connecting fullnode to sequencer p2p: $$MULTIADDR"
-        curl -sf -X POST http://op-node-fullnode:9548 \
-          -H 'Content-Type: application/json' \
-          -d "{\"jsonrpc\":\"2.0\",\"method\":\"opp2p_connectPeer\",\"params\":[\"$$MULTIADDR\"],\"id\":1}"
+        curl -sf -X POST http://op-node-fullnode:9548           -H 'Content-Type: application/json'           -d "{\"jsonrpc\":\"2.0\",\"method\":\"opp2p_connectPeer\",\"params\":[\"$$MULTIADDR\"],\"id\":1}"
 
   op-geth-fullnode:
-    platform: linux/amd64
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${OP_HTTP_PORT}"]
-      interval: 3s
-      timeout: 2s
-      retries: 40
-    image: ${OP_GETH_IMAGE}
-    depends_on:
-      l2-genesis:
-        condition: service_completed_successfully
-      l1-geth:
-        condition: service_healthy
+    extends:
+      file: docker-compose-op-geth.yml
+      service: op-geth
     volumes:
-      - l2-config:/config:ro
       - op-data-fullnode:/data
-    environment:
-      L1_RPC: http://l1-geth:${L1_HTTP_PORT}
-      OP_HTTP_PORT: ${OP_HTTP_PORT}
-      OP_ENGINE_PORT: ${OP_ENGINE_PORT}
     ports:
       - "${OP_FULL_HTTP_PORT}:${OP_HTTP_PORT}"
       - "${OP_FULL_ENGINE_PORT}:${OP_ENGINE_PORT}"
@@ -266,17 +166,18 @@ services:
         condition: service_completed_successfully
       op-geth-fullnode:
         condition: service_started
-      l1-beacon:
+      l1-anvil:
         condition: service_started
     environment:
-      OP_NODE_L1_ETH_RPC: http://l1-geth:${L1_HTTP_PORT}
-      OP_NODE_L1_BEACON: http://l1-beacon:${L1_BEACON_PORT}
+      OP_NODE_L1_ETH_RPC: http://l1-anvil:${L1_HTTP_PORT}
+      OP_NODE_L1_BEACON: http://l1-anvil:${L1_HTTP_PORT}
       OP_NODE_L2_ENGINE_RPC: http://op-geth-fullnode:${OP_ENGINE_PORT}
       OP_NODE_RPC_PORT: "9548"
     ports:
       - "9548:9548"
     volumes:
       - l2-config:/config:ro
+      - /etc/localtime:/etc/localtime:ro
     command:
       - op-node
       - --l2.jwt-secret=/config/jwt.txt
@@ -285,6 +186,7 @@ services:
       - --rpc.enable-admin=true
       - --l1.http-poll-interval=1s
       - --l1.epoch-poll-interval=1s
+      - --l1.beacon.ignore
       - --p2p.listen.ip=0.0.0.0
       - --p2p.listen.tcp=9004
       - --p2p.listen.udp=9004
@@ -292,10 +194,9 @@ services:
       - --p2p.sync.req-resp=true
 
   op-batcher:
-    platform: linux/amd64
     image: ${OP_BATCHER_IMAGE}
     depends_on:
-      l1-geth:
+      l1-anvil:
         condition: service_healthy
       op-geth-sequencer:
         condition: service_started
@@ -308,15 +209,15 @@ services:
       attestation-service-zk:
         condition: service_healthy
     environment:
-      L1_RPC: http://l1-geth:${L1_HTTP_PORT}
-      OP_BATCHER_L1_ETH_RPC: http://l1-geth:${L1_HTTP_PORT}
+      L1_RPC: http://l1-anvil:${L1_HTTP_PORT}
+      OP_BATCHER_L1_ETH_RPC: http://l1-anvil:${L1_HTTP_PORT}
       OP_BATCHER_L2_ETH_RPC: http://op-geth-sequencer:${OP_HTTP_PORT}
       OP_BATCHER_ROLLUP_RPC: http://op-node-sequencer:${ROLLUP_PORT}
       OP_BATCHER_ESPRESSO_URLS: http://espresso-dev-node:${ESPRESSO_SEQUENCER_API_PORT},http://espresso-dev-node:${ESPRESSO_SEQUENCER_API_PORT}
       OP_BATCHER_MAX_CHANNEL_DURATION: "32"
       OP_BATCHER_MAX_PENDING_TX: "32"
     volumes:
-      - deployer:/deployer:ro
+      - ./deployment/deployer:/deployer:ro
     command:
       - op-batcher
       - --espresso.enabled=true
@@ -325,6 +226,39 @@ services:
       - --espresso.light-client-addr=${ESPRESSO_SEQUENCER_LIGHT_CLIENT_PROXY_ADDRESS}
       - --espresso.testing-batcher-private-key=${OP_TESTING_BATCHER_PRIVATE_KEY:-$OPERATOR_PRIVATE_KEY}
       - --private-key=${OP_BATCHER_PRIVATE_KEY:-$TEE_BATCHER_PRIVATE_KEY}
+      - --espresso.batch-authenticator-addr=${BATCH_AUTH_ADDR}
+      - --max-channel-duration=2
+      - --target-num-frames=1
+      - --max-pending-tx=32
+      - --data-availability-type=calldata
+      - --rpc.enable-admin
+
+  op-batcher-fallback:
+    profiles: ["fallback"]
+    image: ${OP_BATCHER_IMAGE}
+    depends_on:
+      l1-anvil:
+        condition: service_healthy
+      op-geth-sequencer:
+        condition: service_started
+      op-node-sequencer:
+        condition: service_started
+      l2-genesis:
+        condition: service_completed_successfully
+    environment:
+      L1_RPC: http://l1-anvil:${L1_HTTP_PORT}
+      OP_BATCHER_L1_ETH_RPC: http://l1-anvil:${L1_HTTP_PORT}
+      OP_BATCHER_L2_ETH_RPC: http://op-geth-sequencer:${OP_HTTP_PORT}
+      OP_BATCHER_ROLLUP_RPC: http://op-node-sequencer:${ROLLUP_PORT}
+      OP_BATCHER_MAX_CHANNEL_DURATION: "32"
+      OP_BATCHER_MAX_PENDING_TX: "32"
+    volumes:
+      - ./deployment/deployer:/deployer:ro
+    command:
+      - op-batcher
+      - --espresso.enabled=false
+      - --private-key=${FALLBACK_BATCHER_PRIVATE_KEY}
+      - --throttle.unsafe-da-bytes-lower-threshold=0
       - --max-channel-duration=2
       - --target-num-frames=1
       - --max-pending-tx=32
@@ -334,7 +268,7 @@ services:
   espresso-dev-node:
     image: ${ESPRESSO_DEV_NODE_IMAGE}
     depends_on:
-      l1-geth:
+      l1-anvil:
         condition: service_healthy
     ports:
       - "${ESPRESSO_SEQUENCER_API_PORT}:${ESPRESSO_SEQUENCER_API_PORT}"
@@ -349,7 +283,7 @@ services:
       ESPRESSO_DEV_NODE_L1_DEPLOYMENT: skip
       RUST_BACKTRACE: 1
       ESPRESSO_SEQUENCER_STORAGE_PATH: /data/espresso
-      ESPRESSO_SEQUENCER_L1_PROVIDER: http://l1-geth:${L1_HTTP_PORT}
+      ESPRESSO_SEQUENCER_L1_PROVIDER: http://l1-anvil:${L1_HTTP_PORT}
       ESPRESSO_DEPLOYER_ACCOUNT_INDEX: 0
       ESPRESSO_DEV_NODE_EPOCH_HEIGHT: "4294967295"
       ESPRESSO_SEQUENCER_ETH_MNEMONIC: "giant issue aisle success illegal bike spike question tent bar rely arctic volcano long crawl hungry vocal artwork sniff fantasy very lucky have athlete"
@@ -360,7 +294,7 @@ services:
     ports:
       - "${ESPRESSO_ATTESTATION_VERIFIER_PORT}:${ESPRESSO_ATTESTATION_VERIFIER_PORT}"
     healthcheck:
-      test: ["CMD-SHELL", "timeout 2 bash -c 'cat < /dev/null > /dev/tcp/localhost/${ESPRESSO_ATTESTATION_VERIFIER_PORT}' || exit 1"]
+      test: ["CMD-SHELL", "timeout 2 bash -c '''cat < /dev/null > /dev/tcp/localhost/${ESPRESSO_ATTESTATION_VERIFIER_PORT}''' || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 30
@@ -380,10 +314,7 @@ services:
       PORT: "${ESPRESSO_ATTESTATION_VERIFIER_PORT}"
 
 volumes:
-  l1-config:
   l2-config:
-  deployer:
-  l1-data:
   op-data-seq:
   op-data-verifier:
   op-data-fullnode:

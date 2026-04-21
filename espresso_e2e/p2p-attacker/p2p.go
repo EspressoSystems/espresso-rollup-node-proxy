@@ -155,7 +155,7 @@ func initP2P(listenerAddress string, chainId *big.Int, seqAddrInfo *peer.AddrInf
 // What is does in our scenario is forwards requests from the fullnode to the sequencer and sends the response back.
 // see https://github.com/EspressoSystems/optimism-espresso-integration/blob/4c769c98c924cb840d6d0bcc34fdeca910e5d030/op-node/p2p/node.go#L156
 func (p *P2P) registerRequestResponse(ctx context.Context, seqID peer.ID) {
-	protoID := protocol.ID(fmt.Sprintf(requestResponseId, p.engine.chainId))
+	protoID := protocol.ID(fmt.Sprintf(requestResponseId, p.engine.chainId.ToBig()))
 
 	// The server listens for request response messages from the fullnode
 	p.libp2pServer.SetStreamHandler(protoID, func(inStream network.Stream) {
