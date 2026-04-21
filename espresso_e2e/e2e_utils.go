@@ -9,7 +9,9 @@ import (
 	"io"
 	"log/slog"
 	"math/big"
+	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"proxy/proxy"
 	verifier "proxy/verifier/op"
@@ -221,6 +223,16 @@ func waitForHTTPReady(t *testing.T, url string, timeout time.Duration) {
 	t.Fatalf("HTTP service at %s did not become ready within %s", url, timeout)
 }
 
+func waitForRollupServicesReady(t *testing.T) {
+	t.Helper()
+	waitForHTTPReady(t, l1GethURL, 1*time.Minute)
+	waitForHTTPReady(t, espressoURL+"/v0/status/block-height", 1*time.Minute)
+	waitForHTTPReady(t, opGethSeqURL, 1*time.Minute)
+	waitForHTTPReady(t, opNodeSeqURL, 1*time.Minute)
+	waitForHTTPReady(t, opGethFullNode, 1*time.Minute)
+	waitForHTTPReady(t, opNodeFullNode, 1*time.Minute)
+}
+
 type JSONRPCResponse struct {
 	Version string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id"`
@@ -331,6 +343,50 @@ func jsonRPCBatchCallRaw(t *testing.T, url string, entries []batchEntry) []JSONR
 	require.NoError(t, json.Unmarshal(respBody, &rpcResps), "batch response: %s", string(respBody))
 	require.Len(t, rpcResps, len(entries), "batch response count mismatch")
 	return rpcResps
+}
+
+func startTestProxy(ctx context.Context, t *testing.T, backendURL string, store *espressostore.EspressoStore, tag string) (proxyURL string, shutdown func()) {
+	t.Helper()
+	p := proxy.NewProxy(backendURL, store, tag)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	proxyURL = "http://" + listener.Addr().String()
+	server := &http.Server{Handler: http.HandlerFunc(p.Serve)}
+	go func() { _ = server.Serve(listener) }()
+	t.Logf("proxy listening on %s", proxyURL)
+	return proxyURL, func() { _ = server.Shutdown(ctx) }
+}
+
+func pollUntil(t *testing.T, timeout time.Duration, failMsg string, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		require.True(t, time.Now().Before(deadline), failMsg)
+		if condition() {
+			return
+		}
+		time.Sleep(time.Second)
+	}
+}
+
+func newTestStore(t *testing.T, name string, hotshotHeight uint64) *espressostore.EspressoStore {
+	t.Helper()
+	stateFile := t.TempDir() + "/" + name + ".json"
+	store, err := espressostore.NewEspressoStore(stateFile, hotshotHeight)
+	require.NoError(t, err)
+	return store
+}
+
+func newDefaultLogger() log.Logger {
+	logger := log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stdout, log.LevelInfo, true))
+	log.SetDefault(logger)
+	return logger
+}
+
+func replaceTag(data json.RawMessage, oldTag, newTag string) json.RawMessage {
+	return json.RawMessage(
+		bytes.ReplaceAll(data, []byte(fmt.Sprintf(`"%s"`, oldTag)), []byte(fmt.Sprintf(`"%s"`, newTag))),
+	)
 }
 
 func getStoredBlock(t *testing.T, store *espressostore.EspressoStore) uint64 {

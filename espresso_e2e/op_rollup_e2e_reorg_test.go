@@ -5,11 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
-	"os"
-	"proxy/proxy"
-	espressostore "proxy/store"
 	"testing"
 	"time"
 
@@ -24,31 +20,17 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 
 	// Wait for services to come up
 	t.Log("waiting for services to be ready")
-	waitForHTTPReady(t, l1GethURL, 1*time.Minute)
-	waitForHTTPReady(t, espressoURL+"/v0/status/block-height", 1*time.Minute)
-	waitForHTTPReady(t, opGethSeqURL, 1*time.Minute)
-	waitForHTTPReady(t, opNodeSeqURL, 1*time.Minute)
-	waitForHTTPReady(t, opGethFullNode, 1*time.Minute)
-	waitForHTTPReady(t, opNodeFullNode, 1*time.Minute)
+	waitForRollupServicesReady(t)
 
-	stateFile := t.TempDir() + "/espresso-state.json"
-	espressoStore, err := espressostore.NewEspressoStore(stateFile, 1)
-	require.NoError(t, err)
+	espressoStore := newTestStore(t, "espresso-state", 1)
 
 	ctx := context.Background()
 	t.Log("Starting in-process proxy")
-	p := proxy.NewProxy(opGethFullNode, espressoStore, espressoTag)
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	proxyURL := "http://" + listener.Addr().String()
-	server := &http.Server{Handler: http.HandlerFunc(p.Serve)}
-	go func() { _ = server.Serve(listener) }()
-	defer func() { _ = server.Shutdown(ctx) }()
-	t.Logf("proxy listening on %s", proxyURL)
+	proxyURL, shutdownProxy := startTestProxy(ctx, t, opGethFullNode, espressoStore, espressoTag)
+	defer shutdownProxy()
 
 	t.Log("Starting OP Verifier")
-	logger := log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stdout, log.LevelInfo, true))
-	log.SetDefault(logger)
+	newDefaultLogger()
 
 	defaultCapturer := &logCapturer{}
 	v := startVerifier(ctx, t, log.NewLogger(defaultCapturer), espressoStore)
@@ -57,25 +39,15 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 	t.Run("proxy does not go backwords in case of l1 reorg", func(t *testing.T) {
 		const targetBlockNum = uint64(10)
 		t.Log("Waiting for block 10 to be produced on OP Geth full node")
-		deadline := time.Now().Add(2 * time.Minute)
-		for {
-			require.True(t, time.Now().Before(deadline), "block 10 not produced within timeout")
+		pollUntil(t, 2*time.Minute, "block 10 not produced within timeout", func() bool {
 			result := jsonRPCCall(t, opGethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{"0xa", false}))
-			if string(result) != "null" {
-				break
-			}
-			time.Sleep(time.Second)
-		}
+			return string(result) != "null"
+		})
 
 		t.Log("Waiting for OP verifer to update espresso store past block 10")
-		deadline = time.Now().Add(1 * time.Minute)
-		for {
-			require.True(t, time.Now().Before(deadline), "OP verifier did not reach block 10 within timeout")
-			if getStoredBlock(t, espressoStore) >= targetBlockNum {
-				break
-			}
-			time.Sleep(time.Second)
-		}
+		pollUntil(t, 1*time.Minute, "OP verifier did not reach block 10 within timeout", func() bool {
+			return getStoredBlock(t, espressoStore) >= targetBlockNum
+		})
 
 		// Get the current L1 block number to use as the reorg point
 		latestL1BlockNum := getBlockByTag(t, l1GethURL, "latest")
@@ -99,7 +71,7 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 		// and that the espresso-tagged block never exceeds the OP geth full nodes latest block.
 		t.Log("Monitoring proxy block number for backwards movement during and after reorg")
 		previous := blockBeforeReorg
-		deadline = time.Now().Add(1 * time.Minute)
+		deadline := time.Now().Add(1 * time.Minute)
 		for {
 			current := getStoredBlock(t, espressoStore)
 			require.GreaterOrEqual(t, current, previous,
