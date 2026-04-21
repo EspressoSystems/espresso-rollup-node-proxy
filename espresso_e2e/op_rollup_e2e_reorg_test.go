@@ -67,42 +67,16 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 		require.Equal(t, http.StatusOK, resp.StatusCode, "mock beacon fork request failed with status %d", resp.StatusCode)
 		t.Log("L1 reorg triggered successfully")
 
-		// Poll for 1 minute asserting the verified L2 block never moves backwards,
-		// and that the espresso-tagged block never exceeds the OP geth full nodes latest block.
 		t.Log("Monitoring proxy block number for backwards movement during and after reorg")
-		previous := blockBeforeReorg
-		deadline := time.Now().Add(1 * time.Minute)
-		for {
-			current := getStoredBlock(t, espressoStore)
-			require.GreaterOrEqual(t, current, previous,
-				"proxy block moved backwards: was %d, now %d", previous, current)
-			if current > previous {
-				t.Logf("Proxy advanced to L2 block %d", current)
-				previous = current
-			}
-
-			// The espresso-tagged block must not be ahead of the OP geth full nodes latest block
-			latestFullNodeBlock := getBlockByTag(t, opGethFullNode, "latest")
-			require.LessOrEqual(t, current, latestFullNodeBlock,
-				"proxy espresso block %d is ahead of OP geth full nodes latest block %d", current, latestFullNodeBlock)
-
-			if time.Now().After(deadline) {
-				break
-			}
-			time.Sleep(time.Second)
-		}
+		previous := monitorStoredBlockProgress(t, espressoStore, blockBeforeReorg, 1*time.Minute, func(uint64) bool {
+			return false
+		})
 
 		require.Greater(t, previous, blockBeforeReorg,
 			"proxy did not advance past block %d during monitoring", blockBeforeReorg)
 		t.Logf("Proxy at L2 block %d after reorg, block never moved backwards", previous)
 
-		proxyResult := jsonRPCCall(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{espressoTag, false}))
-		var proxyBlock struct {
-			Number string `json:"number"`
-		}
-		require.NoError(t, json.Unmarshal(proxyResult, &proxyBlock))
-		directResult := jsonRPCCall(t, opGethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{proxyBlock.Number, false}))
-		require.JSONEq(t, string(directResult), string(proxyResult))
+		requireProxyTagMatchesDirectBlock(t, proxyURL, opGethFullNode, espressoTag)
 		t.Log("Proxy espresso tag response matches direct OP geth full node response after reorg")
 	})
 
@@ -162,27 +136,9 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 
 		// Make sure we never go backwards
 		t.Log("Monitoring proxy block number for backwards movement during and after reorg")
-		previous := blockBeforeFork
-		deadline = time.Now().Add(3 * time.Minute)
-		for {
-			current := getStoredBlock(t, espressoStore)
-			require.GreaterOrEqual(t, current, previous,
-				"proxy block moved backwards: was %d, now %d", previous, current)
-			if current > previous {
-				t.Logf("Proxy advanced to L2 block %d", current)
-				previous = current
-			}
-
-			// The espresso-tagged block must not be ahead of the OP geth full nodes latest block
-			latestFullNodeBlock := getBlockByTag(t, opGethFullNode, "latest")
-			require.LessOrEqual(t, current, latestFullNodeBlock,
-				"proxy espresso block %d is ahead of OP geth full nodes latest block %d", current, latestFullNodeBlock)
-
-			if current >= blockBeforeFork+5 || time.Now().After(deadline) {
-				break
-			}
-			time.Sleep(time.Second)
-		}
+		monitorStoredBlockProgress(t, espressoStore, blockBeforeFork, 3*time.Minute, func(current uint64) bool {
+			return current >= blockBeforeFork+5
+		})
 
 		// Verify we advanced after full node reorg
 		verifiedBlock := getStoredBlock(t, espressoStore)
@@ -190,13 +146,7 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 			"proxy did not advance past block %d after full node reorg resolved", blockBeforeFork)
 		t.Logf("Proxy at L2 block %d after full node fork, before was at %d, block never moved backwards", verifiedBlock, blockBeforeFork)
 
-		proxyResult := jsonRPCCall(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{espressoTag, false}))
-		var proxyBlock struct {
-			Number string `json:"number"`
-		}
-		require.NoError(t, json.Unmarshal(proxyResult, &proxyBlock))
-		directResult := jsonRPCCall(t, opGethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{proxyBlock.Number, false}))
-		require.JSONEq(t, string(directResult), string(proxyResult))
+		requireProxyTagMatchesDirectBlock(t, proxyURL, opGethFullNode, espressoTag)
 		t.Log("Proxy espresso tag response matches direct OP geth full node response after full node reorg")
 
 		requireLogStringAttrs(t, defaultCapturer, "batch verification failed", map[string]string{

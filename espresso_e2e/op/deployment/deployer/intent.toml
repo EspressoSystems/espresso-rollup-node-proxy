@@ -1,8 +1,6 @@
 configType = 'standard-overrides'
 fundDevAccounts = true
 l1ChainID = 11155111
-l1ContractsLocator = 'file:////Users/snehkoul/Espresso/optimism-espresso-integration/packages/contracts-bedrock/forge-artifacts'
-l2ContractsLocator = 'file:////Users/snehkoul/Espresso/optimism-espresso-integration/packages/contracts-bedrock/forge-artifacts'
 opDeployerVersion = 'untagged-4c98df18-1776447376'
 opcmAddress = '0x0dead0118ed1ce6ad508bcedceded7987fc0566b'
 

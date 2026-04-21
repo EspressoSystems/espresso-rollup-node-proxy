@@ -389,6 +389,41 @@ func replaceTag(data json.RawMessage, oldTag, newTag string) json.RawMessage {
 	)
 }
 
+func requireProxyTagMatchesDirectBlock(t *testing.T, proxyURL, directURL, tag string) {
+	t.Helper()
+	proxyResult := jsonRPCCall(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{tag, false}))
+	var proxyBlock struct {
+		Number string `json:"number"`
+	}
+	require.NoError(t, json.Unmarshal(proxyResult, &proxyBlock))
+	directResult := jsonRPCCall(t, directURL, "eth_getBlockByNumber", jsonMarshal(t, []any{proxyBlock.Number, false}))
+	require.JSONEq(t, string(directResult), string(proxyResult))
+}
+
+func monitorStoredBlockProgress(t *testing.T, store *espressostore.EspressoStore, initialBlock uint64, timeout time.Duration, stopWhen func(current uint64) bool) uint64 {
+	t.Helper()
+	previous := initialBlock
+	deadline := time.Now().Add(timeout)
+	for {
+		current := getStoredBlock(t, store)
+		require.GreaterOrEqual(t, current, previous,
+			"proxy block moved backwards: was %d, now %d", previous, current)
+		if current > previous {
+			t.Logf("Proxy advanced to L2 block %d", current)
+			previous = current
+		}
+
+		latestFullNodeBlock := getBlockByTag(t, opGethFullNode, "latest")
+		require.LessOrEqual(t, current, latestFullNodeBlock,
+			"proxy espresso block %d is ahead of OP geth full nodes latest block %d", current, latestFullNodeBlock)
+
+		if stopWhen(current) || time.Now().After(deadline) {
+			return previous
+		}
+		time.Sleep(time.Second)
+	}
+}
+
 func getStoredBlock(t *testing.T, store *espressostore.EspressoStore) uint64 {
 	t.Helper()
 	state := store.GetState()
