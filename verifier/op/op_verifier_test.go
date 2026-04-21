@@ -1,10 +1,16 @@
 package verifier
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
 	"log/slog"
 	"math/big"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	proxyPkg "proxy/proxy"
 	"testing"
 	"time"
 
@@ -377,4 +383,83 @@ func TestStoresEthereumFinalizedBlockWhenAhead(t *testing.T) {
 
 		assertEthereumFinalizedBlockStored(t, h, capturer, 2, true)
 	})
+}
+
+func TestProxyUsesEthereumFinalizedBlockWhenEspressoStopsAdvancing(t *testing.T) {
+	capturer := &logCapturer{}
+	h := newTestHarness(t, log.NewLogger(capturer))
+	ctx := context.Background()
+	syncStatus := &eth.SyncStatus{
+		FinalizedL1: eth.L1BlockRef{Number: 10, Hash: common.Hash{1}},
+		SafeL2: eth.L2BlockRef{
+			Number:   5,
+			L1Origin: eth.BlockID{Number: 10, Hash: common.Hash{1}},
+		},
+	}
+
+	h.streamer.On("GetFallbackHotshotPos").Return(uint64(1))
+	h.endpointProv.On("EthClient", mock.Anything).Return(h.ethClient, nil)
+	h.endpointProv.On("RollupClient", mock.Anything).Return(h.rollupClient, nil)
+	h.ethClient.On("BlockByNumber", mock.Anything, big.NewInt(int64(rpc.FinalizedBlockNumber))).Return(newBlockWithNumber(105), nil)
+	h.rollupClient.On("SyncStatus", mock.Anything).Return(syncStatus, nil)
+	h.streamer.On("Refresh", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	h.streamer.On("HasNext", mock.Anything).Return(false)
+	h.streamer.On("Update", mock.Anything).Return(nil)
+	h.streamer.On("Peek", mock.Anything).Return(nil)
+
+	var upstreamSeenTags []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+
+		var req proxyPkg.JSONRPCRequest
+		require.NoError(t, json.Unmarshal(body, &req))
+
+		var params []any
+		require.NoError(t, json.Unmarshal(req.Params, &params))
+		require.Len(t, params, 2)
+
+		tag, ok := params[0].(string)
+		require.True(t, ok)
+		upstreamSeenTags = append(upstreamSeenTags, tag)
+
+		resp := proxyPkg.JSONRPCResponse{
+			Version: "2.0",
+			ID:      req.ID,
+			Result:  json.RawMessage(`{"number":"` + tag + `"}`),
+		}
+		w.Header().Set("Content-Type", "application/json")
+		require.NoError(t, json.NewEncoder(w).Encode(resp))
+	}))
+	defer upstream.Close()
+
+	proxy := proxyPkg.NewProxy(upstream.URL, h.store, "finalized")
+	callProxy := func() string {
+		reqBody := `{"jsonrpc":"2.0","id":1,"method":"eth_getBlockByNumber","params":["finalized",false]}`
+		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		proxy.Serve(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		var resp proxyPkg.JSONRPCResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		require.Nil(t, resp.Error)
+
+		var block struct {
+			Number string `json:"number"`
+		}
+		require.NoError(t, json.Unmarshal(resp.Result, &block))
+		return block.Number
+	}
+
+	require.Equal(t, "0x1", callProxy())
+
+	h.verifier.verifyAndAdvance(ctx)
+
+	require.Contains(t, capturer.errorMessages, "ethereum finalized block is ahead of espresso finalized block")
+	require.Equal(t, uint64(105), h.store.GetState().L2BlockNumber)
+	require.Equal(t, "0x69", callProxy())
+	require.Equal(t, []string{"0x1", "0x69"}, upstreamSeenTags)
 }
