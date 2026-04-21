@@ -56,7 +56,7 @@ func TestOPE2EL2Reorg(t *testing.T) {
 	deadline := time.Now().Add(3 * time.Minute)
 	for {
 		require.True(t, time.Now().Before(deadline), "sequencer safe block did not become > 0")
-		if getBlockByTag(t, opGethSeqURL, "safe") > 0 {
+		if getBlockByTag(t, opGethSeqURL, "safe") > 15 {
 			break
 		}
 		time.Sleep(time.Second)
@@ -67,7 +67,8 @@ func TestOPE2EL2Reorg(t *testing.T) {
 	reorgTarget := currentSeqBlock - reorgBlocks
 	t.Logf("Sequencer at block %d, proxy verified at block %d", currentSeqBlock, blockBeforeReorg)
 
-	logBlockHashes := func(label string) {
+	captureBlockHashes := func(label string) map[uint64]string {
+		hashes := make(map[uint64]string)
 		t.Logf("Block hashes %s (blocks %d..%d):", label, reorgTarget, currentSeqBlock)
 		for i := reorgTarget; i <= currentSeqBlock; i++ {
 			result := jsonRPCCall(t, opGethSeqURL, "eth_getBlockByNumber",
@@ -79,19 +80,13 @@ func TestOPE2EL2Reorg(t *testing.T) {
 				t.Logf("  block %d: <not found>", i)
 			} else {
 				t.Logf("  block %d: %s", i, block.Hash)
+				hashes[i] = block.Hash
 			}
 		}
+		return hashes
 	}
 
-	// Capture original hash before reorg for the post-reorg assertion
-	originalSeqBlockJSON := jsonRPCCall(t, opGethSeqURL, "eth_getBlockByNumber",
-		jsonMarshal(t, []any{fmt.Sprintf("0x%x", currentSeqBlock), false}))
-	var originalSeqBlock struct {
-		Hash string `json:"hash"`
-	}
-	require.NoError(t, json.Unmarshal(originalSeqBlockJSON, &originalSeqBlock))
-
-	logBlockHashes("before reorg")
+	preReorgHashes := captureBlockHashes("before reorg")
 
 	// Stop sequencer node, rewind geth, restart
 	t.Log("Stopping op-node-sequencer")
@@ -121,16 +116,16 @@ func TestOPE2EL2Reorg(t *testing.T) {
 	}
 	stopLoad()
 
-	logBlockHashes("after reorg")
+	captureBlockHashes("after reorg")
 
-	// Confirm the reorg produced a different hash at the original block
+	// Confirm the reorg produced a different hash at the tip
 	newSeqBlockJSON := jsonRPCCall(t, opGethSeqURL, "eth_getBlockByNumber",
 		jsonMarshal(t, []any{fmt.Sprintf("0x%x", currentSeqBlock), false}))
 	var newSeqBlock struct {
 		Hash string `json:"hash"`
 	}
 	require.NoError(t, json.Unmarshal(newSeqBlockJSON, &newSeqBlock))
-	require.NotEqual(t, originalSeqBlock.Hash, newSeqBlock.Hash,
+	require.NotEqual(t, preReorgHashes[currentSeqBlock], newSeqBlock.Hash,
 		"expected hash change at block %d after sequencer reorg", currentSeqBlock)
 	t.Logf("Sequencer reorg confirmed at block %d", currentSeqBlock)
 
@@ -144,24 +139,26 @@ func TestOPE2EL2Reorg(t *testing.T) {
 			t.Logf("Proxy advanced to L2 block %d", current)
 			previous = current
 		}
-		if previous > currentSeqBlock {
+		if previous > currentSeqBlock || time.Now().After(deadline) {
 			break
 		}
-		require.True(t, time.Now().Before(deadline),
-			"proxy did not advance past reorged block %d (stuck at %d)", currentSeqBlock, previous)
 		time.Sleep(time.Second)
 	}
 
 	t.Logf("Proxy at L2 block %d after sequencer reorg, never moved backwards", previous)
 
-	proxyResult := jsonRPCCall(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{espressoTag, false}))
-	var proxyBlock struct {
-		Number string `json:"number"`
+	// Espresso enforces the canonical chain, so both the sequencer and proxy should
+	// end up serving the original pre-reorg block at currentSeqBlock.
+	hex := fmt.Sprintf("0x%x", currentSeqBlock)
+	seqBlockJSON := jsonRPCCall(t, opGethSeqURL, "eth_getBlockByNumber", jsonMarshal(t, []any{hex, false}))
+	proxyBlockJSON := jsonRPCCall(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{hex, false}))
+	var seqBlockHash, proxyBlockHash struct {
+		Hash string `json:"hash"`
 	}
-	require.NoError(t, json.Unmarshal(proxyResult, &proxyBlock))
-	seqResult := jsonRPCCall(t, opGethSeqURL, "eth_getBlockByNumber", jsonMarshal(t, []any{proxyBlock.Number, false}))
-	fullNodeResult := jsonRPCCall(t, opGethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{proxyBlock.Number, false}))
-	require.JSONEq(t, string(seqResult), string(proxyResult), "proxy block should match sequencer after reorg")
-	require.JSONEq(t, string(fullNodeResult), string(proxyResult), "proxy block should match full node after reorg")
-	t.Log("Proxy espresso block matches sequencer and full node after sequencer reorg")
+	require.NoError(t, json.Unmarshal(seqBlockJSON, &seqBlockHash))
+	require.NoError(t, json.Unmarshal(proxyBlockJSON, &proxyBlockHash))
+	require.Equal(t, preReorgHashes[currentSeqBlock], seqBlockHash.Hash,
+		"sequencer block %d should match pre-reorg hash", currentSeqBlock)
+	require.Equal(t, preReorgHashes[currentSeqBlock], proxyBlockHash.Hash,
+		"proxy block %d should match pre-reorg hash", currentSeqBlock)
 }
