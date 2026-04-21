@@ -233,6 +233,38 @@ services:
       - --data-availability-type=calldata
       - --rpc.enable-admin
 
+  op-batcher-fallback:
+    profiles: ["fallback"]
+    image: ${OP_BATCHER_IMAGE}
+    depends_on:
+      l1-anvil:
+        condition: service_healthy
+      op-geth-sequencer:
+        condition: service_started
+      op-node-sequencer:
+        condition: service_started
+      l2-genesis:
+        condition: service_completed_successfully
+    environment:
+      L1_RPC: http://l1-anvil:${L1_HTTP_PORT}
+      OP_BATCHER_L1_ETH_RPC: http://l1-anvil:${L1_HTTP_PORT}
+      OP_BATCHER_L2_ETH_RPC: http://op-geth-sequencer:${OP_HTTP_PORT}
+      OP_BATCHER_ROLLUP_RPC: http://op-node-sequencer:${ROLLUP_PORT}
+      OP_BATCHER_MAX_CHANNEL_DURATION: "32"
+      OP_BATCHER_MAX_PENDING_TX: "32"
+    volumes:
+      - ./deployment/deployer:/deployer:ro
+    command:
+      - op-batcher
+      - --espresso.enabled=false
+      - --private-key=${FALLBACK_BATCHER_PRIVATE_KEY}
+      - --throttle.unsafe-da-bytes-lower-threshold=0
+      - --max-channel-duration=2
+      - --target-num-frames=1
+      - --max-pending-tx=32
+      - --data-availability-type=calldata
+      - --rpc.enable-admin
+
   espresso-dev-node:
     image: ${ESPRESSO_DEV_NODE_IMAGE}
     depends_on:
