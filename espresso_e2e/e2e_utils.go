@@ -105,7 +105,7 @@ func runDockerComposeFile(workingDir string, composeFile string, services ...str
 
 	shutdown := func() {
 		args := append([]string{"compose"}, fileArgs...)
-		args = append(args, "down", "--volumes", "--remove-orphans")
+		args = append(args, "--profile", "fallback", "down", "--volumes", "--remove-orphans")
 		p := exec.Command("docker", args...)
 		p.Dir = workingDir
 		if out, err := p.CombinedOutput(); err != nil {
@@ -188,6 +188,18 @@ func switchBatcher(t *testing.T) {
 		require.Equal(t, "0x1", receipt.Status, "switchBatcher transaction failed")
 		return
 	}
+}
+
+func getHotshotHeight(t *testing.T) uint64 {
+	t.Helper()
+	resp, err := http.Get(espressoURL + "/v0/status/block-height")
+	require.NoError(t, err)
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	var height uint64
+	require.NoError(t, json.Unmarshal(body, &height))
+	return height
 }
 
 func waitForHTTPReady(t *testing.T, url string, timeout time.Duration) {
