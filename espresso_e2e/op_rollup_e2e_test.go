@@ -520,9 +520,10 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 
 		t.Log("Waiting for L2 full node to finalize blocks beyond the pre-stop espresso block")
 		deadline = time.Now().Add(3 * time.Minute)
+		var ethFinalized uint64
 		for {
 			require.True(t, time.Now().Before(deadline), "L2 full node did not finalize past pre-stop block within timeout")
-			ethFinalized := getBlockByTag(t, opGethFullNode, "finalized")
+			ethFinalized = getBlockByTag(t, opGethFullNode, "finalized")
 			if ethFinalized > preStopBlock {
 				t.Logf("L2 finalized block %d is past pre-stop espresso block %d", ethFinalized, preStopBlock)
 				break
@@ -534,7 +535,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		deadline = time.Now().Add(3 * time.Minute)
 		for {
 			require.True(t, time.Now().Before(deadline), "verifier did not advance store past pre-stop block via ethereum finality within timeout")
-			if getStoredBlock(t, store) > preStopBlock {
+			if getStoredBlock(t, store) > ethFinalized {
 				break
 			}
 			time.Sleep(time.Second)
