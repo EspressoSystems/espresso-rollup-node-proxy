@@ -10,8 +10,6 @@
     "superchainConfigProxy": null,
     "superchainRoles": null,
     "fundDevAccounts": true,
-    "l1ContractsLocator": "file:////Users/snehkoul/Espresso/optimism-espresso-integration/packages/contracts-bedrock/forge-artifacts",
-    "l2ContractsLocator": "file:////Users/snehkoul/Espresso/optimism-espresso-integration/packages/contracts-bedrock/forge-artifacts",
     "chains": [
       {
         "id": "0x000000000000000000000000000000000000000000000000000000000153c16e",
@@ -163,4 +161,3 @@
   "l1StateDump": null,
   "DeploymentCalldata": null
 }
-
