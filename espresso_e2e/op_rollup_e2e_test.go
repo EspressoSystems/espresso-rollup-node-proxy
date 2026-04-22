@@ -239,7 +239,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		t.Log("Verified that verifier and proxy started with correct hotshot height and L2 block number after restart")
 	})
 
-	t.Run("switchover with espresso tag", func(t *testing.T) {
+	t.Run("switchover", func(t *testing.T) {
 		// Capture the current HotShot height before espresso batcher starts posting.
 		hotshotHeight := getHotshotHeight(t)
 		t.Logf("Captured HotShot height %d", hotshotHeight)
@@ -260,27 +260,50 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 			}
 		}()
 
-		// Create an empty store and proxy.
 		store := newTestStore(t, "switchover-state", hotshotHeight)
 		require.Equal(t, uint64(0), getStoredBlock(t, store), "store should start with L2BlockNumber=0")
 
-		t.Log("Starting proxy with empty store, fallback batcher active")
-		proxyURL, shutdownProxy := startTestProxy(ctx, t, opGethFullNode, store, espressoTag)
-		defer shutdownProxy()
+		t.Log("Starting proxy with espresso tag, empty store, fallback batcher active")
+		espressoProxyURL, shutdownEspressoProxy := startTestProxy(ctx, t, opGethFullNode, store, espressoTag)
+		defer shutdownEspressoProxy()
+
+		t.Log("Starting proxy with finalized tag, empty store, fallback batcher active")
+		finalizedProxyURL, shutdownFinalizedProxy := startTestProxy(ctx, t, opGethFullNode, store, "finalized")
+		defer shutdownFinalizedProxy()
+
+		// --- Pre-switchover: espresso tag ---
 
 		// Espresso tag should error because the store has no verified state.
-		resp := jsonRPCCallRaw(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{espressoTag, false}))
+		resp := jsonRPCCallRaw(t, espressoProxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{espressoTag, false}))
 		require.True(t, resp.Error != nil && string(resp.Error) != "null",
 			"should return a JSON-RPC error when store has no verified state, got result: %s", string(resp.Result))
 
 		// Non-espresso requests should still work (forwarded to the OP geth full node).
-		resp = jsonRPCCallRaw(t, proxyURL, "eth_blockNumber", nil)
+		resp = jsonRPCCallRaw(t, espressoProxyURL, "eth_blockNumber", nil)
 		require.True(t, resp.Error == nil || string(resp.Error) == "null",
 			"should not return a JSON-RPC error for non-espresso tag requests, got error: %s", string(resp.Error))
 		require.NotNil(t, resp.Result, "should return a result for eth_blockNumber even when store is empty")
 		t.Log("Confirmed: espresso tag errors and non-espresso requests work with fallback batcher")
 
-		//  Switch to espresso batcher.
+		// --- Pre-switchover: finalized tag ---
+
+		// "finalized" is a valid Ethereum tag so the full node handles it even
+		// when the store is empty (request passes through unchanged).
+		resp = jsonRPCCallRaw(t, finalizedProxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{"finalized", false}))
+		require.True(t, resp.Error == nil || string(resp.Error) == "null",
+			"finalized tag should not error with empty store, got error: %s", string(resp.Error))
+		require.NotNil(t, resp.Result, "should return a result for finalized tag even with empty store")
+		t.Log("Confirmed: finalized tag does not error with empty store (forwarded to full node)")
+
+		// Before switchover: proxy forwards "finalized" to full node unchanged
+		// so it should return the same result as calling full node directly.
+		proxyResp := jsonRPCCallRaw(t, finalizedProxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{"finalized", false}))
+		directResp := jsonRPCCallRaw(t, opGethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{"finalized", false}))
+		requireJSONRPCEqual(t, directResp, proxyResp, "eth_getBlockByNumber(finalized)")
+		t.Log("Confirmed: before switchover, proxy returns same finalized block as full node")
+
+		// --- Switch to espresso batcher (single cycle for both tags) ---
+
 		t.Log("Stopping fallback batcher and activating espresso batcher")
 		dockerComposeStop(t, rollupWorkingDir, "op-batcher-fallback")
 		switchBatcher(t)
@@ -301,78 +324,19 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		})
 		t.Logf("Switchover complete: store at block %d (ethereum finalized at %d)", getStoredBlock(t, store), ethFinalizedBlock)
 
-		// Post-switchover: espresso tag should resolve.
-		resp = jsonRPCCallRaw(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{espressoTag, false}))
+		// --- Post-switchover: espresso tag ---
+
+		resp = jsonRPCCallRaw(t, espressoProxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{espressoTag, false}))
 		require.True(t, resp.Error == nil || string(resp.Error) == "null",
 			"should not return a JSON-RPC error for espresso tag after switchover, got error: %s", string(resp.Error))
 		require.NotNil(t, resp.Result, "should return a result for espresso tag after switchover")
 		t.Log("Confirmed: espresso tag works after switchover")
-	})
 
-	t.Run("switchover with finalized tag", func(t *testing.T) {
-		espressoTag := "finalized"
-
-		hotshotHeight := getHotshotHeight(t)
-		t.Logf("Captured HotShot height %d", hotshotHeight)
-
-		t.Log("Stopping espresso batcher and activating fallback batcher")
-		dockerComposeStop(t, rollupWorkingDir, "op-batcher")
-		switchBatcher(t)
-		dockerComposeStart(t, rollupWorkingDir, []string{"fallback"}, "op-batcher-fallback")
-
-		fallbackMode := true
-		defer func() {
-			if fallbackMode {
-				dockerComposeStop(t, rollupWorkingDir, "op-batcher-fallback")
-				switchBatcher(t)
-				dockerComposeStart(t, rollupWorkingDir, nil, "op-batcher")
-			}
-		}()
-
-		store := newTestStore(t, "switchover-finalized-state", hotshotHeight)
-		require.Equal(t, uint64(0), getStoredBlock(t, store), "store should start with L2BlockNumber=0")
-
-		t.Log("Starting proxy with finalized tag, empty store, fallback batcher active")
-		proxyURL, shutdownProxy := startTestProxy(ctx, t, opGethFullNode, store, espressoTag)
-		defer shutdownProxy()
-
-		// "finalized" is a valid Ethereum tag so the full node handles it even
-		// when the store is empty (request passes through unchanged).
-		resp := jsonRPCCallRaw(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{espressoTag, false}))
-		require.True(t, resp.Error == nil || string(resp.Error) == "null",
-			"finalized tag should not error with empty store, got error: %s", string(resp.Error))
-		require.NotNil(t, resp.Result, "should return a result for finalized tag even with empty store")
-		t.Log("Confirmed: finalized tag does not error with empty store (forwarded to full node)")
-
-		// Before switchover: proxy forwards "finalized" to full node unchanged
-		// so it should return the same result as calling full node directly.
-		proxyResp := jsonRPCCallRaw(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{espressoTag, false}))
-		directResp := jsonRPCCallRaw(t, opGethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{"finalized", false}))
-		requireJSONRPCEqual(t, directResp, proxyResp, "eth_getBlockByNumber(finalized)")
-		t.Log("Confirmed: before switchover, proxy returns same finalized block as full node")
-
-		//  Switch to espresso batcher.
-		t.Log("Stopping fallback batcher and activating espresso batcher")
-		dockerComposeStop(t, rollupWorkingDir, "op-batcher-fallback")
-		switchBatcher(t)
-		dockerComposeStart(t, rollupWorkingDir, nil, "op-batcher")
-		fallbackMode = false
-
-		t.Log("Starting verifier to sync from Espresso")
-		v := startVerifier(ctx, t, newDefaultLogger(), store)
-		defer v.Stop()
-
-		t.Log("Waiting for espresso finalized block to exceed ethereum finalized block")
-		var ethFinalizedBlock uint64
-		pollUntil(t, 3*time.Minute, "verifier did not advance past ethereum finalized block within timeout", func() bool {
-			ethFinalizedBlock = getBlockByTag(t, opGethFullNode, "finalized")
-			return ethFinalizedBlock > 0 && getStoredBlock(t, store) > ethFinalizedBlock
-		})
-		t.Logf("Switchover complete: store at block %d (ethereum finalized at %d)", getStoredBlock(t, store), ethFinalizedBlock)
+		// --- Post-switchover: finalized tag ---
 
 		// After switchover: proxy replaces "finalized" with the Espresso finalized block
 		// number from the store instead of forwarding to the full node unchanged.
-		espressoFinalizedBlock := getBlockByTag(t, proxyURL, espressoTag)
+		espressoFinalizedBlock := getBlockByTag(t, finalizedProxyURL, "finalized")
 		storeBlock := getStoredBlock(t, store)
 		require.True(t, espressoFinalizedBlock >= storeBlock,
 			"proxy should return Espresso finalized block (%d) at (%d)",
