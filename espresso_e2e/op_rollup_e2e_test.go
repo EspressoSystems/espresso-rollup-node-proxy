@@ -96,6 +96,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 
 		for _, tc := range methodsWithNoEspressoTag {
 			t.Run(tc.method, func(t *testing.T) {
+				t.Parallel()
 				proxyResp := jsonRPCCallRaw(t, proxyURL, tc.method, jsonMarshal(t, tc.params))
 				directResp := jsonRPCCallRaw(t, opGethFullNode, tc.method, jsonMarshal(t, tc.params))
 				requireJSONRPCEqual(t, directResp, proxyResp, tc.method)
@@ -129,6 +130,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 
 		for _, tc := range espressoTagMethods {
 			t.Run(tc.method, func(t *testing.T) {
+				t.Parallel()
 				proxyParams := jsonMarshal(t, tc.params)
 				directParams := replaceTag(proxyParams, espressoTag, blockHex)
 				proxyResp := jsonRPCCallRaw(t, proxyURL, tc.method, proxyParams)

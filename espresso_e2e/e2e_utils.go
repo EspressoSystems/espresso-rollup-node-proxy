@@ -117,8 +117,13 @@ func runDockerComposeFile(workingDir string, composeFile string, services ...str
 
 	shutdown()
 
+	pullPolicy := os.Getenv("E2E_PULL_POLICY")
+	if pullPolicy == "" {
+		pullPolicy = "always"
+	}
+
 	invocation := append([]string{"compose"}, fileArgs...)
-	invocation = append(invocation, "up", "-d", "--pull", "always")
+	invocation = append(invocation, "up", "-d", "--pull", pullPolicy)
 	invocation = append(invocation, services...)
 	cmd := exec.Command("docker", invocation...)
 	cmd.Dir = workingDir
@@ -204,8 +209,7 @@ func getHotshotHeight(t *testing.T) uint64 {
 	return height
 }
 
-func waitForHTTPReady(t *testing.T, url string, timeout time.Duration) {
-	t.Helper()
+func waitForHTTPReadyErr(url string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	client := &http.Client{
 		Timeout: 5 * time.Second,
@@ -215,22 +219,41 @@ func waitForHTTPReady(t *testing.T, url string, timeout time.Duration) {
 		if err == nil {
 			_ = resp.Body.Close()
 			if resp.StatusCode < 500 {
-				return
+				return nil
 			}
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	t.Fatalf("HTTP service at %s did not become ready within %s", url, timeout)
+	return fmt.Errorf("HTTP service at %s did not become ready within %s", url, timeout)
 }
 
 func waitForRollupServicesReady(t *testing.T) {
 	t.Helper()
-	waitForHTTPReady(t, l1GethURL, 1*time.Minute)
-	waitForHTTPReady(t, espressoURL+"/v0/status/block-height", 1*time.Minute)
-	waitForHTTPReady(t, opGethSeqURL, 1*time.Minute)
-	waitForHTTPReady(t, opNodeSeqURL, 1*time.Minute)
-	waitForHTTPReady(t, opGethFullNode, 1*time.Minute)
-	waitForHTTPReady(t, opNodeFullNode, 1*time.Minute)
+	services := []string{
+		l1GethURL,
+		espressoURL + "/v0/status/block-height",
+		opGethSeqURL,
+		opNodeSeqURL,
+		opGethFullNode,
+		opNodeFullNode,
+	}
+
+	var wg sync.WaitGroup
+	errs := make([]error, len(services))
+	for i, url := range services {
+		wg.Add(1)
+		go func(idx int, svcURL string) {
+			defer wg.Done()
+			errs[idx] = waitForHTTPReadyErr(svcURL, 1*time.Minute)
+		}(i, url)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("service %s failed readiness check: %v", services[i], err)
+		}
+	}
 }
 
 type JSONRPCResponse struct {
@@ -365,7 +388,7 @@ func pollUntil(t *testing.T, timeout time.Duration, failMsg string, condition fu
 		if condition() {
 			return
 		}
-		time.Sleep(time.Second)
+		time.Sleep(250 * time.Millisecond)
 	}
 }
 
