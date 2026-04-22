@@ -12,7 +12,7 @@ import (
 
 func TestOPE2EL2Reorg(t *testing.T) {
 	t.Log("Starting rollup nodes")
-	shutdown := runDockerComposeFile(rollupWorkingDir, "docker-compose.reorg.yml")
+	shutdown := runDockerComposeFile(rollupWorkingDir, "docker-compose.yml")
 	defer shutdown()
 
 	// Wait for services to come up
