@@ -9,6 +9,7 @@ import (
 	"proxy/proxy"
 	"proxy/store"
 	verifier "proxy/verifier/op"
+	"runtime/debug"
 	"syscall"
 	"time"
 
@@ -17,6 +18,44 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 )
+
+type statusResponseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (w *statusResponseWriter) WriteHeader(code int) {
+	w.statusCode = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func requestLoggingMiddleware(next http.Handler, logger log.Logger) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		sw := &statusResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+		next.ServeHTTP(sw, r)
+		logger.Debug("http request",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"remote_addr", r.RemoteAddr,
+			"status", sw.statusCode,
+			"latency_ms", time.Since(start).Milliseconds(),
+			"content_length", r.ContentLength,
+		)
+	})
+}
+
+func recoveryMiddleware(next http.Handler, logger log.Logger) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				logger.Error("panic recovered in HTTP handler", "panic", rec, "stack", string(debug.Stack()))
+				http.Error(w, "internal server error", http.StatusInternalServerError)
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
 
 func main() {
 	cfg := parseConfig()
@@ -74,8 +113,13 @@ func main() {
 	mux.HandleFunc("/", fullNodeProxy.Serve)
 
 	server := &http.Server{
-		Addr:    cfg.ListenAddr,
-		Handler: mux,
+		Addr:              cfg.ListenAddr,
+		Handler:           requestLoggingMiddleware(recoveryMiddleware(mux, logger), logger),
+		ReadTimeout:       15 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 * 1024 * 1024,
 	}
 
 	go func() {

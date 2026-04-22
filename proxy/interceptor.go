@@ -63,8 +63,6 @@ func (i *Interceptor) Intercept(rawRequest []byte) ([]byte, error) {
 	return result, err
 }
 
-// InterceptBatch is able to handle batch JSON RPC requests
-// https://www.jsonrpc.org/specification#batch
 func (i *Interceptor) interceptBatch(rawRequest []byte) ([]byte, error) {
 	var batch []json.RawMessage
 	if err := json.Unmarshal(rawRequest, &batch); err != nil {
@@ -121,6 +119,8 @@ func (i *Interceptor) replaceEspressoTag(rawRequest []byte, blockNumber uint64) 
 	if err := json.Unmarshal(rawRequest, &req); err != nil {
 		return nil, false, fmt.Errorf("failed to parse JSON-RPC request: %w", err)
 	}
+
+	log.Debug("rpc request", "rpc_method", req.Method, "rpc_id", string(req.ID))
 
 	// If the request has no params, there is nothing to replace
 	if req.Params == nil {

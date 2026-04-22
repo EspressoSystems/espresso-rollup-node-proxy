@@ -132,6 +132,27 @@ func TestServe(t *testing.T) {
 		require.JSONEq(t, "null", string(resp.ID))
 	})
 
+	t.Run("rejects request body exceeding size limit", func(t *testing.T) {
+		proxy := newTestProxy(t, "http://unused", 100, "espresso")
+
+		oversizedBody := make([]byte, maxRequestBodySize+1)
+		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(oversizedBody))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		proxy.Serve(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+
+		var resp JSONRPCResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		require.NotNil(t, resp.Error)
+		require.Equal(t, PARSE_ERROR_CODE, resp.Error.Code)
+		require.Equal(t, "request body too large", resp.Error.Message)
+		require.JSONEq(t, "null", string(resp.ID))
+	})
+
 	t.Run("replaces finalized tag when configured", func(t *testing.T) {
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, err := io.ReadAll(r.Body)

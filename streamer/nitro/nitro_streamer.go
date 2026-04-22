@@ -110,21 +110,24 @@ func (s *EspressoStreamer) Reset(currentMessagePos uint64, currentHotshotBlock u
 }
 
 func (s *EspressoStreamer) Next(ctx context.Context) *MessageWithMetadataAndPos {
-	result := s.Peek(ctx)
+	s.messageLock.Lock()
+	defer s.messageLock.Unlock()
+
+	result := s.peekLocked()
 	if result == nil {
 		return nil
 	}
-
-	// Advance the current message position, so that the next call to
-	// `Peek` or `Next` will return the next message
-	s.Advance()
+	s.currentMessagePos += 1
 	return result
 }
 
 func (s *EspressoStreamer) Peek(ctx context.Context) *MessageWithMetadataAndPos {
 	s.messageLock.Lock()
 	defer s.messageLock.Unlock()
+	return s.peekLocked()
+}
 
+func (s *EspressoStreamer) peekLocked() *MessageWithMetadataAndPos {
 	compareMessageWithCurrentPos := func(msg *MessageWithMetadataAndPos) int {
 		if msg.Pos == s.currentMessagePos {
 			return FilterAndFind_Target

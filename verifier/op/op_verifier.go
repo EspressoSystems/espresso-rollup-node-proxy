@@ -9,6 +9,7 @@ import (
 	espressoStore "proxy/store"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	opStreamer "github.com/EspressoSystems/espresso-streamers/op"
@@ -52,7 +53,7 @@ type OPEspressoBatchVerifier struct {
 	l1Client          *ethclient.Client
 	cancel            context.CancelFunc
 	runWg             sync.WaitGroup
-	running           bool
+	running           atomic.Bool
 	totalBatchLatency time.Duration
 	batchCount        uint64
 }
@@ -133,12 +134,11 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 }
 
 func (v *OPEspressoBatchVerifier) Start(ctx context.Context) {
-	if v.running {
-		v.logger.Warn("OP Verifier is already running")
+	if !v.running.CompareAndSwap(false, true) {
+		v.logger.Warn("OP Verifier is already running or starting")
 		return
 	}
 
-	v.running = true
 	ctx, cancel := context.WithCancel(ctx)
 	v.cancel = cancel
 	v.runWg.Add(1)
@@ -241,11 +241,8 @@ func (v *OPEspressoBatchVerifier) getEthereumFinalizedBlockNumber(ctx context.Co
 func (v *OPEspressoBatchVerifier) syncEspressoStateWithEthereumFinality(ethFinalizedBlockNumber uint64) error {
 	espressoState := v.espressoStore.GetState()
 	blockNumberToStore := v.blockNumberToStore(espressoState.L2BlockNumber, ethFinalizedBlockNumber)
-	if blockNumberToStore <= espressoState.L2BlockNumber {
-		return nil
-	}
-
-	return v.espressoStore.Update(blockNumberToStore, v.streamer.GetFallbackHotshotPos())
+	_, err := v.espressoStore.UpdateIfGreater(blockNumberToStore, v.streamer.GetFallbackHotshotPos())
+	return err
 }
 
 func (v *OPEspressoBatchVerifier) blockNumberToStore(espressoFinalizedBlockNumber uint64, ethFinalizedBlockNumber uint64) uint64 {
@@ -376,34 +373,28 @@ func (v *OPEspressoBatchVerifier) advanceStreamerAndEspressoState(ctx context.Co
 	hotshotFallbackPos := v.streamer.GetFallbackHotshotPos()
 	blockNumberToStore := v.blockNumberToStore(blockNumber, ethFinalizedBlockNumber)
 
-	espressoState := v.espressoStore.GetState()
-	if espressoState.L2BlockNumber >= blockNumberToStore {
-		v.logger.Warn("not updating espresso state in store because block number is not greater than current block number in store",
-			"current_block_number", espressoState.L2BlockNumber, "new_block_number", blockNumberToStore)
-		v.streamer.Next(ctx)
-		return nil
-	}
-
-	err := v.espressoStore.Update(blockNumberToStore, hotshotFallbackPos)
+	updated, err := v.espressoStore.UpdateIfGreater(blockNumberToStore, hotshotFallbackPos)
 	if err != nil {
 		v.logger.Error("failed to update espresso state in store", "error", err)
 		return err
 	}
+	if !updated {
+		v.logger.Warn("not updating espresso state in store because block number is not greater than current block number in store",
+			"new_block_number", blockNumberToStore)
+	}
 
 	v.streamer.Next(ctx)
-
 	return nil
 }
 
 func (v *OPEspressoBatchVerifier) Stop() {
-	if !v.running {
-		v.logger.Warn("OP Verifier is not running")
+	if !v.running.CompareAndSwap(true, false) {
+		v.logger.Warn("OP Verifier is not running or is already stopping")
 		return
 	}
 	v.logger.Info("Stopping OP Verifier")
 	v.cancel()
 	v.runWg.Wait()
-	v.running = false
 
 	v.endpointProvider.Close()
 	v.l1Client.Close()

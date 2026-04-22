@@ -15,6 +15,9 @@ import (
 const (
 	PARSE_ERROR_CODE    = -32700
 	INTERNAL_ERROR_CODE = -32603
+
+	// maxRequestBodySize is the maximum allowed size for incoming request bodies (10MB).
+	maxRequestBodySize = 10 * 1024 * 1024
 )
 
 type Proxy struct {
@@ -43,10 +46,15 @@ func NewProxy(fullNodeExecutionRPC string, store *espressoStore.EspressoStore, e
 }
 
 func (p *Proxy) Serve(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBodySize+1))
 	if err != nil {
 		log.Error("failed to read request body", "error", err)
 		writeJSONRPCError(w, nil, PARSE_ERROR_CODE, "failed to read request body")
+		return
+	}
+	if int64(len(body)) > maxRequestBodySize {
+		log.Error("request body too large", "size", len(body), "limit", maxRequestBodySize)
+		writeJSONRPCError(w, nil, PARSE_ERROR_CODE, "request body too large")
 		return
 	}
 

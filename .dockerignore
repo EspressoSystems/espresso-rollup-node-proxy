@@ -1,0 +1,7 @@
+.git/
+.github/
+espresso_e2e/
+docs/
+*.md
+.dockerignore
+.env*
