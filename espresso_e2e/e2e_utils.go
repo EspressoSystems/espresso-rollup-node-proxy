@@ -616,7 +616,6 @@ func startLoadGen(ctx context.Context, t *testing.T, rpcURL string) func() {
 					nonce = n
 				}
 			} else {
-				// t.Logf("load gen: tx nonce=%d hash=%s sent", nonce, signed.Hash())
 				nonce++
 			}
 			time.Sleep(10 * time.Millisecond)
