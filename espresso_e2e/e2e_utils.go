@@ -71,7 +71,7 @@ const (
 	p2pAttackUrl                   = "http://127.0.0.1:8560"
 	L2_CHAIN_ID                    = 22266222
 	espressoTag                    = "espresso"
-	finalizedBlocks                = 100
+	finalizedBlocks                = 200
 	batchAuthenticatorAddress      = "0x4826533b4897376654bb4d4ad88b7fafd0c98528"
 	batchAuthenticatorOwnerAddress = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
 )
@@ -100,16 +100,6 @@ func startVerifier(ctx context.Context, t *testing.T, logger log.Logger, store *
 
 func runDockerCompose(workingDir string, services ...string) func() {
 	return runDockerComposeFile(workingDir, "", services...)
-}
-
-func dockerComposeExec(t *testing.T, workingDir, composeFile, action, service string) {
-	t.Helper()
-	args := []string{"compose", "-f", composeFile, action, service}
-	cmd := exec.Command("docker", args...)
-	cmd.Dir = workingDir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("docker compose %s %s failed: %v\n%s", action, service, err, out)
-	}
 }
 
 func runDockerComposeFile(workingDir string, composeFile string, services ...string) func() {
@@ -155,13 +145,18 @@ func dockerComposeStop(t *testing.T, workingDir string, service string) {
 	}
 }
 
-func dockerComposeStart(t *testing.T, workingDir string, profiles []string, services ...string) {
+// dockerComposeStart starts services. When noDeps is true, --no-deps is passed so only
+// the named services are started/recreated without touching their dependencies.
+func dockerComposeStart(t *testing.T, workingDir string, profiles []string, noDeps bool, services ...string) {
 	t.Helper()
 	args := []string{"compose"}
 	for _, p := range profiles {
 		args = append(args, "--profile", p)
 	}
 	args = append(args, "up", "-d")
+	if noDeps {
+		args = append(args, "--no-deps")
+	}
 	args = append(args, services...)
 	cmd := exec.Command("docker", args...)
 	cmd.Dir = workingDir
@@ -435,6 +430,26 @@ func monitorStoredBlockProgress(t *testing.T, store *espressostore.EspressoStore
 		}
 		time.Sleep(time.Second)
 	}
+}
+
+func captureBlockHashes(t *testing.T, label string, from, to uint64) map[uint64]string {
+	t.Helper()
+	hashes := make(map[uint64]string)
+	t.Logf("Block hashes %s (blocks %d..%d):", label, from, to)
+	for i := from; i <= to; i++ {
+		result := jsonRPCCall(t, opGethSeqURL, "eth_getBlockByNumber",
+			jsonMarshal(t, []any{fmt.Sprintf("0x%x", i), false}))
+		var block struct {
+			Hash string `json:"hash"`
+		}
+		if err := json.Unmarshal(result, &block); err != nil || block.Hash == "" {
+			t.Logf("  block %d: <not found>", i)
+		} else {
+			t.Logf("  block %d: %s", i, block.Hash)
+			hashes[i] = block.Hash
+		}
+	}
+	return hashes
 }
 
 func getStoredBlock(t *testing.T, store *espressostore.EspressoStore) uint64 {
