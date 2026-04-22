@@ -100,8 +100,6 @@ func TestOPE2EL2Reorg(t *testing.T) {
 	require.NoError(t, json.Unmarshal(seqBlockJSON, &seqBlock))
 	require.Equal(t, preReorgHashes[currentSeqBlock], seqBlock.Hash,
 		"sequencer block %d should match pre-reorg hash", currentSeqBlock)
-	require.Equal(t, preReorgHashes[currentSeqBlock], proxyBlockHash.Hash,
-		"proxy block %d should match pre-reorg hash", currentSeqBlock)
 	require.Greater(t, previous, currentSeqBlock,
 		"proxy did not advance past reorged block %d (stuck at %d)", currentSeqBlock, previous)
 	require.JSONEq(t, string(seqBlockJSON), string(proxyBlockJSON),
