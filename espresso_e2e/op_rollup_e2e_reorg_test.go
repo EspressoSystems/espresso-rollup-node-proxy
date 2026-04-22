@@ -30,8 +30,6 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 	defer shutdownProxy()
 
 	t.Log("Starting OP Verifier")
-	newDefaultLogger()
-
 	defaultCapturer := &logCapturer{}
 	v := startVerifier(ctx, t, log.NewLogger(defaultCapturer), espressoStore)
 	defer v.Stop()
@@ -96,31 +94,22 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 
 		// Wait for L2 to reach malicious block
 		t.Logf("Waiting for stored block to reach full node malicious block: %d", maliciousBlockNum)
-		deadline := time.Now().Add(3 * time.Minute)
 		var blockBeforeFork uint64
-		for {
+		pollUntil(t, 3*time.Minute, fmt.Sprintf("L2 did not reach block %d within timeout", maliciousBlockNum), func() bool {
 			blockBeforeFork = getStoredBlock(t, espressoStore)
-			require.True(t, time.Now().Before(deadline), "L2 did not reach block %d within timeout", maliciousBlockNum)
 			require.LessOrEqual(t, blockBeforeFork, maliciousBlockNum-1,
 				"proxy passed malicious block %d without stopping", maliciousBlockNum)
 			t.Logf("Waiting for L2 block %d, currently at %d", maliciousBlockNum-1, blockBeforeFork)
-			if blockBeforeFork == maliciousBlockNum-1 {
-				break
-			}
-			time.Sleep(time.Second)
-		}
+			return blockBeforeFork == maliciousBlockNum-1
+		})
 		t.Logf("Proxy at L2 block %d before triggering fork on full node", blockBeforeFork)
 
 		// Wait for both full node and sequencer to produce the malicious block
 		maliciousBlockHex := fmt.Sprintf("0x%x", maliciousBlockNum)
-		for {
-			require.True(t, time.Now().Before(deadline), "full node did not produce block %d within timeout", maliciousBlockNum)
-			if getBlockByTag(t, opGethFullNode, "latest") >= maliciousBlockNum &&
-				getBlockByTag(t, opGethSeqURL, "latest") >= maliciousBlockNum {
-				break
-			}
-			time.Sleep(time.Second)
-		}
+		pollUntil(t, 3*time.Minute, fmt.Sprintf("full node did not produce block %d within timeout", maliciousBlockNum), func() bool {
+			return getBlockByTag(t, opGethFullNode, "latest") >= maliciousBlockNum &&
+				getBlockByTag(t, opGethSeqURL, "latest") >= maliciousBlockNum
+		})
 
 		// Ensure full node block hash and sequencer block hash mismatch
 		fullNodeBlock := jsonRPCCall(t, opGethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{maliciousBlockHex, false}))
