@@ -240,6 +240,10 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 	})
 
 	t.Run("switchover with espresso tag", func(t *testing.T) {
+		// Capture the current HotShot height before espresso batcher starts posting.
+		hotshotHeight := getHotshotHeight(t)
+		t.Logf("Captured HotShot height %d", hotshotHeight)
+
 		// Switch to fallback batcher so there is no espresso state.
 		t.Log("Stopping espresso batcher and activating fallback batcher")
 		dockerComposeStop(t, rollupWorkingDir, "op-batcher")
@@ -255,10 +259,6 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 				dockerComposeStart(t, rollupWorkingDir, nil, "op-batcher")
 			}
 		}()
-
-		// Capture the current HotShot height before espresso batcher starts posting.
-		hotshotHeight := getHotshotHeight(t)
-		t.Logf("Captured HotShot height %d while fallback batcher is active", hotshotHeight)
 
 		// Create an empty store and proxy.
 		store := newTestStore(t, "switchover-state", hotshotHeight)
@@ -312,6 +312,9 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 	t.Run("switchover with finalized tag", func(t *testing.T) {
 		espressoTag := "finalized"
 
+		hotshotHeight := getHotshotHeight(t)
+		t.Logf("Captured HotShot height %d", hotshotHeight)
+
 		t.Log("Stopping espresso batcher and activating fallback batcher")
 		dockerComposeStop(t, rollupWorkingDir, "op-batcher")
 		switchBatcher(t)
@@ -325,9 +328,6 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 				dockerComposeStart(t, rollupWorkingDir, nil, "op-batcher")
 			}
 		}()
-
-		hotshotHeight := getHotshotHeight(t)
-		t.Logf("Captured HotShot height %d while fallback batcher is active", hotshotHeight)
 
 		store := newTestStore(t, "switchover-finalized-state", hotshotHeight)
 		require.Equal(t, uint64(0), getStoredBlock(t, store), "store should start with L2BlockNumber=0")
