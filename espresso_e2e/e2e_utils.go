@@ -145,18 +145,13 @@ func dockerComposeStop(t *testing.T, workingDir string, service string) {
 	}
 }
 
-// dockerComposeStart starts services. When noDeps is true, --no-deps is passed so only
-// the named services are started/recreated without touching their dependencies.
-func dockerComposeStart(t *testing.T, workingDir string, profiles []string, noDeps bool, services ...string) {
+func dockerComposeStart(t *testing.T, workingDir string, profiles []string, services ...string) {
 	t.Helper()
 	args := []string{"compose"}
 	for _, p := range profiles {
 		args = append(args, "--profile", p)
 	}
 	args = append(args, "up", "-d")
-	if noDeps {
-		args = append(args, "--no-deps")
-	}
 	args = append(args, services...)
 	cmd := exec.Command("docker", args...)
 	cmd.Dir = workingDir

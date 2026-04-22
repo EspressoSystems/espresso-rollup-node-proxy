@@ -61,7 +61,7 @@ func TestOPE2EL2Reorg(t *testing.T) {
 
 	// bring back up
 	t.Log("Restarting op-node-sequencer")
-	dockerComposeStart(t, rollupWorkingDir, nil, true, "op-node-sequencer")
+	dockerComposeStart(t, rollupWorkingDir, nil, "op-node-sequencer")
 
 	// Wait for sequencer to rebuild past the original block
 	t.Logf("Waiting for sequencer to reach block %d again", currentSeqBlock)
