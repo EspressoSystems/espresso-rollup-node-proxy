@@ -4,7 +4,7 @@ go 1.25.1
 
 require (
 	github.com/EspressoSystems/espresso-network/sdks/go v0.3.4
-	github.com/EspressoSystems/espresso-streamers v1.0.2-0.20260416103436-247fc89a909c
+	github.com/EspressoSystems/espresso-streamers v1.0.2
 	github.com/ccoveille/go-safecast v1.1.0
 	github.com/ethereum-optimism/optimism v1.16.7
 	github.com/ethereum/go-ethereum v1.17.1

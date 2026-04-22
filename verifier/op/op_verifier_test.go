@@ -104,6 +104,8 @@ func (m *mockStreamer) GetBatchFinalizationTimestamp(hash common.Hash) (uint64, 
 	return args.Get(0).(uint64), args.Bool(1)
 }
 
+func (m *mockStreamer) SetProperHead(_ common.Hash) {}
+
 var _ opStreamer.EspressoStreamer[derivation.EspressoBatch] = (*mockStreamer)(nil)
 
 type mockEndpointProvider struct {

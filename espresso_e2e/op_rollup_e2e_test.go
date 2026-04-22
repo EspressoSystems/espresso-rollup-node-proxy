@@ -1,14 +1,8 @@
 package espresso_e2e
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"net"
-	"net/http"
-	"os"
-	"proxy/proxy"
 	espressostore "proxy/store"
 	"testing"
 	"time"
@@ -24,59 +18,33 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 
 	// Wait for services to come up
 	t.Log("waiting for services to be ready")
-	waitForHTTPReady(t, l1GethURL, 1*time.Minute)
-	waitForHTTPReady(t, espressoURL+"/v0/status/block-height", 1*time.Minute)
-	waitForHTTPReady(t, opGethSeqURL, 1*time.Minute)
-	waitForHTTPReady(t, opNodeSeqURL, 1*time.Minute)
-	waitForHTTPReady(t, opGethFullNode, 1*time.Minute)
-	waitForHTTPReady(t, opNodeFullNode, 1*time.Minute)
+	waitForRollupServicesReady(t)
 
-	stateFile := t.TempDir() + "/espresso-state.json"
-	espressoStore, err := espressostore.NewEspressoStore(stateFile, 1)
-	require.NoError(t, err)
-	err = espressoStore.Update(1, 1)
+	espressoStore := newTestStore(t, "espresso-state", 1)
+	err := espressoStore.Update(1, 1)
 	require.NoError(t, err)
 
 	ctx := context.Background()
 	t.Log("Starting in-process proxy")
-	p := proxy.NewProxy(opGethFullNode, espressoStore, espressoTag)
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
-	proxyURL := "http://" + listener.Addr().String()
-	server := &http.Server{Handler: http.HandlerFunc(p.Serve)}
-	go func() { _ = server.Serve(listener) }()
-	defer func() { _ = server.Shutdown(ctx) }()
-	t.Logf("proxy listening on %s", proxyURL)
+	proxyURL, shutdownProxy := startTestProxy(ctx, t, opGethFullNode, espressoStore, espressoTag)
+	defer shutdownProxy()
 
 	t.Run("basic proxy advances", func(t *testing.T) {
 		t.Log("Starting OP Verifier")
-		logger := log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stdout, log.LevelInfo, true))
-		log.SetDefault(logger)
-
-		v := startVerifier(ctx, t, logger, espressoStore)
+		v := startVerifier(ctx, t, newDefaultLogger(), espressoStore)
 		defer v.Stop()
 		const targetBlockNum = uint64(10)
 
 		t.Log("Waiting for block 10 to be produced on OP Geth full node")
-		deadline := time.Now().Add(2 * time.Minute)
-		for {
-			require.True(t, time.Now().Before(deadline), "block 10 not produced within timeout")
+		pollUntil(t, 2*time.Minute, "block 10 not produced within timeout", func() bool {
 			result := jsonRPCCall(t, opGethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{"0xa", false}))
-			if string(result) != "null" {
-				break
-			}
-			time.Sleep(time.Second)
-		}
+			return string(result) != "null"
+		})
 
 		t.Log("Waiting for OP verifer to update espresso store past block 10")
-		deadline = time.Now().Add(1 * time.Minute)
-		for {
-			require.True(t, time.Now().Before(deadline), "OP verifier did not reach block 10 within timeout")
-			if getStoredBlock(t, espressoStore) >= targetBlockNum {
-				break
-			}
-			time.Sleep(time.Second)
-		}
+		pollUntil(t, 1*time.Minute, "OP verifier did not reach block 10 within timeout", func() bool {
+			return getStoredBlock(t, espressoStore) >= targetBlockNum
+		})
 
 		verifiedBlock := getStoredBlock(t, espressoStore)
 		t.Logf("Espresso store at block %d", verifiedBlock)
@@ -89,10 +57,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 
 	t.Run("rpc compatibility", func(t *testing.T) {
 		t.Log("Starting OP Verifier")
-		logger := log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stdout, log.LevelInfo, true))
-		log.SetDefault(logger)
-
-		v := startVerifier(ctx, t, logger, espressoStore)
+		v := startVerifier(ctx, t, newDefaultLogger(), espressoStore)
 		defer v.Stop()
 
 		userAddr := "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
@@ -165,9 +130,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		for _, tc := range espressoTagMethods {
 			t.Run(tc.method, func(t *testing.T) {
 				proxyParams := jsonMarshal(t, tc.params)
-				directParams := json.RawMessage(
-					bytes.ReplaceAll(proxyParams, []byte(fmt.Sprintf(`"%s"`, espressoTag)), []byte(fmt.Sprintf(`"%s"`, blockHex))),
-				)
+				directParams := replaceTag(proxyParams, espressoTag, blockHex)
 				proxyResp := jsonRPCCallRaw(t, proxyURL, tc.method, proxyParams)
 				directResp := jsonRPCCallRaw(t, opGethFullNode, tc.method, directParams)
 				requireJSONRPCEqual(t, directResp, proxyResp, tc.method)
@@ -188,9 +151,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 			for i, e := range proxyBatch {
 				directBatch[i] = batchEntry{method: e.method}
 				if e.params != nil {
-					directBatch[i].params = json.RawMessage(
-						bytes.ReplaceAll(e.params, []byte(fmt.Sprintf(`"%s"`, espressoTag)), []byte(fmt.Sprintf(`"%s"`, blockHex))),
-					)
+					directBatch[i].params = replaceTag(e.params, espressoTag, blockHex)
 				}
 			}
 
@@ -205,10 +166,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 
 	t.Run("proxy restart resumes from persisted state", func(t *testing.T) {
 		t.Log("Starting OP Verifier")
-		logger := log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stdout, log.LevelInfo, true))
-		log.SetDefault(logger)
-
-		v := startVerifier(ctx, t, logger, espressoStore)
+		v := startVerifier(ctx, t, newDefaultLogger(), espressoStore)
 		defer v.Stop()
 		const initialHotshotHeight = uint64(1)
 		const targetBlockNum = uint64(10)
@@ -222,13 +180,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 
 		firstCapturer := &logCapturer{}
 
-		nodeProxy := proxy.NewProxy(opGethFullNode, initialStore, espressoTag)
-		listener, err := net.Listen("tcp", "127.0.0.1:0")
-		require.NoError(t, err)
-		proxyURL := "http://" + listener.Addr().String()
-		server := &http.Server{Handler: http.HandlerFunc(nodeProxy.Serve)}
-		go func() { _ = server.Serve(listener) }()
-		t.Logf("Proxy listening on %s", proxyURL)
+		proxyURL, shutdownProxy := startTestProxy(ctx, t, opGethFullNode, initialStore, espressoTag)
 
 		// Now we start the verifier and check if it starts with finalizedL2Block and initialHotshotHeight, and that it advances the store past block 10.
 		verifier := startVerifier(ctx, t, log.NewLogger(firstCapturer), initialStore)
@@ -238,14 +190,9 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		})
 
 		t.Log("Waiting for OP verifer to update espresso store past block 10")
-		deadline := time.Now().Add(3 * time.Minute)
-		for {
-			require.True(t, time.Now().Before(deadline), "OP verifier did not reach block 10 within timeout")
-			if getStoredBlock(t, initialStore) >= finalizedL2Block+targetBlockNum {
-				break
-			}
-			time.Sleep(time.Second)
-		}
+		pollUntil(t, 3*time.Minute, "OP verifier did not reach block 10 within timeout", func() bool {
+			return getStoredBlock(t, initialStore) >= finalizedL2Block+targetBlockNum
+		})
 
 		verifier.Stop()
 
@@ -263,23 +210,16 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 
 		require.GreaterOrEqual(t, preRestartHotshotHeight, initialHotshotHeight, "store did not advance past initial hotshot height")
 		require.Greater(t, preRestartBlock, finalizedL2Block, "store did not advance past finalized block")
-		_ = server.Shutdown(ctx)
+		shutdownProxy()
 		t.Log("proxy and verifier stopped")
 
 		// Now that proxy has advanced to a higher block number and hotshot height,
 		// we will restart the proxy with with the same state file, and assert it resumes from the persisted state correctly.
 		newStore, err := espressostore.NewEspressoStore(initialStateFile, initialHotshotHeight)
-
 		require.NoError(t, err)
 
-		newProxy := proxy.NewProxy(opGethFullNode, newStore, espressoTag)
-		listener, err = net.Listen("tcp", "127.0.0.1:0")
-		require.NoError(t, err)
-		proxyURL = "http://" + listener.Addr().String()
-		server = &http.Server{Handler: http.HandlerFunc(newProxy.Serve)}
-		go func() { _ = server.Serve(listener) }()
-		t.Logf("New proxy listening on %s", proxyURL)
-		defer func() { _ = server.Shutdown(ctx) }()
+		proxyURL, shutdownProxy = startTestProxy(ctx, t, opGethFullNode, newStore, espressoTag)
+		defer shutdownProxy()
 
 		resumedBlock := getStoredBlock(t, newStore)
 		require.Equal(t, preRestartBlock, resumedBlock, "new store should resume from persisted block")
@@ -300,11 +240,15 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 	})
 
 	t.Run("switchover with espresso tag", func(t *testing.T) {
+		// Capture the current HotShot height before espresso batcher starts posting.
+		hotshotHeight := getHotshotHeight(t)
+		t.Logf("Captured HotShot height %d", hotshotHeight)
+
 		// Switch to fallback batcher so there is no espresso state.
 		t.Log("Stopping espresso batcher and activating fallback batcher")
 		dockerComposeStop(t, rollupWorkingDir, "op-batcher")
 		switchBatcher(t)
-		dockerComposeStart(t, rollupWorkingDir, []string{"fallback"}, "op-batcher-fallback")
+		dockerComposeStart(t, rollupWorkingDir, []string{"fallback"}, false, "op-batcher-fallback")
 
 		// Cleanup: if the test fails while in fallback mode, restore espresso batcher.
 		fallbackMode := true
@@ -312,29 +256,17 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 			if fallbackMode {
 				dockerComposeStop(t, rollupWorkingDir, "op-batcher-fallback")
 				switchBatcher(t)
-				dockerComposeStart(t, rollupWorkingDir, nil, "op-batcher")
+				dockerComposeStart(t, rollupWorkingDir, nil, false, "op-batcher")
 			}
 		}()
 
-		// Capture the current HotShot height before espresso batcher starts posting.
-		hotshotHeight := getHotshotHeight(t)
-		t.Logf("Captured HotShot height %d while fallback batcher is active", hotshotHeight)
-
 		// Create an empty store and proxy.
-		stateFile := t.TempDir() + "/switchover-state.json"
-		store, err := espressostore.NewEspressoStore(stateFile, hotshotHeight)
-		require.NoError(t, err)
+		store := newTestStore(t, "switchover-state", hotshotHeight)
 		require.Equal(t, uint64(0), getStoredBlock(t, store), "store should start with L2BlockNumber=0")
 
 		t.Log("Starting proxy with empty store, fallback batcher active")
-		p := proxy.NewProxy(opGethFullNode, store, espressoTag)
-		listener, err := net.Listen("tcp", "127.0.0.1:0")
-		require.NoError(t, err)
-		proxyURL := "http://" + listener.Addr().String()
-		server := &http.Server{Handler: http.HandlerFunc(p.Serve)}
-		go func() { _ = server.Serve(listener) }()
-		defer func() { _ = server.Shutdown(ctx) }()
-		t.Logf("proxy listening on %s", proxyURL)
+		proxyURL, shutdownProxy := startTestProxy(ctx, t, opGethFullNode, store, espressoTag)
+		defer shutdownProxy()
 
 		// Espresso tag should error because the store has no verified state.
 		resp := jsonRPCCallRaw(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{espressoTag, false}))
@@ -352,29 +284,21 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		t.Log("Stopping fallback batcher and activating espresso batcher")
 		dockerComposeStop(t, rollupWorkingDir, "op-batcher-fallback")
 		switchBatcher(t)
-		dockerComposeStart(t, rollupWorkingDir, nil, "op-batcher")
+		dockerComposeStart(t, rollupWorkingDir, nil, false, "op-batcher")
 		fallbackMode = false
 
 		// Start the verifier — it reads FallbackHotshotHeight from the store
 		// (captured before the switch) and immediately picks up new espresso batches.
 		t.Log("Starting verifier to sync from Espresso")
-		logger := log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stdout, log.LevelInfo, true))
-		log.SetDefault(logger)
-		v := startVerifier(ctx, t, logger, store)
+		v := startVerifier(ctx, t, newDefaultLogger(), store)
 		defer v.Stop()
 
 		t.Log("Waiting for espresso finalized block to exceed ethereum finalized block")
-		deadline := time.Now().Add(3 * time.Minute)
 		var ethFinalizedBlock uint64
-		for {
-			require.True(t, time.Now().Before(deadline), "verifier did not advance past ethereum finalized block within timeout")
+		pollUntil(t, 3*time.Minute, "verifier did not advance past ethereum finalized block within timeout", func() bool {
 			ethFinalizedBlock = getBlockByTag(t, opGethFullNode, "finalized")
-			storedBlock := getStoredBlock(t, store)
-			if ethFinalizedBlock > 0 && storedBlock > ethFinalizedBlock {
-				break
-			}
-			time.Sleep(time.Second)
-		}
+			return ethFinalizedBlock > 0 && getStoredBlock(t, store) > ethFinalizedBlock
+		})
 		t.Logf("Switchover complete: store at block %d (ethereum finalized at %d)", getStoredBlock(t, store), ethFinalizedBlock)
 
 		// Post-switchover: espresso tag should resolve.
@@ -388,37 +312,29 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 	t.Run("switchover with finalized tag", func(t *testing.T) {
 		espressoTag := "finalized"
 
+		hotshotHeight := getHotshotHeight(t)
+		t.Logf("Captured HotShot height %d", hotshotHeight)
+
 		t.Log("Stopping espresso batcher and activating fallback batcher")
 		dockerComposeStop(t, rollupWorkingDir, "op-batcher")
 		switchBatcher(t)
-		dockerComposeStart(t, rollupWorkingDir, []string{"fallback"}, "op-batcher-fallback")
+		dockerComposeStart(t, rollupWorkingDir, []string{"fallback"}, false, "op-batcher-fallback")
 
 		fallbackMode := true
 		defer func() {
 			if fallbackMode {
 				dockerComposeStop(t, rollupWorkingDir, "op-batcher-fallback")
 				switchBatcher(t)
-				dockerComposeStart(t, rollupWorkingDir, nil, "op-batcher")
+				dockerComposeStart(t, rollupWorkingDir, nil, false, "op-batcher")
 			}
 		}()
 
-		hotshotHeight := getHotshotHeight(t)
-		t.Logf("Captured HotShot height %d while fallback batcher is active", hotshotHeight)
-
-		stateFile := t.TempDir() + "/switchover-finalized-state.json"
-		store, err := espressostore.NewEspressoStore(stateFile, hotshotHeight)
-		require.NoError(t, err)
+		store := newTestStore(t, "switchover-finalized-state", hotshotHeight)
 		require.Equal(t, uint64(0), getStoredBlock(t, store), "store should start with L2BlockNumber=0")
 
 		t.Log("Starting proxy with finalized tag, empty store, fallback batcher active")
-		p := proxy.NewProxy(opGethFullNode, store, espressoTag)
-		listener, err := net.Listen("tcp", "127.0.0.1:0")
-		require.NoError(t, err)
-		proxyURL := "http://" + listener.Addr().String()
-		server := &http.Server{Handler: http.HandlerFunc(p.Serve)}
-		go func() { _ = server.Serve(listener) }()
-		defer func() { _ = server.Shutdown(ctx) }()
-		t.Logf("proxy listening on %s", proxyURL)
+		proxyURL, shutdownProxy := startTestProxy(ctx, t, opGethFullNode, store, espressoTag)
+		defer shutdownProxy()
 
 		// "finalized" is a valid Ethereum tag so the full node handles it even
 		// when the store is empty (request passes through unchanged).
@@ -439,27 +355,19 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		t.Log("Stopping fallback batcher and activating espresso batcher")
 		dockerComposeStop(t, rollupWorkingDir, "op-batcher-fallback")
 		switchBatcher(t)
-		dockerComposeStart(t, rollupWorkingDir, nil, "op-batcher")
+		dockerComposeStart(t, rollupWorkingDir, nil, false, "op-batcher")
 		fallbackMode = false
 
 		t.Log("Starting verifier to sync from Espresso")
-		logger := log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stdout, log.LevelInfo, true))
-		log.SetDefault(logger)
-		v := startVerifier(ctx, t, logger, store)
+		v := startVerifier(ctx, t, newDefaultLogger(), store)
 		defer v.Stop()
 
 		t.Log("Waiting for espresso finalized block to exceed ethereum finalized block")
-		deadline := time.Now().Add(3 * time.Minute)
 		var ethFinalizedBlock uint64
-		for {
-			require.True(t, time.Now().Before(deadline), "verifier did not advance past ethereum finalized block within timeout")
+		pollUntil(t, 3*time.Minute, "verifier did not advance past ethereum finalized block within timeout", func() bool {
 			ethFinalizedBlock = getBlockByTag(t, opGethFullNode, "finalized")
-			storedBlock := getStoredBlock(t, store)
-			if ethFinalizedBlock > 0 && storedBlock > ethFinalizedBlock {
-				break
-			}
-			time.Sleep(time.Second)
-		}
+			return ethFinalizedBlock > 0 && getStoredBlock(t, store) > ethFinalizedBlock
+		})
 		t.Logf("Switchover complete: store at block %d (ethereum finalized at %d)", getStoredBlock(t, store), ethFinalizedBlock)
 
 		// After switchover: proxy replaces "finalized" with the Espresso finalized block
@@ -474,34 +382,21 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 	})
 
 	t.Run("fallback to ethereum finality when espresso stops", func(t *testing.T) {
-		stateFile := t.TempDir() + "/fallback-state.json"
-		store, err := espressostore.NewEspressoStore(stateFile, 1)
-		require.NoError(t, err)
-		err = store.Update(1, 1)
+		store := newTestStore(t, "fallback-state", 1)
+		err := store.Update(1, 1)
 		require.NoError(t, err)
 
-		p := proxy.NewProxy(opGethFullNode, store, "finalized")
-		listener, err := net.Listen("tcp", "127.0.0.1:0")
-		require.NoError(t, err)
-		proxyURL := "http://" + listener.Addr().String()
-		server := &http.Server{Handler: http.HandlerFunc(p.Serve)}
-		go func() { _ = server.Serve(listener) }()
-		defer func() { _ = server.Shutdown(ctx) }()
-		t.Logf("proxy listening on %s", proxyURL)
+		proxyURL, shutdownProxy := startTestProxy(ctx, t, opGethFullNode, store, "finalized")
+		defer shutdownProxy()
 
 		capturer := &logCapturer{}
 		v := startVerifier(ctx, t, log.NewLogger(capturer), store)
 		defer v.Stop()
 
 		t.Log("Waiting for espresso verifier to advance past block 5")
-		deadline := time.Now().Add(3 * time.Minute)
-		for {
-			require.True(t, time.Now().Before(deadline), "espresso verifier did not advance past block 5 within timeout")
-			if getStoredBlock(t, store) >= 5 {
-				break
-			}
-			time.Sleep(time.Second)
-		}
+		pollUntil(t, 3*time.Minute, "espresso verifier did not advance past block 5 within timeout", func() bool {
+			return getStoredBlock(t, store) >= 5
+		})
 		preStopBlock := getStoredBlock(t, store)
 		t.Logf("Espresso advanced to block %d, stopping espresso batcher", preStopBlock)
 
@@ -511,35 +406,28 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		switchBatcher(t)
 		defer func() {
 			switchBatcher(t)
-			dockerComposeStart(t, rollupWorkingDir, nil, "op-batcher")
+			dockerComposeStart(t, rollupWorkingDir, nil, false, "op-batcher")
 		}()
 
 		t.Log("Starting fallback batcher (espresso disabled)")
-		dockerComposeStart(t, rollupWorkingDir, []string{"fallback"}, "op-batcher-fallback")
+		dockerComposeStart(t, rollupWorkingDir, []string{"fallback"}, false, "op-batcher-fallback")
 		defer dockerComposeStop(t, rollupWorkingDir, "op-batcher-fallback")
 
 		t.Log("Waiting for L2 full node to finalize blocks beyond the pre-stop espresso block")
-		deadline = time.Now().Add(3 * time.Minute)
 		var ethFinalized uint64
-		for {
-			require.True(t, time.Now().Before(deadline), "L2 full node did not finalize past pre-stop block within timeout")
+		pollUntil(t, 3*time.Minute, "L2 full node did not finalize past pre-stop block within timeout", func() bool {
 			ethFinalized = getBlockByTag(t, opGethFullNode, "finalized")
 			if ethFinalized > preStopBlock {
 				t.Logf("L2 finalized block %d is past pre-stop espresso block %d", ethFinalized, preStopBlock)
-				break
+				return true
 			}
-			time.Sleep(time.Second)
-		}
+			return false
+		})
 
 		t.Log("Waiting for verifier to advance store using ethereum finality")
-		deadline = time.Now().Add(3 * time.Minute)
-		for {
-			require.True(t, time.Now().Before(deadline), "verifier did not advance store past pre-stop block via ethereum finality within timeout")
-			if getStoredBlock(t, store) > ethFinalized {
-				break
-			}
-			time.Sleep(time.Second)
-		}
+		pollUntil(t, 3*time.Minute, "verifier did not advance store past pre-stop block via ethereum finality within timeout", func() bool {
+			return getStoredBlock(t, store) > ethFinalized
+		})
 		t.Logf("Store advanced to block %d (was %d before espresso batcher stopped)", getStoredBlock(t, store), preStopBlock)
 
 		requireLogStringAttrs(t, capturer, "ethereum finalized block is ahead of espresso finalized block", map[string]string{})

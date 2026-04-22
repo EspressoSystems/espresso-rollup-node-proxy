@@ -9,7 +9,9 @@ import (
 	"io"
 	"log/slog"
 	"math/big"
+	"net"
 	"net/http"
+	"os"
 	"os/exec"
 	"proxy/proxy"
 	verifier "proxy/verifier/op"
@@ -69,7 +71,7 @@ const (
 	p2pAttackUrl                   = "http://127.0.0.1:8560"
 	L2_CHAIN_ID                    = 22266222
 	espressoTag                    = "espresso"
-	finalizedBlocks                = 100
+	finalizedBlocks                = 200
 	batchAuthenticatorAddress      = "0x4826533b4897376654bb4d4ad88b7fafd0c98528"
 	batchAuthenticatorOwnerAddress = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
 )
@@ -98,16 +100,6 @@ func startVerifier(ctx context.Context, t *testing.T, logger log.Logger, store *
 
 func runDockerCompose(workingDir string, services ...string) func() {
 	return runDockerComposeFile(workingDir, "", services...)
-}
-
-func dockerComposeExec(t *testing.T, workingDir, composeFile, action, service string) {
-	t.Helper()
-	args := []string{"compose", "-f", composeFile, action, service}
-	cmd := exec.Command("docker", args...)
-	cmd.Dir = workingDir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("docker compose %s %s failed: %v\n%s", action, service, err, out)
-	}
 }
 
 func runDockerComposeFile(workingDir string, composeFile string, services ...string) func() {
@@ -153,13 +145,18 @@ func dockerComposeStop(t *testing.T, workingDir string, service string) {
 	}
 }
 
-func dockerComposeStart(t *testing.T, workingDir string, profiles []string, services ...string) {
+// dockerComposeStart starts services. When noDeps is true, --no-deps is passed so only
+// the named services are started/recreated without touching their dependencies.
+func dockerComposeStart(t *testing.T, workingDir string, profiles []string, noDeps bool, services ...string) {
 	t.Helper()
 	args := []string{"compose"}
 	for _, p := range profiles {
 		args = append(args, "--profile", p)
 	}
 	args = append(args, "up", "-d")
+	if noDeps {
+		args = append(args, "--no-deps")
+	}
 	args = append(args, services...)
 	cmd := exec.Command("docker", args...)
 	cmd.Dir = workingDir
@@ -232,6 +229,16 @@ func waitForHTTPReady(t *testing.T, url string, timeout time.Duration) {
 		time.Sleep(500 * time.Millisecond)
 	}
 	t.Fatalf("HTTP service at %s did not become ready within %s", url, timeout)
+}
+
+func waitForRollupServicesReady(t *testing.T) {
+	t.Helper()
+	waitForHTTPReady(t, l1GethURL, 1*time.Minute)
+	waitForHTTPReady(t, espressoURL+"/v0/status/block-height", 1*time.Minute)
+	waitForHTTPReady(t, opGethSeqURL, 1*time.Minute)
+	waitForHTTPReady(t, opNodeSeqURL, 1*time.Minute)
+	waitForHTTPReady(t, opGethFullNode, 1*time.Minute)
+	waitForHTTPReady(t, opNodeFullNode, 1*time.Minute)
 }
 
 type JSONRPCResponse struct {
@@ -344,6 +351,105 @@ func jsonRPCBatchCallRaw(t *testing.T, url string, entries []batchEntry) []JSONR
 	require.NoError(t, json.Unmarshal(respBody, &rpcResps), "batch response: %s", string(respBody))
 	require.Len(t, rpcResps, len(entries), "batch response count mismatch")
 	return rpcResps
+}
+
+func startTestProxy(ctx context.Context, t *testing.T, backendURL string, store *espressostore.EspressoStore, tag string) (proxyURL string, shutdown func()) {
+	t.Helper()
+	p := proxy.NewProxy(backendURL, store, tag)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	proxyURL = "http://" + listener.Addr().String()
+	server := &http.Server{Handler: http.HandlerFunc(p.Serve)}
+	go func() { _ = server.Serve(listener) }()
+	t.Logf("proxy listening on %s", proxyURL)
+	return proxyURL, func() { _ = server.Shutdown(ctx) }
+}
+
+func pollUntil(t *testing.T, timeout time.Duration, failMsg string, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		require.True(t, time.Now().Before(deadline), failMsg)
+		if condition() {
+			return
+		}
+		time.Sleep(time.Second)
+	}
+}
+
+func newTestStore(t *testing.T, name string, hotshotHeight uint64) *espressostore.EspressoStore {
+	t.Helper()
+	stateFile := t.TempDir() + "/" + name + ".json"
+	store, err := espressostore.NewEspressoStore(stateFile, hotshotHeight)
+	require.NoError(t, err)
+	return store
+}
+
+func newDefaultLogger() log.Logger {
+	logger := log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stdout, log.LevelInfo, true))
+	log.SetDefault(logger)
+	return logger
+}
+
+func replaceTag(data json.RawMessage, oldTag, newTag string) json.RawMessage {
+	return json.RawMessage(
+		bytes.ReplaceAll(data, []byte(fmt.Sprintf(`"%s"`, oldTag)), []byte(fmt.Sprintf(`"%s"`, newTag))),
+	)
+}
+
+func requireProxyTagMatchesDirectBlock(t *testing.T, proxyURL, directURL, tag string) {
+	t.Helper()
+	proxyResult := jsonRPCCall(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{tag, false}))
+	var proxyBlock struct {
+		Number string `json:"number"`
+	}
+	require.NoError(t, json.Unmarshal(proxyResult, &proxyBlock))
+	directResult := jsonRPCCall(t, directURL, "eth_getBlockByNumber", jsonMarshal(t, []any{proxyBlock.Number, false}))
+	require.JSONEq(t, string(directResult), string(proxyResult))
+}
+
+func monitorStoredBlockProgress(t *testing.T, store *espressostore.EspressoStore, initialBlock uint64, timeout time.Duration, stopWhen func(current uint64) bool) uint64 {
+	t.Helper()
+	previous := initialBlock
+	deadline := time.Now().Add(timeout)
+	for {
+		current := getStoredBlock(t, store)
+		require.GreaterOrEqual(t, current, previous,
+			"proxy block moved backwards: was %d, now %d", previous, current)
+		if current > previous {
+			t.Logf("Proxy advanced to L2 block %d", current)
+			previous = current
+		}
+
+		latestFullNodeBlock := getBlockByTag(t, opGethFullNode, "latest")
+		require.LessOrEqual(t, current, latestFullNodeBlock,
+			"proxy espresso block %d is ahead of OP geth full nodes latest block %d", current, latestFullNodeBlock)
+
+		if stopWhen(current) || time.Now().After(deadline) {
+			return previous
+		}
+		time.Sleep(time.Second)
+	}
+}
+
+func captureBlockHashes(t *testing.T, label string, from, to uint64) map[uint64]string {
+	t.Helper()
+	hashes := make(map[uint64]string)
+	t.Logf("Block hashes %s (blocks %d..%d):", label, from, to)
+	for i := from; i <= to; i++ {
+		result := jsonRPCCall(t, opGethSeqURL, "eth_getBlockByNumber",
+			jsonMarshal(t, []any{fmt.Sprintf("0x%x", i), false}))
+		var block struct {
+			Hash string `json:"hash"`
+		}
+		if err := json.Unmarshal(result, &block); err != nil || block.Hash == "" {
+			t.Logf("  block %d: <not found>", i)
+		} else {
+			t.Logf("  block %d: %s", i, block.Hash)
+			hashes[i] = block.Hash
+		}
+	}
+	return hashes
 }
 
 func getStoredBlock(t *testing.T, store *espressostore.EspressoStore) uint64 {
