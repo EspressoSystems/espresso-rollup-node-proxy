@@ -73,4 +73,29 @@ func TestEspressoStore(t *testing.T) {
 		require.False(t, state.UpdatedAt.IsZero())
 	})
 
+	t.Run("Test UpdateIfGreater", func(t *testing.T) {
+		fp := tempFilePath(t)
+		store, err := NewEspressoStore(fp, 1)
+		require.NoError(t, err)
+		err = store.Update(10, 5)
+		require.NoError(t, err)
+
+		updated, err := store.UpdateIfGreater(10, 99)
+		require.NoError(t, err)
+		require.False(t, updated, "equal block number should be rejected")
+
+		updated, err = store.UpdateIfGreater(3, 99)
+		require.NoError(t, err)
+		require.False(t, updated, "lower block number should be rejected")
+
+		require.Equal(t, uint64(5), store.GetState().FallbackHotshotHeight, "state should be unchanged after rejections")
+
+		updated, err = store.UpdateIfGreater(20, 30)
+		require.NoError(t, err)
+		require.True(t, updated)
+		state := store.GetState()
+		require.Equal(t, uint64(20), state.L2BlockNumber)
+		require.Equal(t, uint64(30), state.FallbackHotshotHeight)
+	})
+
 }

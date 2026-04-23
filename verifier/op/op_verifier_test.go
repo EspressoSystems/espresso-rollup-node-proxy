@@ -435,7 +435,7 @@ func TestProxyUsesEthereumFinalizedBlockWhenEspressoStopsAdvancing(t *testing.T)
 	}))
 	defer upstream.Close()
 
-	proxy := proxyPkg.NewProxy(upstream.URL, h.store, "finalized")
+	proxy := proxyPkg.NewProxy(&proxyPkg.ProxyConfig{FullNodeExecutionRPC: upstream.URL, EspressoTag: "finalized", MaxBatchSize: proxyPkg.DefaultMaxBatchSize}, h.store)
 	callProxy := func() string {
 		reqBody := `{"jsonrpc":"2.0","id":1,"method":"eth_getBlockByNumber","params":["finalized",false]}`
 		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))

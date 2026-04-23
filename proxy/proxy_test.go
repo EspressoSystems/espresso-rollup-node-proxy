@@ -20,7 +20,7 @@ func newTestProxy(t *testing.T, upstreamURL string, l2BlockNumber uint64, espres
 	require.NoError(t, err)
 	err = store.Update(l2BlockNumber, 1)
 	require.NoError(t, err)
-	return NewProxy(upstreamURL, store, espressoTag)
+	return NewProxy(&ProxyConfig{FullNodeExecutionRPC: upstreamURL, EspressoTag: espressoTag, MaxBatchSize: DefaultMaxBatchSize}, store)
 }
 
 type errReader struct{}
@@ -132,6 +132,25 @@ func TestServe(t *testing.T) {
 		require.JSONEq(t, "null", string(resp.ID))
 	})
 
+	t.Run("rejects batch exceeding max batch size", func(t *testing.T) {
+		fp := filepath.Join(t.TempDir(), "state.json")
+		store, err := espressoStore.NewEspressoStore(fp, 1)
+		require.NoError(t, err)
+		require.NoError(t, store.Update(100, 1))
+		p := NewProxy(&ProxyConfig{FullNodeExecutionRPC: "http://unused", EspressoTag: "espresso", MaxBatchSize: 2}, store)
+
+		body := `[{"jsonrpc":"2.0","id":1,"method":"eth_chainId"},{"jsonrpc":"2.0","id":2,"method":"eth_chainId"},{"jsonrpc":"2.0","id":3,"method":"eth_chainId"}]`
+		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
+		rec := httptest.NewRecorder()
+
+		p.Serve(rec, req)
+		var resp JSONRPCResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		require.NotNil(t, resp.Error)
+		require.Equal(t, INVALID_REQUEST_CODE, resp.Error.Code)
+		require.Equal(t, "batch too large", resp.Error.Message)
+	})
+
 	t.Run("replaces finalized tag when configured", func(t *testing.T) {
 		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			body, err := io.ReadAll(r.Body)
@@ -160,5 +179,4 @@ func TestServe(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, rec.Code)
 	})
-
 }

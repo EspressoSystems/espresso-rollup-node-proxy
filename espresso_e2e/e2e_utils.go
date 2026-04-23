@@ -203,18 +203,6 @@ func switchBatcher(t *testing.T) {
 	}
 }
 
-func getHotshotHeight(t *testing.T) uint64 {
-	t.Helper()
-	resp, err := http.Get(espressoURL + "/v0/status/block-height")
-	require.NoError(t, err)
-	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	var height uint64
-	require.NoError(t, json.Unmarshal(body, &height))
-	return height
-}
-
 func waitForHTTPReady(t *testing.T, url string, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -358,7 +346,12 @@ func jsonRPCBatchCallRaw(t *testing.T, url string, entries []batchEntry) []JSONR
 
 func startTestProxy(ctx context.Context, t *testing.T, backendURL string, store *espressostore.EspressoStore, tag string) (proxyURL string, shutdown func()) {
 	t.Helper()
-	p := proxy.NewProxy(backendURL, store, tag)
+	p := proxy.NewProxy(&proxy.ProxyConfig{
+		FullNodeExecutionRPC: backendURL,
+		EspressoTag:          tag,
+		MaxBatchSize:         proxy.DefaultMaxBatchSize,
+		MaxRequestBodySize:   proxy.DefaultMaxRequestBodySize,
+	}, store)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	proxyURL = "http://" + listener.Addr().String()

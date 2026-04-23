@@ -80,6 +80,24 @@ func (es *EspressoStore) Update(l2BlockNumber uint64, fallbackHotshotHeight uint
 	return nil
 }
 
+func (es *EspressoStore) UpdateIfGreater(l2BlockNumber uint64, fallbackHotshotHeight uint64) (bool, error) {
+	es.mu.Lock()
+	defer es.mu.Unlock()
+	if es.state.L2BlockNumber >= l2BlockNumber {
+		return false, nil
+	}
+	originalState := es.state
+	es.state.L2BlockNumber = l2BlockNumber
+	es.state.FallbackHotshotHeight = fallbackHotshotHeight
+	es.state.UpdatedAt = time.Now()
+
+	if err := es.writeToDisk(); err != nil {
+		es.state = originalState
+		return false, fmt.Errorf("failed to write updated state to disk: %w", err)
+	}
+	return true, nil
+}
+
 func (es *EspressoStore) loadFromDisk() error {
 	data, err := os.ReadFile(es.filePath)
 	if err != nil {
@@ -90,7 +108,7 @@ func (es *EspressoStore) loadFromDisk() error {
 	if err := json.Unmarshal(data, &state); err != nil {
 		return err
 	}
-	if state.FallbackHotshotHeight == 0 || state.L2BlockNumber == 0 || state.UpdatedAt.IsZero() {
+	if state.FallbackHotshotHeight == 0 || state.UpdatedAt.IsZero() {
 		return fmt.Errorf("invalid state file: missing required fields")
 	}
 	es.state = state
