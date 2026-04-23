@@ -179,7 +179,6 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		require.NoError(t, err)
 
 		firstCapturer := &logCapturer{}
-
 		proxyURL, shutdownProxy := startTestProxy(ctx, t, opGethFullNode, initialStore, espressoTag)
 
 		// Now we start the verifier and check if it starts with finalizedL2Block and initialHotshotHeight, and that it advances the store past block 10.

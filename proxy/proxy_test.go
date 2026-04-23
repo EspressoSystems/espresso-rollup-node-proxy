@@ -20,7 +20,7 @@ func newTestProxy(t *testing.T, upstreamURL string, l2BlockNumber uint64, espres
 	require.NoError(t, err)
 	err = store.Update(l2BlockNumber, 1)
 	require.NoError(t, err)
-	return NewProxy(upstreamURL, store, espressoTag)
+	return NewProxy(&ProxyConfig{FullNodeExecutionRPC: upstreamURL, EspressoTag: espressoTag, MaxBatchSize: DefaultMaxBatchSize}, store)
 }
 
 type errReader struct{}
@@ -132,25 +132,23 @@ func TestServe(t *testing.T) {
 		require.JSONEq(t, "null", string(resp.ID))
 	})
 
-	t.Run("rejects request body exceeding size limit", func(t *testing.T) {
-		proxy := newTestProxy(t, "http://unused", 100, "espresso")
+	t.Run("rejects batch exceeding max batch size", func(t *testing.T) {
+		fp := filepath.Join(t.TempDir(), "state.json")
+		store, err := espressoStore.NewEspressoStore(fp, 1)
+		require.NoError(t, err)
+		require.NoError(t, store.Update(100, 1))
+		p := NewProxy(&ProxyConfig{FullNodeExecutionRPC: "http://unused", EspressoTag: "espresso", MaxBatchSize: 2}, store)
 
-		oversizedBody := make([]byte, maxRequestBodySize+1)
-		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(oversizedBody))
-		req.Header.Set("Content-Type", "application/json")
+		body := `[{"jsonrpc":"2.0","id":1,"method":"eth_chainId"},{"jsonrpc":"2.0","id":2,"method":"eth_chainId"},{"jsonrpc":"2.0","id":3,"method":"eth_chainId"}]`
+		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
 		rec := httptest.NewRecorder()
 
-		proxy.Serve(rec, req)
-
-		require.Equal(t, http.StatusOK, rec.Code)
-		require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
-
+		p.Serve(rec, req)
 		var resp JSONRPCResponse
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 		require.NotNil(t, resp.Error)
-		require.Equal(t, PARSE_ERROR_CODE, resp.Error.Code)
-		require.Equal(t, "request body too large", resp.Error.Message)
-		require.JSONEq(t, "null", string(resp.ID))
+		require.Equal(t, INVALID_REQUEST_CODE, resp.Error.Code)
+		require.Equal(t, "batch too large", resp.Error.Message)
 	})
 
 	t.Run("replaces finalized tag when configured", func(t *testing.T) {
@@ -181,5 +179,4 @@ func TestServe(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, rec.Code)
 	})
-
 }

@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	espressoStore "proxy/store"
 
@@ -37,15 +38,30 @@ type JSONRPCResponse struct {
 // the specified espresso tag and replacing the tag with a block number
 // finalized by Espresso. Note: the espreso tag can be "finalized", "espresso" etc
 // and is configurable
+const maxJSONDepth = 32
+
+var errMaxJSONDepthExceeded = errors.New("JSON nesting depth exceeds limit")
+
 type Interceptor struct {
-	store       *espressoStore.EspressoStore
-	espressoTag string
+	store        *espressoStore.EspressoStore
+	espressoTag  string
+	maxBatchSize int
 }
 
-func NewInterceptor(store *espressoStore.EspressoStore, espressoTag string) *Interceptor {
+type BatchTooLargeError struct {
+	Count int
+	Limit int
+}
+
+func (e *BatchTooLargeError) Error() string {
+	return fmt.Sprintf("batch too large (count %d exceeds limit %d)", e.Count, e.Limit)
+}
+
+func NewInterceptor(store *espressoStore.EspressoStore, espressoTag string, maxBatchSize int) *Interceptor {
 	return &Interceptor{
-		store:       store,
-		espressoTag: espressoTag,
+		store:        store,
+		espressoTag:  espressoTag,
+		maxBatchSize: maxBatchSize,
 	}
 }
 
@@ -67,6 +83,9 @@ func (i *Interceptor) interceptBatch(rawRequest []byte) ([]byte, error) {
 	var batch []json.RawMessage
 	if err := json.Unmarshal(rawRequest, &batch); err != nil {
 		return nil, fmt.Errorf("failed to parse batch JSON-RPC request: %w", err)
+	}
+	if i.maxBatchSize > 0 && len(batch) > i.maxBatchSize {
+		return nil, &BatchTooLargeError{Count: len(batch), Limit: i.maxBatchSize}
 	}
 
 	state := i.store.GetState()
@@ -127,7 +146,7 @@ func (i *Interceptor) replaceEspressoTag(rawRequest []byte, blockNumber uint64) 
 		return rawRequest, false, nil
 	}
 
-	replacedParams, changed, err := i.replaceTagInParams(req.Params, blockNumber)
+	replacedParams, changed, err := i.replaceTagInParams(req.Params, blockNumber, 0)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to replace espresso tag with block number: %w", err)
 	}
@@ -149,7 +168,11 @@ func (i *Interceptor) replaceEspressoTag(rawRequest []byte, blockNumber uint64) 
 
 // replaceTagInParams recursively walks JSON params and replaces
 // exact matches of the espresso tag with a hex block number.
-func (i *Interceptor) replaceTagInParams(params json.RawMessage, espressoFinalizedBlockNumber uint64) (json.RawMessage, bool, error) {
+func (i *Interceptor) replaceTagInParams(params json.RawMessage, espressoFinalizedBlockNumber uint64, depth int) (json.RawMessage, bool, error) {
+	if depth > maxJSONDepth {
+		return nil, false, errMaxJSONDepthExceeded
+	}
+
 	var s string
 
 	// Case 1: params is a string containing the espresso tag
@@ -176,7 +199,7 @@ func (i *Interceptor) replaceTagInParams(params json.RawMessage, espressoFinaliz
 	if err := json.Unmarshal(params, &obj); err == nil {
 		changed := false
 		for key, value := range obj {
-			result, c, err := i.replaceTagInParams(value, espressoFinalizedBlockNumber)
+			result, c, err := i.replaceTagInParams(value, espressoFinalizedBlockNumber, depth+1)
 			if err != nil {
 				return nil, false, fmt.Errorf("failed to replace espresso tag in object: %w", err)
 			}
@@ -205,7 +228,7 @@ func (i *Interceptor) replaceTagInParams(params json.RawMessage, espressoFinaliz
 	if err := json.Unmarshal(params, &arr); err == nil {
 		changed := false
 		for j, value := range arr {
-			result, c, err := i.replaceTagInParams(value, espressoFinalizedBlockNumber)
+			result, c, err := i.replaceTagInParams(value, espressoFinalizedBlockNumber, depth+1)
 			if err != nil {
 				return nil, false, fmt.Errorf("failed to replace espresso tag in array: %w", err)
 			}
