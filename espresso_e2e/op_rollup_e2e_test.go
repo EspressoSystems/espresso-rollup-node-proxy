@@ -179,6 +179,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		require.NoError(t, err)
 
 		firstCapturer := &logCapturer{}
+
 		proxyURL, shutdownProxy := startTestProxy(ctx, t, opGethFullNode, initialStore, espressoTag)
 
 		// Now we start the verifier and check if it starts with finalizedL2Block and initialHotshotHeight, and that it advances the store past block 10.
@@ -308,7 +309,6 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 
 	t.Run("switchover with finalized tag", func(t *testing.T) {
 		espressoTag := "finalized"
-
 		hotshotHeight := uint64(0)
 
 		t.Log("Stopping espresso batcher and activating fallback batcher")
@@ -426,7 +426,9 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		})
 		t.Logf("Store advanced to block %d (was %d before espresso batcher stopped)", getStoredBlock(t, store), preStopBlock)
 
-		requireLogStringAttrs(t, capturer, "ethereum finalized block is ahead of espresso finalized block", map[string]string{})
+		pollUntil(t, 1*time.Minute, "verifier did not log that ethereum finalized block is ahead of espresso finalized block within timeout", func() bool {
+			return matchLogStringAttrs(capturer, "ethereum finalized block is ahead of espresso finalized block", map[string]string{})
+		})
 		t.Log("Confirmed: verifier logged that ethereum finalized block is ahead of espresso finalized block")
 
 		resp := jsonRPCCallRaw(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{"finalized", false}))
