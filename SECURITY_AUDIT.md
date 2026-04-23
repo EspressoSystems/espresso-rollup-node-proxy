@@ -8,15 +8,15 @@
 
 ## Executive Summary
 
-The Espresso Rollup Node Proxy is a Go service that intercepts JSON-RPC calls to enforce Espresso finality on rollup full nodes. This audit identified **25 findings** across security, consensus logic, infrastructure, and supply chain dimensions.
+The Espresso Rollup Node Proxy is a Go service that intercepts JSON-RPC calls to enforce Espresso finality on rollup full nodes. This audit identified **23 findings** across security, consensus logic, infrastructure, and supply chain dimensions.
 
 | Severity | Count |
 |----------|-------|
-| Critical | 5 |
-| High     | 7 |
+| Critical | 4 |
+| High     | 6 |
 | Medium   | 10 |
 | Low      | 3 |
-| **Total** | **25** |
+| **Total** | **23** |
 
 The most impactful issues are: complete lack of authentication/rate-limiting on the HTTP proxy, unbounded request body reads enabling OOM denial-of-service, missing HTTP server timeouts enabling slowloris attacks, unrestricted RPC method forwarding to the backend node, and non-atomic state updates in the verifier that can cause finality regressions under concurrency.
 
@@ -137,33 +137,6 @@ func (v *OPEspressoBatchVerifier) advanceStreamerAndEspressoState(ctx context.Co
 **Impact**: Under concurrent access or rapid verification intervals, the store could regress to a lower block number, violating the monotonicity invariant that the proxy guarantees to clients. The streamer also advances independently of store success, causing desynchronization.
 
 **Recommendation**: Wrap the entire read-check-update sequence in a single lock, or add a compare-and-swap operation to the store that rejects non-monotonic updates.
-
----
-
-### C-05: Silent Message Dropping in Streamer (Verification Bypass)
-
-**File**: `streamer/nitro/nitro_streamer.go:232-239`  
-**Component**: EspressoStreamer
-
-When RLP decoding of individual messages fails, the error is silently swallowed with `continue`. The function returns success even if messages were dropped.
-
-```go
-// nitro_streamer.go:232-239
-for i, message := range messages {
-    var messageWithMetadata MessageWithMetadata
-    err = rlp.DecodeBytes(message, &messageWithMetadata)
-    if err != nil {
-        log.Warn("failed to decode message", "err", err)
-        continue // Error silently swallowed
-    }
-    // ...
-}
-return result, nil // Returns success even with dropped messages
-```
-
-**Impact**: An attacker who can influence the transaction payload could craft messages that fail to decode, causing those messages to be silently skipped. The proxy would report successful verification of an incomplete batch.
-
-**Recommendation**: Track dropped message count and fail if any messages fail to decode, or expose the dropped count to callers for policy decisions.
 
 ---
 
@@ -310,31 +283,6 @@ for idx, raw := range batch {
 **Impact**: Proxy can serve slightly stale block numbers. In practice, this is a consistency issue within a single batch -- all entries get the same block number, which is actually consistent behavior. The real risk is if the state becomes **invalid** (zeroed) between read and use.
 
 **Recommendation**: This is low-risk given the current single-verifier design. Document the intentional snapshot semantics. If consistency is critical, re-read state per request.
-
----
-
-### H-08: Streamer `Next()` Peek/Advance Not Atomic
-
-**File**: `streamer/nitro/nitro_streamer.go:112-122`  
-**Component**: EspressoStreamer
-
-`Next()` calls `Peek()` (which acquires/releases the lock) then `Advance()` (which acquires/releases the lock again). Between these two operations, another goroutine could call `Reset()` and corrupt state.
-
-```go
-func (s *EspressoStreamer) Next(ctx context.Context) *MessageWithMetadataAndPos {
-    result := s.Peek(ctx) // Lock acquired and released
-    if result == nil {
-        return nil
-    }
-    // RACE WINDOW: Reset() could fire here
-    s.Advance()           // Lock acquired and released again
-    return result
-}
-```
-
-**Impact**: If `Reset()` is called between `Peek` and `Advance`, the streamer advances past the reset position, causing message position tracking to become inconsistent.
-
-**Recommendation**: Combine peek and advance into a single locked operation.
 
 ---
 
@@ -624,7 +572,6 @@ FROM alpine:3.21                      # Tag, not digest
 | ID | Finding | Effort |
 |----|---------|--------|
 | C-04 | Make verifier state update atomic | Medium |
-| C-05 | Fail on message decode errors (or track) | Low |
 | H-04 | Enforce batch request size limit | Low |
 | H-05 | Protect `running` flag with mutex/atomic | Low |
 | M-03 | Add config validation | Low |
@@ -637,7 +584,6 @@ FROM alpine:3.21                      # Tag, not digest
 | ID | Finding | Effort |
 |----|---------|--------|
 | H-06 | Document TOCTOU snapshot semantics | Low |
-| H-08 | Make streamer Next() atomic | Medium |
 | M-01 | Add TLS support or document TLS termination | Medium |
 | M-02 | Fix store file permissions to 0600 | Low |
 | M-04 | Replace string error matching with sentinel errors | Medium |
