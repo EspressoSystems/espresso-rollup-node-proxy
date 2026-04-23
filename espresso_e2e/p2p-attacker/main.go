@@ -101,6 +101,11 @@ func main() {
 		fmt.Fprint(w, p2p.libp2pServer.ID().String())
 	})
 
+	http.HandleFunc("/stop-fork", func(w http.ResponseWriter, r *http.Request) {
+		p2p.StopFork()
+		w.WriteHeader(http.StatusOK)
+	})
+
 	http.HandleFunc("/create-fork-at-block", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 

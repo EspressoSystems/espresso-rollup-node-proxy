@@ -72,6 +72,12 @@ func (p *P2P) SetForkBlock(forkBlock uint64) {
 	}
 }
 
+func (p *P2P) StopFork() {
+	log.Printf("stopping fork (was at block %d, chain len %d)", p.forkBlock, len(p.maliciousChain))
+	p.forkBlock = 0
+	p.maliciousChain = make(map[common.Hash]common.Hash)
+}
+
 // Creates the attacker's server-side libp2p host that fullnodes connect to.
 // It joins the gossip topic so we can publish blocks to subscribers.
 func initLibP2PServer(ctx context.Context, listenerAddress string, topicName string, pubSubOpts []pubsub.Option) (host.Host, *pubsub.Topic) {
