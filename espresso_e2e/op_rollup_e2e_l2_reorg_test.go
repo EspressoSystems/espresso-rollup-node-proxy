@@ -33,15 +33,18 @@ func TestOPE2EL2Reorg(t *testing.T) {
 
 	const reorgBlocks = uint64(8)
 
-	// Wait for the sequencer to have a safe block so there's headroom for the reorg
-	pollUntil(t, 3*time.Minute, "sequencer safe block did not become > 15", func() bool {
-		return getBlockByTag(t, opGethSeqURL, "safe") > 15
+	// Wait until latest - safe >= reorgBlocks so the reorg target stays above the safe block.
+	pollUntil(t, 3*time.Minute, fmt.Sprintf("sequencer did not build enough unsafe headroom for a %d-block reorg", reorgBlocks), func() bool {
+		latest := getBlockByTag(t, opGethSeqURL, "latest")
+		safe := getBlockByTag(t, opGethSeqURL, "safe")
+		return safe > 20 && latest >= safe+reorgBlocks
 	})
 
 	currentSeqBlock := getBlockByTag(t, opGethSeqURL, "latest")
+	safeBlock := getBlockByTag(t, opGethSeqURL, "safe")
 	blockBeforeReorg := getStoredBlock(t, espressoStore)
 	reorgTarget := currentSeqBlock - reorgBlocks
-	t.Logf("Sequencer at block %d, proxy verified at block %d", currentSeqBlock, blockBeforeReorg)
+	t.Logf("Sequencer at block %d (safe %d), proxy verified at block %d, rewinding to %d", currentSeqBlock, safeBlock, blockBeforeReorg, reorgTarget)
 
 	preReorgHashes := captureBlockHashes(t, "before reorg", reorgTarget, currentSeqBlock)
 
