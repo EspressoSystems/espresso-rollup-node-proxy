@@ -108,7 +108,7 @@ func (es *EspressoStore) loadFromDisk() error {
 	if err := json.Unmarshal(data, &state); err != nil {
 		return err
 	}
-	if state.FallbackHotshotHeight == 0 || state.L2BlockNumber == 0 || state.UpdatedAt.IsZero() {
+	if state.FallbackHotshotHeight == 0 || state.UpdatedAt.IsZero() {
 		return fmt.Errorf("invalid state file: missing required fields")
 	}
 	es.state = state

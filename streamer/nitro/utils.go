@@ -181,9 +181,9 @@ func FilterAndFind[T any](arr *[]T, compareFunc func(T) int) int {
 // CountUniqueEntries iterates over an array with potential duplicate values and counts the unique entries.
 // returns a Uint that represents the number of unique entries.
 // @Dev:
-func CountUniqueEntries[T any](arr *[]T) uint64 {
+func CountUniqueEntries[T comparable](arr *[]T) uint64 {
 	var uniqueCount uint64 // Declare the variable before assignment so the compiler doesn't infer it as an int.
-	entriesMap := make(map[any]bool)
+	entriesMap := make(map[T]bool)
 	uniqueCount = 0
 	for _, entry := range *arr {
 		if !entriesMap[entry] {

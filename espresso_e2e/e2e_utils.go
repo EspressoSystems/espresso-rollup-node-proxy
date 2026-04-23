@@ -335,7 +335,12 @@ func jsonRPCBatchCallRaw(t *testing.T, url string, entries []batchEntry) []JSONR
 
 func startTestProxy(ctx context.Context, t *testing.T, backendURL string, store *espressostore.EspressoStore, tag string) (proxyURL string, shutdown func()) {
 	t.Helper()
-	p := proxy.NewProxy(backendURL, store, tag)
+	p := proxy.NewProxy(&proxy.ProxyConfig{
+		FullNodeExecutionRPC: backendURL,
+		EspressoTag:          tag,
+		MaxBatchSize:         proxy.DefaultMaxBatchSize,
+		MaxRequestBodySize:   proxy.DefaultMaxRequestBodySize,
+	}, store)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	proxyURL = "http://" + listener.Addr().String()
