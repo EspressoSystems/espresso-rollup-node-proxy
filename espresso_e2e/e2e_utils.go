@@ -27,6 +27,9 @@ import (
 	opStreamer "github.com/EspressoSystems/espresso-streamers/op"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/require"
@@ -64,11 +67,12 @@ const (
 	opGethFullNode                 = "http://127.0.0.1:8555"
 	opNodeSeqURL                   = "http://127.0.0.1:9545"
 	opNodeFullNode                 = "http://127.0.0.1:9548"
+	opGethVerifierUrl              = "http://127.0.0.1:8547"
 	mockBeaconURL                  = "http://127.0.0.1:5052"
 	p2pAttackUrl                   = "http://127.0.0.1:8560"
 	L2_CHAIN_ID                    = 22266222
 	espressoTag                    = "espresso"
-	finalizedBlocks                = 100
+	finalizedBlocks                = 200
 	batchAuthenticatorAddress      = "0x4826533b4897376654bb4d4ad88b7fafd0c98528"
 	batchAuthenticatorOwnerAddress = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
 )
@@ -96,10 +100,10 @@ func startVerifier(ctx context.Context, t *testing.T, logger log.Logger, store *
 }
 
 func runDockerCompose(workingDir string, services ...string) func() {
-	return runDockerComposeFile(workingDir, "", services...)
+	return runDockerComposeFile(workingDir, "", nil, services...)
 }
 
-func runDockerComposeFile(workingDir string, composeFile string, services ...string) func() {
+func runDockerComposeFile(workingDir string, composeFile string, extraProfiles []string, services ...string) func() {
 	fileArgs := []string{}
 	if composeFile != "" {
 		fileArgs = []string{"-f", composeFile}
@@ -107,7 +111,11 @@ func runDockerComposeFile(workingDir string, composeFile string, services ...str
 
 	shutdown := func() {
 		args := append([]string{"compose"}, fileArgs...)
-		args = append(args, "--profile", "fallback", "down", "--volumes", "--remove-orphans")
+		args = append(args, "--profile", "fallback")
+		for _, p := range extraProfiles {
+			args = append(args, "--profile", p)
+		}
+		args = append(args, "down", "--volumes", "--remove-orphans")
 		p := exec.Command("docker", args...)
 		p.Dir = workingDir
 		if out, err := p.CombinedOutput(); err != nil {
@@ -118,6 +126,9 @@ func runDockerComposeFile(workingDir string, composeFile string, services ...str
 	shutdown()
 
 	invocation := append([]string{"compose"}, fileArgs...)
+	for _, p := range extraProfiles {
+		invocation = append(invocation, "--profile", p)
+	}
 	invocation = append(invocation, "up", "-d", "--pull", "always")
 	invocation = append(invocation, services...)
 	cmd := exec.Command("docker", invocation...)
@@ -417,6 +428,26 @@ func monitorStoredBlockProgress(t *testing.T, store *espressostore.EspressoStore
 	}
 }
 
+func captureBlockHashes(t *testing.T, label string, from, to uint64) map[uint64]string {
+	t.Helper()
+	hashes := make(map[uint64]string)
+	t.Logf("Block hashes %s (blocks %d..%d):", label, from, to)
+	for i := from; i <= to; i++ {
+		result := jsonRPCCall(t, opGethSeqURL, "eth_getBlockByNumber",
+			jsonMarshal(t, []any{fmt.Sprintf("0x%x", i), false}))
+		var block struct {
+			Hash string `json:"hash"`
+		}
+		if err := json.Unmarshal(result, &block); err != nil || block.Hash == "" {
+			t.Logf("  block %d: <not found>", i)
+		} else {
+			t.Logf("  block %d: %s", i, block.Hash)
+			hashes[i] = block.Hash
+		}
+	}
+	return hashes
+}
+
 func getStoredBlock(t *testing.T, store *espressostore.EspressoStore) uint64 {
 	t.Helper()
 	state := store.GetState()
@@ -533,4 +564,64 @@ func matchLogAttrs(capturer *logCapturer, msg string, expected map[string]uint64
 		}
 	}
 	return false
+}
+
+func startLoadGen(ctx context.Context, t *testing.T, rpcURL string) func() {
+	t.Helper()
+	const loadGenKey = "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+	privateKey, err := crypto.HexToECDSA(loadGenKey)
+	require.NoError(t, err)
+
+	client, err := ethclient.DialContext(ctx, rpcURL)
+	require.NoError(t, err)
+
+	sender := crypto.PubkeyToAddress(privateKey.PublicKey)
+	to := common.HexToAddress("0x0000000000000000000000000000000000000001")
+	chainID := big.NewInt(L2_CHAIN_ID)
+
+	stopCh := make(chan struct{})
+	var once sync.Once
+	go func() {
+		nonce, err := client.PendingNonceAt(ctx, sender)
+		if err != nil {
+			t.Logf("load gen: failed to get nonce: %v", err)
+			return
+		}
+		t.Logf("load gen: starting from nonce %d", nonce)
+		for {
+			select {
+			case <-stopCh:
+				t.Logf("load gen: stopped")
+				return
+			case <-ctx.Done():
+				return
+			default:
+			}
+			tx := types.NewTx(&types.DynamicFeeTx{
+				ChainID:   chainID,
+				Nonce:     nonce,
+				To:        &to,
+				Value:     big.NewInt(1),
+				Gas:       21000,
+				GasTipCap: big.NewInt(1),
+				GasFeeCap: big.NewInt(1),
+			})
+			signed, err := types.SignTx(tx, types.NewLondonSigner(chainID), privateKey)
+			if err != nil {
+				time.Sleep(50 * time.Millisecond)
+				continue
+			}
+			if err := client.SendTransaction(ctx, signed); err != nil {
+				t.Logf("load gen: tx nonce=%d failed: %v — re-querying nonce", nonce, err)
+				if n, err := client.PendingNonceAt(ctx, sender); err == nil {
+					nonce = n
+				}
+			} else {
+				nonce++
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+
+	return func() { once.Do(func() { close(stopCh) }) }
 }

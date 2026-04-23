@@ -77,6 +77,66 @@ services:
       - l2-config:/config
       - ./deployment/deployer:/deployer:ro
 
+  op-geth-verifier:
+    profiles: ["verifier"]
+    platform: linux/amd64
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${OP_HTTP_PORT}"]
+      interval: 3s
+      timeout: 2s
+      retries: 40
+    image: ${OP_GETH_IMAGE}
+    depends_on:
+      l2-genesis:
+        condition: service_completed_successfully
+      l1-anvil:
+        condition: service_healthy
+    volumes:
+      - l2-config:/config:ro
+      - op-data-verifier:/data
+    environment:
+      L1_RPC: http://l1-anvil:${L1_HTTP_PORT}
+      OP_HTTP_PORT: ${OP_HTTP_PORT}
+      OP_ENGINE_PORT: ${OP_ENGINE_PORT}
+    ports:
+      - "8547:${OP_HTTP_PORT}"
+      - "8553:${OP_ENGINE_PORT}"
+
+  op-node-verifier:
+    profiles: ["verifier"]
+    platform: linux/amd64
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${VERIFIER_PORT}"]
+      interval: 3s
+      timeout: 2s
+      retries: 40
+    image: ${OP_NODE_IMAGE}
+    depends_on:
+      l2-rollup:
+        condition: service_completed_successfully
+      op-geth-verifier:
+        condition: service_started
+      l1-anvil:
+        condition: service_healthy
+    environment:
+      OP_NODE_L1_ETH_RPC: http://l1-anvil:${L1_HTTP_PORT}
+      OP_NODE_L1_BEACON: http://l1-anvil:${L1_HTTP_PORT}
+      OP_NODE_L2_ENGINE_RPC: http://op-geth-verifier:${OP_ENGINE_PORT}
+      OP_NODE_RPC_PORT: ${VERIFIER_PORT}
+    ports:
+      - "${VERIFIER_PORT}:${VERIFIER_PORT}"
+    volumes:
+      - l2-config:/config:ro
+    command:
+      - op-node
+      - --l2.jwt-secret=/config/jwt.txt
+      - --rollup.config=/config/rollup.json
+      - --rpc.addr=0.0.0.0
+      - --l1.http-poll-interval=1s
+      - --l1.epoch-poll-interval=1s
+      - --l1.beacon.ignore
+      - --p2p.disable=true
+
   op-geth-sequencer:
     extends:
       file: docker-compose-op-geth.yml
