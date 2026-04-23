@@ -12,12 +12,13 @@ import (
 
 func TestOPE2EL2Reorg(t *testing.T) {
 	t.Log("Starting rollup nodes")
-	shutdown := runDockerComposeFile(rollupWorkingDir, "docker-compose.yml")
+	shutdown := runDockerComposeFile(rollupWorkingDir, "docker-compose.yml", []string{"verifier"})
 	defer shutdown()
 
 	// Wait for services to come up
 	t.Log("waiting for services to be ready")
 	waitForRollupServicesReady(t)
+	waitForHTTPReady(t, opGethVerifierUrl, 1*time.Minute)
 
 	espressoStore := newTestStore(t, "espresso-state", 1)
 
@@ -104,4 +105,13 @@ func TestOPE2EL2Reorg(t *testing.T) {
 		"proxy did not advance past reorged block %d (stuck at %d)", currentSeqBlock, previous)
 	require.JSONEq(t, string(seqBlockJSON), string(proxyBlockJSON),
 		"proxy and sequencer should serve the same block at %d", currentSeqBlock)
+
+	// Verify the op-geth-verifier node (which derives from L1 without Espresso) also converges
+	// to the canonical chain.
+	pollUntil(t, 1*time.Minute, fmt.Sprintf("verifier did not reach block %d", currentSeqBlock), func() bool {
+		return getBlockByTag(t, opGethVerifierUrl, "latest") >= currentSeqBlock
+	})
+	verifierBlockJSON := jsonRPCCall(t, opGethVerifierUrl, "eth_getBlockByNumber", jsonMarshal(t, []any{currentSeqBlockHex, false}))
+	require.JSONEq(t, string(seqBlockJSON), string(verifierBlockJSON),
+		"verifier and sequencer should serve the same block at %d", currentSeqBlock)
 }

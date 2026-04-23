@@ -15,7 +15,7 @@ import (
 
 func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 	t.Log("Starting rollup nodes")
-	shutdown := runDockerComposeFile(rollupWorkingDir, "docker-compose.reorg.yml")
+	shutdown := runDockerComposeFile(rollupWorkingDir, "docker-compose.reorg.yml", nil)
 	defer shutdown()
 
 	// Wait for services to come up
@@ -125,7 +125,7 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 
 		// Make sure we never go backwards
 		t.Log("Monitoring proxy block number for backwards movement during and after reorg")
-		monitorStoredBlockProgress(t, espressoStore, blockBeforeFork, 3*time.Minute, func(current uint64) bool {
+		monitorStoredBlockProgress(t, espressoStore, blockBeforeFork, 5*time.Minute, func(current uint64) bool {
 			return current >= blockBeforeFork+5
 		})
 

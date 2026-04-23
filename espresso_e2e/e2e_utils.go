@@ -67,6 +67,7 @@ const (
 	opGethFullNode                 = "http://127.0.0.1:8555"
 	opNodeSeqURL                   = "http://127.0.0.1:9545"
 	opNodeFullNode                 = "http://127.0.0.1:9548"
+	opGethVerifierUrl              = "http://127.0.0.1:8547"
 	mockBeaconURL                  = "http://127.0.0.1:5052"
 	p2pAttackUrl                   = "http://127.0.0.1:8560"
 	L2_CHAIN_ID                    = 22266222
@@ -99,10 +100,10 @@ func startVerifier(ctx context.Context, t *testing.T, logger log.Logger, store *
 }
 
 func runDockerCompose(workingDir string, services ...string) func() {
-	return runDockerComposeFile(workingDir, "", services...)
+	return runDockerComposeFile(workingDir, "", nil, services...)
 }
 
-func runDockerComposeFile(workingDir string, composeFile string, services ...string) func() {
+func runDockerComposeFile(workingDir string, composeFile string, extraProfiles []string, services ...string) func() {
 	fileArgs := []string{}
 	if composeFile != "" {
 		fileArgs = []string{"-f", composeFile}
@@ -110,7 +111,11 @@ func runDockerComposeFile(workingDir string, composeFile string, services ...str
 
 	shutdown := func() {
 		args := append([]string{"compose"}, fileArgs...)
-		args = append(args, "--profile", "fallback", "down", "--volumes", "--remove-orphans")
+		args = append(args, "--profile", "fallback")
+		for _, p := range extraProfiles {
+			args = append(args, "--profile", p)
+		}
+		args = append(args, "down", "--volumes", "--remove-orphans")
 		p := exec.Command("docker", args...)
 		p.Dir = workingDir
 		if out, err := p.CombinedOutput(); err != nil {
@@ -121,6 +126,9 @@ func runDockerComposeFile(workingDir string, composeFile string, services ...str
 	shutdown()
 
 	invocation := append([]string{"compose"}, fileArgs...)
+	for _, p := range extraProfiles {
+		invocation = append(invocation, "--profile", p)
+	}
 	invocation = append(invocation, "up", "-d", "--pull", "always")
 	invocation = append(invocation, services...)
 	cmd := exec.Command("docker", invocation...)
