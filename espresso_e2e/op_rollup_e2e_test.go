@@ -240,9 +240,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 	})
 
 	t.Run("switchover with espresso tag", func(t *testing.T) {
-		// Capture the current HotShot height before espresso batcher starts posting.
-		hotshotHeight := getHotshotHeight(t)
-		t.Logf("Captured HotShot height %d", hotshotHeight)
+		hotshotHeight := uint64(0)
 
 		// Switch to fallback batcher so there is no espresso state.
 		t.Log("Stopping espresso batcher and activating fallback batcher")
@@ -312,8 +310,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 	t.Run("switchover with finalized tag", func(t *testing.T) {
 		espressoTag := "finalized"
 
-		hotshotHeight := getHotshotHeight(t)
-		t.Logf("Captured HotShot height %d", hotshotHeight)
+		hotshotHeight := uint64(0)
 
 		t.Log("Stopping espresso batcher and activating fallback batcher")
 		dockerComposeStop(t, rollupWorkingDir, "op-batcher")

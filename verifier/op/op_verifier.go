@@ -393,7 +393,9 @@ func (v *OPEspressoBatchVerifier) Stop() {
 		return
 	}
 	v.logger.Info("Stopping OP Verifier")
-	v.cancel()
+	if v.cancel != nil {
+		v.cancel()
+	}
 	v.runWg.Wait()
 
 	v.endpointProvider.Close()

@@ -46,6 +46,14 @@ func NewProxy(fullNodeExecutionRPC string, store *espressoStore.EspressoStore, e
 }
 
 func (p *Proxy) Serve(w http.ResponseWriter, r *http.Request) {
+	if r.Body != nil {
+		defer func() {
+			err := r.Body.Close()
+			if err != nil {
+				log.Warn("failed to close request body", "error", err)
+			}
+		}()
+	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBodySize+1))
 	if err != nil {
 		log.Error("failed to read request body", "error", err)
