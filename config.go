@@ -2,15 +2,21 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"net/url"
 	"os"
+	"proxy/proxy"
 	verifier "proxy/verifier/op"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/spf13/pflag"
 )
 
 type OPConfig struct {
+	Enable                    bool          `json:"enable"`
 	FullNodeConsensusRPC      string        `json:"full_node_consensus_rpc"`
 	VerificationInterval      time.Duration `json:"verification_interval"`
 	QueryServiceURL           string        `json:"query_service_url"`
@@ -26,6 +32,8 @@ type Config struct {
 	EspressoTag          string   `json:"espresso_tag"`
 	StoreFilePath        string   `json:"store_file_path"`
 	InitialHotshotHeight uint64   `json:"initial_hotshot_height"`
+	MaxBatchSize         int      `json:"max_batch_size"`
+	MaxRequestBodySize   int      `json:"max_request_body_size"`
 	OPConfig             OPConfig `json:"op"`
 	LogLevel             string   `json:"log_level"`
 	TrackBatchLatency    bool     `json:"track_batch_latency"`
@@ -33,12 +41,14 @@ type Config struct {
 
 func defaultConfig() *Config {
 	return &Config{
-		ListenAddr:    ":8080",
-		EspressoTag:   "espresso",
-		StoreFilePath: "espresso_store.json",
-		LogLevel:      "info",
+		ListenAddr:         ":8080",
+		EspressoTag:        "espresso",
+		StoreFilePath:      "espresso_store.json",
+		MaxBatchSize:       proxy.DefaultMaxBatchSize,
+		MaxRequestBodySize: proxy.DefaultMaxRequestBodySize,
+		LogLevel:           "info",
 		OPConfig: OPConfig{
-			VerificationInterval: 1 * time.Millisecond,
+			VerificationInterval: 10 * time.Millisecond,
 		},
 	}
 }
@@ -70,8 +80,10 @@ func parseConfig() *Config {
 	pflag.StringVar(&cfg.StoreFilePath, "store-file-path", cfg.StoreFilePath, "path to state persistence file")
 	pflag.Uint64Var(&cfg.InitialHotshotHeight, "initial-hotshot-height", cfg.InitialHotshotHeight, "initial hotshot height")
 	pflag.BoolVar(&cfg.TrackBatchLatency, "track-batch-latency", cfg.TrackBatchLatency, "whether to track batch latency")
+	pflag.IntVar(&cfg.MaxBatchSize, "max-batch-size", cfg.MaxBatchSize, "maximum number of requests in a JSON-RPC batch (0 = no limit)")
+	pflag.IntVar(&cfg.MaxRequestBodySize, "max-request-body-size", cfg.MaxRequestBodySize, "maximum request body size in bytes (0 = no limit)")
 
-	// Optimism specific config
+	pflag.BoolVar(&cfg.OPConfig.Enable, "op.enable", cfg.OPConfig.Enable, "enable OP mode")
 	pflag.StringVar(&cfg.OPConfig.FullNodeConsensusRPC, "op.full-node-consensus-rpc", cfg.OPConfig.FullNodeConsensusRPC, "OP full node consensus RPC URL")
 	pflag.DurationVar(&cfg.OPConfig.VerificationInterval, "op.verification-interval", cfg.OPConfig.VerificationInterval, "OP verification interval")
 	pflag.StringVar(&cfg.OPConfig.QueryServiceURL, "op.query-service-url", cfg.OPConfig.QueryServiceURL, "Espresso query service URL")
@@ -80,8 +92,75 @@ func parseConfig() *Config {
 	pflag.StringVar(&cfg.OPConfig.BatchAuthenticatorAddress, "op.batch-authenticator-address", cfg.OPConfig.BatchAuthenticatorAddress, "Espresso batch authenticator contract address")
 
 	pflag.Parse()
-	return cfg
 
+	if err := cfg.validate(); err != nil {
+		log.Crit("invalid configuration", "error", err)
+	}
+
+	return cfg
+}
+
+func validateURL(field, s string) error {
+	if s == "" {
+		return fmt.Errorf("%s: must not be empty", field)
+	}
+	u, err := url.Parse(s)
+	if err != nil {
+		return fmt.Errorf("%s: invalid URL %q: %w", field, s, err)
+	}
+	if u.Scheme == "" {
+		return fmt.Errorf("%s: missing scheme in URL %q", field, s)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("%s: missing host in URL %q", field, s)
+	}
+	return nil
+}
+
+func validateAddress(field, s string) error {
+	if s == "" {
+		return fmt.Errorf("%s: must not be empty", field)
+	}
+	if !common.IsHexAddress(s) {
+		return fmt.Errorf("%s: invalid Ethereum address %q", field, s)
+	}
+	return nil
+}
+
+func (c *Config) validate() error {
+	var errs []error
+
+	errs = append(errs, validateURL("full-node-execution-rpc", c.FullNodeExecutionRPC))
+	errs = append(errs, validateURL("l1-rpc", c.L1RPC))
+
+	if c.OPConfig.Enable {
+		errs = append(errs, validateURL("op.full-node-consensus-rpc", c.OPConfig.FullNodeConsensusRPC))
+		errs = append(errs, validateURL("op.query-service-url", c.OPConfig.QueryServiceURL))
+		errs = append(errs, validateAddress("op.light-client-address", c.OPConfig.LightClientAddress))
+		errs = append(errs, validateAddress("op.batcher-address", c.OPConfig.BatcherAddress))
+		errs = append(errs, validateAddress("op.batch-authenticator-address", c.OPConfig.BatchAuthenticatorAddress))
+	}
+
+	if c.ListenAddr == "" {
+		errs = append(errs, fmt.Errorf("listen-addr: must not be empty"))
+	}
+	if c.EspressoTag == "" {
+		errs = append(errs, fmt.Errorf("espresso-tag: must not be empty"))
+	}
+	if c.StoreFilePath == "" {
+		errs = append(errs, fmt.Errorf("store-file-path: must not be empty"))
+	}
+
+	return errors.Join(errs...)
+}
+
+func (c *Config) toProxyConfig() *proxy.ProxyConfig {
+	return &proxy.ProxyConfig{
+		FullNodeExecutionRPC: c.FullNodeExecutionRPC,
+		EspressoTag:          c.EspressoTag,
+		MaxBatchSize:         c.MaxBatchSize,
+		MaxRequestBodySize:   c.MaxRequestBodySize,
+	}
 }
 
 func (c *Config) toOPVerifierConfig() *verifier.OPEspressoBatchVerifierConfig {

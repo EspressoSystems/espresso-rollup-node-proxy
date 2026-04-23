@@ -62,7 +62,8 @@ func main() {
 
 	fullNodeVerifier.Start(ctx)
 	logger.Info("OP Verifier Started")
-	fullNodeProxy := proxy.NewProxy(cfg.FullNodeExecutionRPC, espressoStore, cfg.EspressoTag)
+	fullNodeProxy := proxy.NewProxy(cfg.toProxyConfig(), espressoStore)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

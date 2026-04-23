@@ -37,7 +37,7 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 
 	ctx := context.Background()
 	t.Log("Starting in-process proxy")
-	p := proxy.NewProxy(opGethFullNode, espressoStore, espressoTag)
+	p := proxy.NewProxy(&proxy.ProxyConfig{FullNodeExecutionRPC: opGethFullNode, EspressoTag: espressoTag, MaxBatchSize: proxy.DefaultMaxBatchSize}, espressoStore)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	proxyURL := "http://" + listener.Addr().String()

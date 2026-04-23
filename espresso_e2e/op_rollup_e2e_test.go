@@ -39,7 +39,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 
 	ctx := context.Background()
 	t.Log("Starting in-process proxy")
-	p := proxy.NewProxy(opGethFullNode, espressoStore, espressoTag)
+	p := proxy.NewProxy(&proxy.ProxyConfig{FullNodeExecutionRPC: opGethFullNode, EspressoTag: espressoTag, MaxBatchSize: proxy.DefaultMaxBatchSize}, espressoStore)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	proxyURL := "http://" + listener.Addr().String()
@@ -222,7 +222,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 
 		firstCapturer := &logCapturer{}
 
-		nodeProxy := proxy.NewProxy(opGethFullNode, initialStore, espressoTag)
+		nodeProxy := proxy.NewProxy(&proxy.ProxyConfig{FullNodeExecutionRPC: opGethFullNode, EspressoTag: espressoTag, MaxBatchSize: proxy.DefaultMaxBatchSize}, initialStore)
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
 		require.NoError(t, err)
 		proxyURL := "http://" + listener.Addr().String()
@@ -272,7 +272,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 
 		require.NoError(t, err)
 
-		newProxy := proxy.NewProxy(opGethFullNode, newStore, espressoTag)
+		newProxy := proxy.NewProxy(&proxy.ProxyConfig{FullNodeExecutionRPC: opGethFullNode, EspressoTag: espressoTag, MaxBatchSize: proxy.DefaultMaxBatchSize}, newStore)
 		listener, err = net.Listen("tcp", "127.0.0.1:0")
 		require.NoError(t, err)
 		proxyURL = "http://" + listener.Addr().String()
@@ -327,7 +327,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		require.Equal(t, uint64(0), getStoredBlock(t, store), "store should start with L2BlockNumber=0")
 
 		t.Log("Starting proxy with empty store, fallback batcher active")
-		p := proxy.NewProxy(opGethFullNode, store, espressoTag)
+		p := proxy.NewProxy(&proxy.ProxyConfig{FullNodeExecutionRPC: opGethFullNode, EspressoTag: espressoTag, MaxBatchSize: proxy.DefaultMaxBatchSize}, store)
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
 		require.NoError(t, err)
 		proxyURL := "http://" + listener.Addr().String()
@@ -411,7 +411,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		require.Equal(t, uint64(0), getStoredBlock(t, store), "store should start with L2BlockNumber=0")
 
 		t.Log("Starting proxy with finalized tag, empty store, fallback batcher active")
-		p := proxy.NewProxy(opGethFullNode, store, espressoTag)
+		p := proxy.NewProxy(&proxy.ProxyConfig{FullNodeExecutionRPC: opGethFullNode, EspressoTag: espressoTag, MaxBatchSize: proxy.DefaultMaxBatchSize}, store)
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
 		require.NoError(t, err)
 		proxyURL := "http://" + listener.Addr().String()
@@ -480,7 +480,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		err = store.Update(1, 1)
 		require.NoError(t, err)
 
-		p := proxy.NewProxy(opGethFullNode, store, "finalized")
+		p := proxy.NewProxy(&proxy.ProxyConfig{FullNodeExecutionRPC: opGethFullNode, EspressoTag: "finalized", MaxBatchSize: proxy.DefaultMaxBatchSize}, store)
 		listener, err := net.Listen("tcp", "127.0.0.1:0")
 		require.NoError(t, err)
 		proxyURL := "http://" + listener.Addr().String()

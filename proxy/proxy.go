@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httputil"
@@ -13,23 +14,35 @@ import (
 )
 
 const (
-	PARSE_ERROR_CODE    = -32700
-	INTERNAL_ERROR_CODE = -32603
+	PARSE_ERROR_CODE          = -32700
+	INVALID_REQUEST_CODE      = -32600
+	INTERNAL_ERROR_CODE       = -32603
+	DefaultMaxBatchSize       = 1000
+	DefaultMaxRequestBodySize = 5 * 1024 * 1024 // 5MB, matches go-ethereum defaultBodyLimit
 )
 
-type Proxy struct {
-	interceptor  *Interceptor
-	reverseProxy *httputil.ReverseProxy
+type ProxyConfig struct {
+	FullNodeExecutionRPC string
+	EspressoTag          string
+	MaxBatchSize         int
+	MaxRequestBodySize   int
 }
 
-func NewProxy(fullNodeExecutionRPC string, store *espressoStore.EspressoStore, espressoTag string) *Proxy {
-	target, err := url.Parse(fullNodeExecutionRPC)
+type Proxy struct {
+	interceptor        *Interceptor
+	reverseProxy       *httputil.ReverseProxy
+	maxRequestBodySize int
+}
+
+func NewProxy(cfg *ProxyConfig, store *espressoStore.EspressoStore) *Proxy {
+	target, err := url.Parse(cfg.FullNodeExecutionRPC)
 	if err != nil {
-		log.Crit("failed to parse full node execution RPC URL", "url", fullNodeExecutionRPC, "error", err)
+		log.Crit("failed to parse full node execution RPC URL", "url", cfg.FullNodeExecutionRPC, "error", err)
 	}
 
 	p := &Proxy{
-		interceptor: NewInterceptor(store, espressoTag),
+		interceptor:        NewInterceptor(store, cfg.EspressoTag, cfg.MaxBatchSize),
+		maxRequestBodySize: cfg.MaxRequestBodySize,
 	}
 
 	p.reverseProxy = &httputil.ReverseProxy{
@@ -43,15 +56,33 @@ func NewProxy(fullNodeExecutionRPC string, store *espressoStore.EspressoStore, e
 }
 
 func (p *Proxy) Serve(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
+	if p.maxRequestBodySize > 0 && r.ContentLength > int64(p.maxRequestBodySize) {
+		writeJSONRPCError(w, nil, INVALID_REQUEST_CODE, "content length too large")
+		return
+	}
+
+	reader := io.Reader(r.Body)
+	if p.maxRequestBodySize > 0 {
+		reader = io.LimitReader(r.Body, int64(p.maxRequestBodySize)+1)
+	}
+	body, err := io.ReadAll(reader)
 	if err != nil {
 		log.Error("failed to read request body", "error", err)
 		writeJSONRPCError(w, nil, PARSE_ERROR_CODE, "failed to read request body")
 		return
 	}
+	if p.maxRequestBodySize > 0 && len(body) > p.maxRequestBodySize {
+		writeJSONRPCError(w, nil, INVALID_REQUEST_CODE, "content length too large")
+		return
+	}
 
 	interceptedBody, err := p.interceptor.Intercept(body)
 	if err != nil {
+		var batchErr *BatchTooLargeError
+		if errors.As(err, &batchErr) {
+			writeJSONRPCError(w, nil, INVALID_REQUEST_CODE, "batch too large")
+			return
+		}
 		log.Error("failed to intercept request", "error", err)
 		writeJSONRPCError(w, nil, INTERNAL_ERROR_CODE, "failed to intercept request")
 		return
