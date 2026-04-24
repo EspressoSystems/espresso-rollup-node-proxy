@@ -72,6 +72,7 @@ func main() {
 		handler = log.NewTerminalHandlerWithLevel(os.Stderr, logLevel, true)
 	}
 	logger := log.NewLogger(handler)
+	log.SetDefault(logger)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
