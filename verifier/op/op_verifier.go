@@ -278,6 +278,13 @@ func (v *OPEspressoBatchVerifier) VerifyNextBatch(ctx context.Context) (*derivat
 	}
 	// Compare the two batches by RLP-encoding them and checking for byte-for-byte equality
 	if err = ensureBatchesMatch(espressoBatch, fullNodeBatch); err != nil {
+		v.logger.Error("batch mismatch details",
+			"batch_number", batchNumber,
+			"espresso_hash", espressoBatch.BatchHeader.Hash().Hex(),
+			"espresso_parent", espressoBatch.BatchHeader.ParentHash.Hex(),
+			"fullnode_hash", fullNodeBatch.BatchHeader.Hash().Hex(),
+			"fullnode_parent", fullNodeBatch.BatchHeader.ParentHash.Hex(),
+		)
 		return nil, fmt.Errorf("batch verification failed for batch number %d: %w", batchNumber, err)
 	}
 	return espressoBatch, nil

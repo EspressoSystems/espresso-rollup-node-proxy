@@ -468,15 +468,28 @@ func jsonMarshal(t *testing.T, v any) json.RawMessage {
 }
 
 type logCapturer struct {
-	mu      sync.Mutex
-	records []slog.Record
+	mu       sync.Mutex
+	records  []slog.Record
+	delegate slog.Handler
+}
+
+func newCapturingLogger() (log.Logger, *logCapturer) {
+	capturer := &logCapturer{
+		delegate: log.NewTerminalHandlerWithLevel(os.Stdout, log.LevelInfo, true),
+	}
+	logger := log.NewLogger(capturer)
+	log.SetDefault(logger)
+	return logger, capturer
 }
 
 func (c *logCapturer) Enabled(_ context.Context, _ slog.Level) bool { return true }
-func (c *logCapturer) Handle(_ context.Context, r slog.Record) error {
+func (c *logCapturer) Handle(ctx context.Context, r slog.Record) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.records = append(c.records, r)
+	c.mu.Unlock()
+	if c.delegate != nil && c.delegate.Enabled(ctx, r.Level) {
+		return c.delegate.Handle(ctx, r)
+	}
 	return nil
 }
 func (c *logCapturer) WithAttrs(_ []slog.Attr) slog.Handler { return c }

@@ -9,6 +9,7 @@ import (
 	"log"
 	"math/big"
 	"net/http"
+	"sync"
 
 	"github.com/ethereum-optimism/optimism/op-service/client"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
@@ -32,6 +33,7 @@ type P2P struct {
 	libp2pClient       host.Host
 	forkBlock          eth.Uint64Quantity
 	maliciousChain     map[common.Hash]common.Hash
+	mu                 sync.Mutex
 }
 
 var (
@@ -66,10 +68,20 @@ func NewP2P(gethEngineRpc string, jwtSecret []byte, privateKey *ecdsa.PrivateKey
 }
 
 func (p *P2P) SetForkBlock(forkBlock uint64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if forkBlock > 0 {
 		log.Printf("setting block to fork at %d", forkBlock)
 		p.forkBlock = eth.Uint64Quantity(forkBlock)
 	}
+}
+
+func (p *P2P) StopFork() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	log.Printf("stopping fork (was at block %d, chain len %d)", p.forkBlock, len(p.maliciousChain))
+	p.forkBlock = 0
+	p.maliciousChain = make(map[common.Hash]common.Hash)
 }
 
 // Creates the attacker's server-side libp2p host that fullnodes connect to.
@@ -238,6 +250,7 @@ func (p *P2P) run() {
 		log.Printf("p2p recieved block %d from peer id %s", payload.ExecutionPayload.BlockNumber, msg.ReceivedFrom)
 
 		// This is the data to be further gossiped
+		p.mu.Lock()
 		outData := msg.Data
 		// Check if we want to start a fork or not
 		if payload.ExecutionPayload.BlockNumber == p.forkBlock {
@@ -256,6 +269,7 @@ func (p *P2P) run() {
 				outData = msg.Data
 			}
 		}
+		p.mu.Unlock()
 
 		// Gossip the message to anyone who has subscribed to the topic, the full node in this case
 		if err := p.topic.Publish(ctx, outData); err != nil {

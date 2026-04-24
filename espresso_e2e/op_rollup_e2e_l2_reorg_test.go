@@ -33,15 +33,18 @@ func TestOPE2EL2Reorg(t *testing.T) {
 
 	const reorgBlocks = uint64(8)
 
-	// Wait for the sequencer to have a safe block so there's headroom for the reorg
-	pollUntil(t, 3*time.Minute, "sequencer safe block did not become > 15", func() bool {
-		return getBlockByTag(t, opGethSeqURL, "safe") > 15
+	// Wait until latest - safe >= reorgBlocks so the reorg target stays above the safe block.
+	pollUntil(t, 3*time.Minute, fmt.Sprintf("sequencer did not build enough unsafe headroom for a %d-block reorg", reorgBlocks), func() bool {
+		latest := getBlockByTag(t, opGethSeqURL, "latest")
+		safe := getBlockByTag(t, opGethSeqURL, "safe")
+		return safe > 20 && latest >= safe+reorgBlocks
 	})
 
 	currentSeqBlock := getBlockByTag(t, opGethSeqURL, "latest")
+	safeBlock := getBlockByTag(t, opGethSeqURL, "safe")
 	blockBeforeReorg := getStoredBlock(t, espressoStore)
 	reorgTarget := currentSeqBlock - reorgBlocks
-	t.Logf("Sequencer at block %d, proxy verified at block %d", currentSeqBlock, blockBeforeReorg)
+	t.Logf("Sequencer at block %d (safe %d), proxy verified at block %d, rewinding to %d", currentSeqBlock, safeBlock, blockBeforeReorg, reorgTarget)
 
 	preReorgHashes := captureBlockHashes(t, "before reorg", reorgTarget, currentSeqBlock)
 
@@ -84,10 +87,12 @@ func TestOPE2EL2Reorg(t *testing.T) {
 		"expected hash change at block %d after sequencer reorg", currentSeqBlock)
 	t.Logf("Sequencer reorg confirmed at block %d", currentSeqBlock)
 
-	previous := monitorStoredBlockProgress(t, espressoStore, blockBeforeReorg, 2*time.Minute, func(current uint64) bool {
-		return current > currentSeqBlock
+	previous := monitorStoredBlockProgress(t, espressoStore, blockBeforeReorg, 3*time.Minute, func(current uint64) bool {
+		return current > currentSeqBlock+5
 	})
 
+	require.Greater(t, previous, currentSeqBlock+5,
+		"proxy did not advance 5 blocks past reorg block %d within timeout (stuck at %d)", currentSeqBlock, previous)
 	t.Logf("Proxy at L2 block %d after sequencer reorg, never moved backwards", previous)
 
 	// Espresso enforces the canonical chain, so both the sequencer and proxy should

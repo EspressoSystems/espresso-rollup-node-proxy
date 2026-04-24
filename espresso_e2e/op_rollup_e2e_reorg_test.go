@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/require"
 )
 
@@ -30,8 +29,8 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 	defer shutdownProxy()
 
 	t.Log("Starting OP Verifier")
-	defaultCapturer := &logCapturer{}
-	v := startVerifier(ctx, t, log.NewLogger(defaultCapturer), espressoStore)
+	verifierLogger, defaultCapturer := newCapturingLogger()
+	v := startVerifier(ctx, t, verifierLogger, espressoStore)
 	defer v.Stop()
 
 	t.Run("proxy does not go backwords in case of l1 reorg", func(t *testing.T) {
@@ -125,8 +124,17 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 
 		// Make sure we never go backwards
 		t.Log("Monitoring proxy block number for backwards movement during and after reorg")
+		now := time.Now()
+		stop := true
 		monitorStoredBlockProgress(t, espressoStore, blockBeforeFork, 5*time.Minute, func(current uint64) bool {
-			return current >= blockBeforeFork+5
+			if (time.Since(now) >= 10*time.Second || current >= blockBeforeFork+10) && stop {
+				resp, err = http.Post(p2pAttackUrl+"/stop-fork", "application/json", nil)
+				require.NoError(t, err)
+				_ = resp.Body.Close()
+				t.Log("Attacker fork stopped")
+				stop = false
+			}
+			return current >= blockBeforeFork+10
 		})
 
 		// Verify we advanced after full node reorg
