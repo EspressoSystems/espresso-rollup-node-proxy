@@ -250,8 +250,8 @@ func (p *P2P) run() {
 		log.Printf("p2p recieved block %d from peer id %s", payload.ExecutionPayload.BlockNumber, msg.ReceivedFrom)
 
 		// This is the data to be further gossiped
-		outData := msg.Data
 		p.mu.Lock()
+		outData := msg.Data
 		// Check if we want to start a fork or not
 		if payload.ExecutionPayload.BlockNumber == p.forkBlock {
 			outData, err = p.injectMaliciousBlock(payload, nil)

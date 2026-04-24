@@ -281,13 +281,9 @@ func (v *OPEspressoBatchVerifier) VerifyNextBatch(ctx context.Context) (*derivat
 		v.logger.Error("batch mismatch details",
 			"batch_number", batchNumber,
 			"espresso_hash", espressoBatch.BatchHeader.Hash().Hex(),
-			"espresso_tx_count", len(espressoBatch.Batch.Transactions),
 			"espresso_parent", espressoBatch.BatchHeader.ParentHash.Hex(),
-			"espresso_state_root", espressoBatch.BatchHeader.Root,
 			"fullnode_hash", fullNodeBatch.BatchHeader.Hash().Hex(),
-			"fullnode_tx_count", len(fullNodeBatch.Batch.Transactions),
 			"fullnode_parent", fullNodeBatch.BatchHeader.ParentHash.Hex(),
-			"fullnode_state_root", fullNodeBatch.BatchHeader.Root,
 		)
 		return nil, fmt.Errorf("batch verification failed for batch number %d: %w", batchNumber, err)
 	}
