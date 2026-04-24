@@ -53,4 +53,16 @@ func TestConfigValidate(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "missing scheme")
 	require.Contains(t, err.Error(), "invalid Ethereum address")
+
+	badLogFormat := *valid
+	badLogFormat.LogFormat = "yaml"
+	err = badLogFormat.validate()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "log-format")
+
+	for _, goodFormat := range []string{"", "text", "json"} {
+		goodLogFormat := *valid
+		goodLogFormat.LogFormat = goodFormat
+		require.NoError(t, goodLogFormat.validate(), "log format %q should be valid", goodFormat)
+	}
 }
