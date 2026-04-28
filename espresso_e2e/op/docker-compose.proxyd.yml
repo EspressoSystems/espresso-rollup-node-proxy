@@ -404,7 +404,7 @@ services:
       - --op.batch-authenticator-address=${BATCH_AUTH_ADDR}
 
   proxyd:
-    image: proxyd:latest
+    image: ${PROXYD_IMAGE}
     depends_on:
       fullnode-proxy-1:
         condition: service_healthy
