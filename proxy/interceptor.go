@@ -89,7 +89,7 @@ func (i *Interceptor) interceptBatch(rawRequest []byte) ([]byte, error) {
 	}
 
 	state := i.store.GetState()
-	if state.FallbackHotshotHeight == 0 || state.L2BlockNumber == 0 || state.UpdatedAt.IsZero() {
+	if state.L2BlockNumber == 0 || state.UpdatedAt.IsZero() {
 		log.Warn("espresso state is empty, sending rawRequest to the full node")
 		return rawRequest, nil
 	}
@@ -122,7 +122,7 @@ func (i *Interceptor) interceptBatch(rawRequest []byte) ([]byte, error) {
 
 func (i *Interceptor) interceptSingle(rawRequest []byte) ([]byte, bool, error) {
 	state := i.store.GetState()
-	if state.FallbackHotshotHeight == 0 || state.L2BlockNumber == 0 || state.UpdatedAt.IsZero() {
+	if state.L2BlockNumber == 0 || state.UpdatedAt.IsZero() {
 		log.Warn("espresso state is empty, sending rawRequest to the full node")
 		return rawRequest, false, nil
 	}
