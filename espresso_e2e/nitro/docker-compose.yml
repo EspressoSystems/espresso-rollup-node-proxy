@@ -1,0 +1,120 @@
+services:
+  demo-l1-network:
+    image: ghcr.io/espressosystems/timeboost/geth-l1:rollup-creator-round2
+    command: --dev --dev.period=1 --verbosity=2
+    ports:
+      - 8545:8545
+      - 8546:8546
+  espresso-dev-node:
+    image: ghcr.io/espressosystems/espresso-sequencer/espresso-dev-node:release-20251120-lip2p-tcp-3855
+    ports:
+      - "41000:41000"
+      - "41003:41003"
+      - "20000:20000"
+    environment:
+      - ESPRESSO_BUILDER_PORT=41003
+      - ESPRESSO_DEPLOYER_ACCOUNT_INDEX=5
+      - ESPRESSO_DEV_NODE_PORT=20000
+      - ESPRESSO_SEQUENCER_API_PORT=41000
+      - ESPRESSO_SEQUENCER_ETH_MNEMONIC=indoor dish desk flag debris potato excuse depart ticket judge file exit
+      - ESPRESSO_SEQUENCER_L1_PROVIDER=http://demo-l1-network:8545
+      - ESPRESSO_SEQUENCER_DATABASE_MAX_CONNECTIONS=25
+      - ESPRESSO_DEV_NODE_EPOCH_HEIGHT=1000000
+      - ESPRESSO_DEV_NODE_MAX_BLOCK_SIZE=10485760
+      - ESPRESSO_SEQUENCER_STORAGE_PATH=/data/espresso
+      - RUST_LOG=WARN
+      - RUST_LOG_FORMAT
+      - ESPRESSO_DEV_NODE_VERSION=0.4
+    volumes:
+      - espresso_storage:/data/espresso
+    depends_on:
+      demo-l1-network:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-s",
+          "-X",
+          "POST",
+          "--data",
+          '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}',
+          "-H",
+          "Content-Type: application/json",
+          "http://localhost:8545",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  rollup-creator:
+    image: ghcr.io/espressosystems/timeboost/rollup-creator:rpc
+    volumes:
+      - "config:/config"
+      - "./nitro-config:/nitro-config"
+    environment:
+      AUTHORIZE_VALIDATORS: 10
+      CHAIN_DEPLOYMENT_INFO: "/config/deployment.json"
+      CHILD_CHAIN_CONFIG_PATH: "/nitro-config/l2_chain_config.json"
+      CHILD_CHAIN_INFO: "/config/deployed_chain_info.json"
+      CHILD_CHAIN_NAME: "arb-dev-test"
+      DEPLOYER_PRIVKEY: 0x4f3edf983ac636a65a842ce7c78d9aa706d3b113b37f60c1b6d9d1f0a5b2b5ff
+      MAX_DATA_SIZE: 117964
+      OWNER_ADDRESS: 0x3f1Eae7D46d88F08fc2F8ed27FCb2AB183EB2d0E
+      PARENT_CHAIN_ID: 1337
+      PARENT_CHAIN_RPC: "http://demo-l1-network:8545"
+      SEQUENCER_ADDRESS: 0x2F1eAe7Dd46D88f08fC2f8ED27Fcb2Ab183eb2d0
+      WASM_MODULE_ROOT: 0xdb698a2576298f25448bc092e52cf13b1e24141c997135d70f217d674bbeb69a
+    command: ["create-rollup-testnode"]
+    depends_on:
+      demo-l1-network:
+        condition: service_healthy
+
+  nitro:
+    image: ghcr.io/espressosystems/nitro-espresso-integration/nitro-node:integration-v3.9.8
+    entrypoint: /usr/local/bin/nitro
+    ports:
+      - "8547:8547"
+      - "8548:8548"
+      - "9642:9642"
+    volumes:
+      - "nitro:/home/user/.arbitrum/local/nitro"
+      - "l1keystore:/home/user/l1keystore"
+      - "config:/config"
+      - "./nitro-config:/nitro-config"
+    command:
+      - --conf.file=/nitro-config/nitro_config.json
+      - --node.feed.output.enable
+      - --node.feed.output.port=9642
+      - --http.api=net,web3,eth,txpool,debug,timeboost,auctioneer,batcher
+      - --node.seq-coordinator.my-url=http://nitro:8547
+      - --graphql.enable
+      - --graphql.vhosts=*
+      - --graphql.corsdomain=*
+    depends_on:
+      rollup-creator:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-s",
+          "-X",
+          "POST",
+          "--data",
+          '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}',
+          "-H",
+          "Content-Type: application/json",
+          "http://localhost:8547",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  config:
+  l1keystore:
+  espresso_storage:
+  nitro:

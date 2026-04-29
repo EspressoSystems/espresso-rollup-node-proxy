@@ -4,8 +4,7 @@ go 1.25.1
 
 require (
 	github.com/EspressoSystems/espresso-network/sdks/go v0.3.4
-	github.com/EspressoSystems/espresso-streamers v1.0.2
-	github.com/ccoveille/go-safecast v1.1.0
+	github.com/EspressoSystems/espresso-streamers v1.0.3-0.20260429183138-dabd77150dff
 	github.com/ethereum-optimism/optimism v1.16.7
 	github.com/ethereum/go-ethereum v1.17.1
 	github.com/spf13/pflag v1.0.6
@@ -25,6 +24,7 @@ require (
 	github.com/btcsuite/btcd/btcec/v2 v2.3.4 // indirect
 	github.com/btcsuite/btcd/btcutil v1.1.5 // indirect
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0 // indirect
+	github.com/ccoveille/go-safecast v1.8.2 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cockroachdb/errors v1.11.3 // indirect
 	github.com/cockroachdb/fifo v0.0.0-20240606204812-0bbfbd93a7ce // indirect
