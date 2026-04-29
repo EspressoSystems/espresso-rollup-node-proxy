@@ -48,26 +48,21 @@
         "batch-poster": {
             "enable": true,
             "max-delay": "1m",
+            "wait-for-max-delay": false,
             "l1-block-bound": "ignore",
             "parent-chain-wallet": {
-                "private-key": "4f3edf983ac636a65a842ce7c78d9aa706d3b113b37f60c1b6d9d1f0a5b2b5ff"
+                "private-key": "b6b15c8cb491557369f3c7d2c287b053eb229daa9c22138887752191c9520659"
             },
             "data-poster": {
                 "redis-signer": {
                     "signing-key": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
                 },
-                "wait-for-l1-finality": false,
-                "replacement-times": [
-                    "5s",
-                    "10s",
-                    "20s"
-                ]
+                "wait-for-l1-finality": false
             },
             "poll-interval": "10s"
         },
         "espresso": {
             "batch-poster": {
-                "hotshot-first-posting-block": 0,
                 "hotshot-url": "http://espresso-dev-node:41000",
                 "resubmit-espresso-tx-deadline": "2m",
                 "tee-type": "SGX",
@@ -122,7 +117,7 @@
     },
     "execution": {
         "sequencer": {
-            "enable": false
+            "enable": true
         },
         "forwarding-target": "null"
     },
