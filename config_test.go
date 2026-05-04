@@ -8,7 +8,7 @@ import (
 )
 
 func TestConfigValidate(t *testing.T) {
-	valid := &Config{
+	valid := Config{
 		FullNodeExecutionRPC: "http://localhost:8545",
 		L1RPC:                "ws://localhost:8546",
 		ListenAddr:           ":8080",
@@ -27,7 +27,7 @@ func TestConfigValidate(t *testing.T) {
 	}
 	require.NoError(t, valid.validate())
 
-	opEnabled := &Config{OPConfig: OPConfig{Enable: true}}
+	opEnabled := Config{OPConfig: OPConfig{Enable: true}}
 	err := opEnabled.validate()
 	require.Error(t, err)
 	for _, field := range []string{
@@ -39,14 +39,14 @@ func TestConfigValidate(t *testing.T) {
 		require.Contains(t, err.Error(), field)
 	}
 
-	opDisabled := &Config{}
+	opDisabled := Config{}
 	err = opDisabled.validate()
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "full-node-execution-rpc")
 	require.NotContains(t, err.Error(), "op.full-node-consensus-rpc")
 	require.NotContains(t, err.Error(), "op.light-client-address")
 
-	malformed := *valid
+	malformed := valid
 	malformed.FullNodeExecutionRPC = "notaurl"
 	malformed.OPConfig.LightClientAddress = "0xTOOSHORT"
 	err = malformed.validate()
@@ -54,14 +54,14 @@ func TestConfigValidate(t *testing.T) {
 	require.Contains(t, err.Error(), "missing scheme")
 	require.Contains(t, err.Error(), "invalid Ethereum address")
 
-	badLogFormat := *valid
+	badLogFormat := valid
 	badLogFormat.LogFormat = "yaml"
 	err = badLogFormat.validate()
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "log-format")
 
 	for _, goodFormat := range []string{"", "text", "json"} {
-		goodLogFormat := *valid
+		goodLogFormat := valid
 		goodLogFormat.LogFormat = goodFormat
 		require.NoError(t, goodLogFormat.validate(), "log format %q should be valid", goodFormat)
 	}
