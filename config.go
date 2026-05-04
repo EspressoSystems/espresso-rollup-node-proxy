@@ -36,6 +36,7 @@ type Config struct {
 	MaxRequestBodySize   int      `json:"max_request_body_size"`
 	OPConfig             OPConfig `json:"op"`
 	LogLevel             string   `json:"log_level"`
+	LogFormat            string   `json:"log_format"`
 	TrackBatchLatency    bool     `json:"track_batch_latency"`
 }
 
@@ -47,6 +48,7 @@ func defaultConfig() *Config {
 		MaxBatchSize:       proxy.DefaultMaxBatchSize,
 		MaxRequestBodySize: proxy.DefaultMaxRequestBodySize,
 		LogLevel:           "info",
+		LogFormat:          "json",
 		OPConfig: OPConfig{
 			VerificationInterval: 10 * time.Millisecond,
 		},
@@ -73,6 +75,7 @@ func parseConfig() *Config {
 
 	pflag.String("config", "", "path to JSON config file")
 	pflag.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "logging level (e.g., debug, info, warn, error)")
+	pflag.StringVar(&cfg.LogFormat, "log-format", cfg.LogFormat, "log output format (text or json)")
 	pflag.StringVar(&cfg.ListenAddr, "listen-addr", cfg.ListenAddr, "proxy listen address")
 	pflag.StringVar(&cfg.FullNodeExecutionRPC, "full-node-execution-rpc", cfg.FullNodeExecutionRPC, "full node execution RPC URL")
 	pflag.StringVar(&cfg.L1RPC, "l1-rpc", cfg.L1RPC, "L1 RPC URL")
@@ -149,6 +152,9 @@ func (c *Config) validate() error {
 	}
 	if c.StoreFilePath == "" {
 		errs = append(errs, fmt.Errorf("store-file-path: must not be empty"))
+	}
+	if c.LogFormat != "" && c.LogFormat != "text" && c.LogFormat != "json" {
+		errs = append(errs, fmt.Errorf("log-format: must be \"text\" or \"json\", got %q", c.LogFormat))
 	}
 
 	return errors.Join(errs...)
