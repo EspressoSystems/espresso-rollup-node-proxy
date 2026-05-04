@@ -338,8 +338,9 @@ services:
       - --p2p.sync.req-resp=true
 
   fullnode-proxy-1:
-    image: espresso-rollup-node-proxy:latest
-    pull_policy: never
+    build:
+      context: ../..
+    pull_policy: build
     depends_on:
       op-geth-fullnode:
         condition: service_healthy
@@ -358,10 +359,12 @@ services:
       - --op.light-client-address=${ESPRESSO_SEQUENCER_LIGHT_CLIENT_PROXY_ADDRESS}
       - --op.batcher-address=${TEE_BATCHER_ADDRESS}
       - --op.batch-authenticator-address=${BATCH_AUTH_ADDR}
+      - --initial-hotshot-height=1
 
   fullnode-proxy-2:
-    image: espresso-rollup-node-proxy:latest
-    pull_policy: never
+    build:
+      context: ../..
+    pull_policy: build
     depends_on:
       op-geth-fullnode-2:
         condition: service_healthy
@@ -380,10 +383,12 @@ services:
       - --op.light-client-address=${ESPRESSO_SEQUENCER_LIGHT_CLIENT_PROXY_ADDRESS}
       - --op.batcher-address=${TEE_BATCHER_ADDRESS}
       - --op.batch-authenticator-address=${BATCH_AUTH_ADDR}
+      - --initial-hotshot-height=1
 
   fullnode-proxy-3:
-    image: espresso-rollup-node-proxy:latest
-    pull_policy: never
+    build:
+      context: ../..
+    pull_policy: build
     depends_on:
       op-geth-fullnode-3:
         condition: service_healthy
@@ -402,6 +407,7 @@ services:
       - --op.light-client-address=${ESPRESSO_SEQUENCER_LIGHT_CLIENT_PROXY_ADDRESS}
       - --op.batcher-address=${TEE_BATCHER_ADDRESS}
       - --op.batch-authenticator-address=${BATCH_AUTH_ADDR}
+      - --initial-hotshot-height=1
 
   proxyd:
     image: ${PROXYD_IMAGE}

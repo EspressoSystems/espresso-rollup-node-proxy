@@ -153,6 +153,26 @@ func dockerComposeStop(t *testing.T, workingDir string, service string) {
 	}
 }
 
+func dockerComposeFileStop(t *testing.T, workingDir, composeFile, service string) {
+	t.Helper()
+	cmd := exec.Command("docker", "compose", "-f", composeFile, "stop", service)
+	cmd.Dir = workingDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker compose -f %s stop %s failed: %v\n%s", composeFile, service, err, string(out))
+	}
+}
+
+func dockerComposeFileStart(t *testing.T, workingDir, composeFile, service string) {
+	t.Helper()
+	cmd := exec.Command("docker", "compose", "-f", composeFile, "start", service)
+	cmd.Dir = workingDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker compose -f %s start %s failed: %v\n%s", composeFile, service, err, string(out))
+	}
+}
+
 func dockerComposeStart(t *testing.T, workingDir string, profiles []string, services ...string) {
 	t.Helper()
 	args := []string{"compose"}
@@ -346,13 +366,18 @@ func jsonRPCBatchCallRaw(t *testing.T, url string, entries []batchEntry) []JSONR
 
 func startTestProxy(ctx context.Context, t *testing.T, backendURL string, store *espressostore.EspressoStore, tag string) (proxyURL string, shutdown func()) {
 	t.Helper()
+	return startTestProxyAt(ctx, t, "127.0.0.1:0", backendURL, store, tag)
+}
+
+func startTestProxyAt(ctx context.Context, t *testing.T, listenAddr, backendURL string, store *espressostore.EspressoStore, tag string) (proxyURL string, shutdown func()) {
+	t.Helper()
 	p := proxy.NewProxy(&proxy.ProxyConfig{
 		FullNodeExecutionRPC: backendURL,
 		EspressoTag:          tag,
 		MaxBatchSize:         proxy.DefaultMaxBatchSize,
 		MaxRequestBodySize:   proxy.DefaultMaxRequestBodySize,
 	}, store)
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := net.Listen("tcp", listenAddr)
 	require.NoError(t, err)
 	proxyURL = "http://" + listener.Addr().String()
 	server := &http.Server{Handler: http.HandlerFunc(p.Serve)}
