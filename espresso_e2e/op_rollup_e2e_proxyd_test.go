@@ -65,7 +65,7 @@ func TestOPE2EProxyd(t *testing.T) {
 		return ok
 	})
 
-	t.Run("EspressoTagMonotonicity", func(t *testing.T) {
+	t.Run("espresso proxy restart and proxyd only goes forward", func(t *testing.T) {
 		initialBlock, _ := getEspressoBlockFromProxyd(t, proxydURL)
 		require.Greater(t, initialBlock, uint64(0), "expected initial block from proxyd to be greater than 0")
 		t.Logf("Proxyd espresso tag at block %d, shutting down fullnode-proxy-1", initialBlock)
@@ -112,11 +112,16 @@ func TestOPE2EProxyd(t *testing.T) {
 		userAddr := "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 		hash := "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
 
+		t.Run("eth_blockNumber", func(t *testing.T) {
+			resp := jsonRPCCallRaw(t, proxydURL, "eth_blockNumber", nil)
+			require.True(t, resp.Error == nil || string(resp.Error) == "null", "eth_blockNumber returned error: %s", string(resp.Error))
+			require.False(t, resp.Result == nil || string(resp.Result) == "null", "eth_blockNumber returned null result")
+		})
+
 		methodsWithNoEspressoTag := []struct {
 			method string
 			params any
 		}{
-			{"eth_blockNumber", nil},
 			{"eth_chainId", nil},
 			{"eth_syncing", nil},
 			{"eth_gasPrice", nil},
