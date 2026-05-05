@@ -112,6 +112,7 @@ func TestOPE2EProxyd(t *testing.T) {
 		userAddr := "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 		hash := "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
 
+		// just verify proxyd returns a valid result and avoid any race conditions for eth_blockNumber
 		t.Run("eth_blockNumber", func(t *testing.T) {
 			resp := jsonRPCCallRaw(t, proxydURL, "eth_blockNumber", nil)
 			require.True(t, resp.Error == nil || string(resp.Error) == "null", "eth_blockNumber returned error: %s", string(resp.Error))
@@ -150,10 +151,6 @@ func TestOPE2EProxyd(t *testing.T) {
 			})
 		}
 
-		espressoBlock, ok := getEspressoBlockFromProxyd(t, proxydURL)
-		require.True(t, ok, "expected espresso tag to resolve")
-		blockHex := fmt.Sprintf("0x%x", espressoBlock)
-
 		espressoTagMethods := []struct {
 			method string
 			params []any
@@ -173,12 +170,15 @@ func TestOPE2EProxyd(t *testing.T) {
 			{"eth_getHeaderByNumber", []any{espressoTag}},
 		}
 
+		espressoBlock, ok := getEspressoBlockFromProxyd(t, proxydURL)
+		require.True(t, ok, "expected espresso tag to resolve")
+		blockHex := fmt.Sprintf("0x%x", espressoBlock)
+
 		for _, tc := range espressoTagMethods {
 			t.Run(tc.method, func(t *testing.T) {
-				proxyParams := jsonMarshal(t, tc.params)
-				directParams := replaceTag(proxyParams, espressoTag, blockHex)
-				proxyResp := jsonRPCCallRaw(t, proxydURL, tc.method, proxyParams)
-				directResp := jsonRPCCallRaw(t, opGethFullNode, tc.method, directParams)
+				params := replaceTag(jsonMarshal(t, tc.params), espressoTag, blockHex)
+				proxyResp := jsonRPCCallRaw(t, proxydURL, tc.method, params)
+				directResp := jsonRPCCallRaw(t, opGethFullNode, tc.method, params)
 				requireJSONRPCEqual(t, directResp, proxyResp, tc.method)
 			})
 		}
