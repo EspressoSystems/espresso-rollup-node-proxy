@@ -16,16 +16,6 @@ const (
 	proxydComposeFile = "docker-compose.proxyd.yml"
 )
 
-func waitForProxydServicesReady(t *testing.T) {
-	t.Helper()
-	waitForHTTPReady(t, l1GethURL, 2*time.Minute)
-	waitForHTTPReady(t, espressoURL+"/v0/status/block-height", 2*time.Minute)
-	waitForHTTPReady(t, opGethSeqURL, 2*time.Minute)
-	waitForHTTPReady(t, opNodeSeqURL, 2*time.Minute)
-	waitForHTTPReady(t, opGethFullNode, 2*time.Minute)
-	waitForHTTPReady(t, opNodeFullNode, 2*time.Minute)
-}
-
 func getEspressoBlockFromProxyd(t *testing.T, url string) (uint64, bool) {
 	t.Helper()
 	resp := jsonRPCCallRaw(t, url, "eth_getBlockByNumber", jsonMarshal(t, []any{espressoTag, false}))
@@ -54,7 +44,7 @@ func TestOPE2EProxyd(t *testing.T) {
 	defer shutdown()
 
 	t.Log("Waiting for OP stack services to be ready")
-	waitForProxydServicesReady(t)
+	waitForRollupServicesReady(t)
 
 	t.Log("Waiting for proxyd to be ready")
 	waitForHTTPReady(t, proxydURL, 2*time.Minute)
