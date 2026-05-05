@@ -65,7 +65,15 @@ func main() {
 	if err := logLevel.UnmarshalText([]byte(cfg.LogLevel)); err != nil {
 		log.Crit("invalid log level", "level", cfg.LogLevel, "error", err)
 	}
-	logger := log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stderr, logLevel, true))
+
+	var handler slog.Handler
+	if cfg.LogFormat == "json" {
+		handler = log.JSONHandlerWithLevel(os.Stderr, logLevel)
+	} else {
+		handler = log.NewTerminalHandlerWithLevel(os.Stderr, logLevel, true)
+	}
+	logger := log.NewLogger(handler)
+	log.SetDefault(logger)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
