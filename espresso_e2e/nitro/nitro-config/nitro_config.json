@@ -2,7 +2,7 @@
     "ensure-rollup-deployment": false,
     "parent-chain": {
         "connection": {
-            "url": "ws://demo-l1-network:8546"
+            "url": "http://l1-geth:8545"
         }
     },
     "chain": {
@@ -63,7 +63,7 @@
         },
         "espresso": {
             "batch-poster": {
-                "hotshot-url": "http://espresso-dev-node:41000",
+                "hotshot-url": "http://espresso-dev-node:24000",
                 "resubmit-espresso-tx-deadline": "2m",
                 "tee-type": "SGX",
                 "txns-monitoring-interval": "1s"

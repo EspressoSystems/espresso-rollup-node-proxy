@@ -222,6 +222,7 @@ func (c *Config) toOPVerifierConfig() *opVerifier.OPEspressoBatchVerifierConfig 
 func (c *Config) toNitroVerifierConfig() *nitroVerifier.NitroEspressoBatchVerifierConfig {
 	return &nitroVerifier.NitroEspressoBatchVerifierConfig{
 		FeedURL:               c.NitroConfig.FeedURL,
+		FullNodeExecutionRPC:  c.FullNodeExecutionRPC,
 		VerificationInterval:  c.NitroConfig.VerificationInterval,
 		QueryServiceURL:       c.NitroConfig.QueryServiceURL,
 		Namespace:             c.NitroConfig.Namespace,

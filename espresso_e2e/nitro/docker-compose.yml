@@ -1,5 +1,5 @@
 services:
-  demo-l1-network:
+  l1-geth:
     image: ghcr.io/espressosystems/timeboost/geth-l1:rollup-creator-round2
     command: --dev --dev.period=1 --verbosity=2
     ports:
@@ -63,12 +63,12 @@ services:
       MAX_DATA_SIZE: 117964
       OWNER_ADDRESS: 0x3f1Eae7D46d88F08fc2F8ed27FCb2AB183EB2d0E
       PARENT_CHAIN_ID: 1337
-      PARENT_CHAIN_RPC: "http://demo-l1-network:8545"
+      PARENT_CHAIN_RPC: "http://l1-geth:8545"
       SEQUENCER_ADDRESS: 0x3f1Eae7D46d88F08fc2F8ed27FCb2AB183EB2d0E
       WASM_MODULE_ROOT: 0xdb698a2576298f25448bc092e52cf13b1e24141c997135d70f217d674bbeb69a
     command: ["create-rollup-testnode"]
     depends_on:
-      demo-l1-network:
+      l1-geth:
         condition: service_healthy
 
   nitro:

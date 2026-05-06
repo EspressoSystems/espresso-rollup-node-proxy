@@ -4,7 +4,7 @@ go 1.25.1
 
 require (
 	github.com/EspressoSystems/espresso-network/sdks/go v0.3.4
-	github.com/EspressoSystems/espresso-streamers v1.0.3-0.20260430130129-62ec38b5d96b
+	github.com/EspressoSystems/espresso-streamers v1.0.3-0.20260505223424-a535b67f2d7f
 	github.com/ethereum-optimism/optimism v1.16.7
 	github.com/ethereum/go-ethereum v1.17.1
 	github.com/spf13/pflag v1.0.6
