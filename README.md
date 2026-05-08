@@ -174,6 +174,8 @@ Clients should point at the proxy (`http://localhost:8080`) rather than directly
 | `--op.batch-authenticator-address` | `op.batch_authenticator_address` | — | Batch Authenticator contract address on L1 |
 | `--op.verification-interval` | `op.verification_interval` | `10ms` | How often the verifier polls for new confirmed batches |
 | `--log-level` | `log_level` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
+| `--log-format` | `log_format` | `json` | Log output format (`text` or `json`) |
+| `--track-batch-latency` | `track_batch_latency` | `false` | Log per-batch and average latency from HotShot finalization to verification |
 
 ## E2E Tests
 
