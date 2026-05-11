@@ -1,11 +1,51 @@
 package main
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
 )
+
+func TestDurationPflag(t *testing.T) {
+	var d Duration
+	fs := pflag.NewFlagSet("test", pflag.ContinueOnError)
+	fs.DurationVar(&d.Duration, "interval", 0, "test interval")
+
+	require.NoError(t, fs.Parse([]string{"--interval=250ms"}))
+	require.Equal(t, 250*time.Millisecond, d.Duration)
+
+	require.NoError(t, fs.Parse([]string{"--interval", "1m"}))
+	require.Equal(t, time.Minute, d.Duration)
+}
+
+func TestDurationUnmarshalJSON(t *testing.T) {
+	t.Run("string duration", func(t *testing.T) {
+		var d Duration
+		require.NoError(t, json.Unmarshal([]byte(`"250ms"`), &d))
+		require.Equal(t, 250*time.Millisecond, d.Duration)
+	})
+
+	t.Run("integer nanoseconds", func(t *testing.T) {
+		var d Duration
+		require.NoError(t, json.Unmarshal([]byte(`250000000`), &d))
+		require.Equal(t, 250*time.Millisecond, d.Duration)
+	})
+
+	t.Run("invalid string", func(t *testing.T) {
+		var d Duration
+		require.Error(t, json.Unmarshal([]byte(`"notaduration"`), &d))
+	})
+
+	t.Run("full config json", func(t *testing.T) {
+		raw := []byte(`{"verification_interval": "250ms"}`)
+		var op OPConfig
+		require.NoError(t, json.Unmarshal(raw, &op))
+		require.Equal(t, 250*time.Millisecond, op.VerificationInterval.Duration)
+	})
+}
 
 func TestConfigValidate(t *testing.T) {
 	valid := Config{
@@ -18,7 +58,7 @@ func TestConfigValidate(t *testing.T) {
 		OPConfig: OPConfig{
 			Enable:                    true,
 			FullNodeConsensusRPC:      "http://localhost:9545",
-			VerificationInterval:      1 * time.Millisecond,
+			VerificationInterval:      Duration{1 * time.Millisecond},
 			QueryServiceURL:           "https://query.espresso.network",
 			LightClientAddress:        "0x1234567890abcdef1234567890abcdef12345678",
 			BatcherAddress:            "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",

@@ -15,14 +15,29 @@ import (
 	"github.com/spf13/pflag"
 )
 
+type Duration struct{ time.Duration }
+
+func (d *Duration) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		parsed, err := time.ParseDuration(s)
+		if err != nil {
+			return err
+		}
+		d.Duration = parsed
+		return nil
+	}
+	return json.Unmarshal(b, &d.Duration)
+}
+
 type OPConfig struct {
-	Enable                    bool          `json:"enable"`
-	FullNodeConsensusRPC      string        `json:"full_node_consensus_rpc"`
-	VerificationInterval      time.Duration `json:"verification_interval"`
-	QueryServiceURL           string        `json:"query_service_url"`
-	LightClientAddress        string        `json:"light_client_address"`
-	BatcherAddress            string        `json:"batcher_address"`
-	BatchAuthenticatorAddress string        `json:"batch_authenticator_address"`
+	Enable                    bool     `json:"enable"`
+	FullNodeConsensusRPC      string   `json:"full_node_consensus_rpc"`
+	VerificationInterval      Duration `json:"verification_interval"`
+	QueryServiceURL           string   `json:"query_service_url"`
+	LightClientAddress        string   `json:"light_client_address"`
+	BatcherAddress            string   `json:"batcher_address"`
+	BatchAuthenticatorAddress string   `json:"batch_authenticator_address"`
 }
 
 type Config struct {
@@ -50,7 +65,7 @@ func defaultConfig() *Config {
 		LogLevel:           "info",
 		LogFormat:          "json",
 		OPConfig: OPConfig{
-			VerificationInterval: 10 * time.Millisecond,
+			VerificationInterval: Duration{10 * time.Millisecond},
 		},
 	}
 }
@@ -88,7 +103,7 @@ func parseConfig() *Config {
 
 	pflag.BoolVar(&cfg.OPConfig.Enable, "op.enable", cfg.OPConfig.Enable, "enable OP mode")
 	pflag.StringVar(&cfg.OPConfig.FullNodeConsensusRPC, "op.full-node-consensus-rpc", cfg.OPConfig.FullNodeConsensusRPC, "OP full node consensus RPC URL")
-	pflag.DurationVar(&cfg.OPConfig.VerificationInterval, "op.verification-interval", cfg.OPConfig.VerificationInterval, "OP verification interval")
+	pflag.DurationVar(&cfg.OPConfig.VerificationInterval.Duration, "op.verification-interval", cfg.OPConfig.VerificationInterval.Duration, "OP verification interval")
 	pflag.StringVar(&cfg.OPConfig.QueryServiceURL, "op.query-service-url", cfg.OPConfig.QueryServiceURL, "Espresso query service URL")
 	pflag.StringVar(&cfg.OPConfig.LightClientAddress, "op.light-client-address", cfg.OPConfig.LightClientAddress, "Espresso light client contract address")
 	pflag.StringVar(&cfg.OPConfig.BatcherAddress, "op.batcher-address", cfg.OPConfig.BatcherAddress, "OP batcher address")
@@ -173,7 +188,7 @@ func (c *Config) toOPVerifierConfig() *verifier.OPEspressoBatchVerifierConfig {
 	return &verifier.OPEspressoBatchVerifierConfig{
 		FullNodeExecutionRPC:      c.FullNodeExecutionRPC,
 		FullNodeConsensusRPC:      c.OPConfig.FullNodeConsensusRPC,
-		VerificationInterval:      c.OPConfig.VerificationInterval,
+		VerificationInterval:      c.OPConfig.VerificationInterval.Duration,
 		QueryServiceURL:           c.OPConfig.QueryServiceURL,
 		BatcherAddress:            c.OPConfig.BatcherAddress,
 		BatchAuthenticatorAddress: c.OPConfig.BatchAuthenticatorAddress,
