@@ -59,6 +59,22 @@ func (fc *FeedClient) GetMessage(seqNum uint64) *BroadcastFeedMessage {
 	return fc.messages[seqNum]
 }
 
+func (fc *FeedClient) AdvanceTo(seqNum uint64) {
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+	for i := fc.nextSeqNum; i < seqNum; i++ {
+		delete(fc.messages, i)
+	}
+	fc.nextSeqNum = seqNum
+}
+
+func (fc *FeedClient) Advance() {
+	fc.mu.Lock()
+	defer fc.mu.Unlock()
+	delete(fc.messages, fc.nextSeqNum)
+	fc.nextSeqNum += 1
+}
+
 func (fc *FeedClient) Start(ctx context.Context) {
 	go fc.readLoop(ctx)
 }
@@ -129,6 +145,9 @@ func (fc *FeedClient) readMessages(ctx context.Context, conn *websocket.Conn) {
 		fc.mu.Lock()
 		for _, feedMsg := range feedMsg.Messages {
 			if feedMsg == nil {
+				continue
+			}
+			if feedMsg.SequenceNumber < fc.nextSeqNum {
 				continue
 			}
 			if fc.messages[feedMsg.SequenceNumber] != nil {

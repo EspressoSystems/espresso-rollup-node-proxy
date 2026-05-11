@@ -27,13 +27,13 @@
             "make-assertion-interval": "10s",
             "strategy": "MakeNodes"
         },
-        "sequencer": true,
+        "sequencer": false,
         "dangerous": {
             "no-sequencer-coordinator": true,
             "disable-blob-reader": true
         },
         "delayed-sequencer": {
-            "enable": true
+            "enable": false
         },
         "seq-coordinator": {
             "enable": false,
@@ -59,14 +59,21 @@
                 },
                 "wait-for-l1-finality": false
             },
-            "poll-interval": "10s"
+            "poll-interval": "5s"
         },
         "espresso": {
             "batch-poster": {
                 "hotshot-url": "http://espresso-dev-node:24000",
                 "resubmit-espresso-tx-deadline": "2m",
-                "tee-type": "SGX",
-                "txns-monitoring-interval": "1s"
+                "tee-type": "TESTS",
+                "txns-monitoring-interval": "1s",
+                "address-valid-ranges": [
+                    {
+                        "address": "0x3f1Eae7D46d88F08fc2F8ed27FCb2AB183EB2d0E",
+                        "from": 0,
+                        "to": 9234811370
+                    }
+                ]
             },
             "streamer": {
                 "txns-polling-interval": "1s"
@@ -80,44 +87,19 @@
         },
         "feed": {
             "input": {
-                "url": []
+                "url": ["ws://sequencer:9642"]
             },
             "output": {
-                "enable": true,
-                "signed": false,
-                "addr": "0.0.0.0",
-                "port": 9642
+                "enable": false
             }
         },
         "data-availability": {
-            "enable": false,
-            "rpc-aggregator": {
-                "enable": false,
-                "assumed-honest": 1,
-                "backends": [
-                    {
-                        "url": "http://das-committee-a:9876",
-                        "pubkey": ""
-                    },
-                    {
-                        "url": "http://das-committee-b:9876",
-                        "pubkey": ""
-                    }
-                ]
-            },
-            "rest-aggregator": {
-                "enable": true,
-                "urls": [
-                    "http://das-mirror:9877"
-                ]
-            },
-            "parent-chain-node-url": "ws://geth:8546",
-            "sequencer-inbox-address": "0x6be3f7c539009f9b3ae2ce11e231bf064c081cd9"
+            "enable": false
         }
     },
     "execution": {
         "sequencer": {
-            "enable": true
+            "enable": false
         },
         "forwarding-target": "null"
     },

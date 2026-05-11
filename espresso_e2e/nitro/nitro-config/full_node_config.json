@@ -1,0 +1,65 @@
+{
+    "ensure-rollup-deployment": false,
+    "parent-chain": {
+        "connection": {
+            "url": "http://l1-geth:8545"
+        }
+    },
+    "chain": {
+        "id": 412346,
+        "info-files": [
+            "/config/deployed_chain_info.json"
+        ]
+    },
+    "node": {
+        "staker": {
+            "enable": false
+        },
+        "sequencer": false,
+        "dangerous": {
+            "no-sequencer-coordinator": true,
+            "disable-blob-reader": true
+        },
+        "delayed-sequencer": {
+            "enable": false
+        },
+        "seq-coordinator": {
+            "enable": false
+        },
+        "batch-poster": {
+            "enable": false
+        },
+        "feed": {
+            "input": {
+                "url": ["ws://sequencer:9642"]
+            },
+            "output": {
+                "enable": true,
+                "signed": false,
+                "addr": "0.0.0.0",
+                "port": 9642
+            }
+        },
+        "data-availability": {
+            "enable": false
+        }
+    },
+    "execution": {
+        "sequencer": {
+            "enable": false
+        },
+        "forwarding-target": "http://sequencer:8547"
+    },
+    "persistent": {
+        "chain": "local"
+    },
+    "ws": {
+        "addr": "0.0.0.0"
+    },
+    "http": {
+        "addr": "0.0.0.0",
+        "vhosts": "*",
+        "corsdomain": "*"
+    },
+    "log-level": "INFO"
+}
