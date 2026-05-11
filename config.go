@@ -37,19 +37,19 @@ type NitroConfig struct {
 }
 
 type Config struct {
-	FullNodeExecutionRPC string   `json:"full_node_execution_rpc"`
-	L1RPC                string   `json:"l1_rpc"`
-	ListenAddr           string   `json:"listen_addr"`
-	EspressoTag          string   `json:"espresso_tag"`
-	StoreFilePath        string   `json:"store_file_path"`
-	InitialHotshotHeight uint64   `json:"initial_hotshot_height"`
-	MaxBatchSize         int      `json:"max_batch_size"`
-	MaxRequestBodySize   int      `json:"max_request_body_size"`
+	FullNodeExecutionRPC string      `json:"full_node_execution_rpc"`
+	L1RPC                string      `json:"l1_rpc"`
+	ListenAddr           string      `json:"listen_addr"`
+	EspressoTag          string      `json:"espresso_tag"`
+	StoreFilePath        string      `json:"store_file_path"`
+	InitialHotshotHeight uint64      `json:"initial_hotshot_height"`
+	MaxBatchSize         int         `json:"max_batch_size"`
+	MaxRequestBodySize   int         `json:"max_request_body_size"`
 	OPConfig             OPConfig    `json:"op"`
 	NitroConfig          NitroConfig `json:"nitro"`
-	LogLevel             string   `json:"log_level"`
-	LogFormat            string   `json:"log_format"`
-	TrackBatchLatency    bool     `json:"track_batch_latency"`
+	LogLevel             string      `json:"log_level"`
+	LogFormat            string      `json:"log_format"`
+	TrackBatchLatency    bool        `json:"track_batch_latency"`
 }
 
 func defaultConfig() *Config {
@@ -101,7 +101,7 @@ func parseConfig() *Config {
 	pflag.IntVar(&cfg.MaxBatchSize, "max-batch-size", cfg.MaxBatchSize, "maximum number of requests in a JSON-RPC batch (0 = no limit)")
 	pflag.IntVar(&cfg.MaxRequestBodySize, "max-request-body-size", cfg.MaxRequestBodySize, "maximum request body size in bytes (0 = no limit)")
 
-	pflag.BoolVar(&cfg.OPConfig.Enable, "op.enable", cfg.OPConfig.Enable, "enable OP verifier mode")
+	pflag.BoolVar(&cfg.OPConfig.Enable, "op.enable", cfg.OPConfig.Enable, "enable OP mode")
 	pflag.StringVar(&cfg.OPConfig.FullNodeConsensusRPC, "op.full-node-consensus-rpc", cfg.OPConfig.FullNodeConsensusRPC, "OP full node consensus RPC URL")
 	pflag.DurationVar(&cfg.OPConfig.VerificationInterval, "op.verification-interval", cfg.OPConfig.VerificationInterval, "OP verification interval")
 	pflag.StringVar(&cfg.OPConfig.QueryServiceURL, "op.query-service-url", cfg.OPConfig.QueryServiceURL, "Espresso query service URL")
@@ -109,7 +109,7 @@ func parseConfig() *Config {
 	pflag.StringVar(&cfg.OPConfig.BatcherAddress, "op.batcher-address", cfg.OPConfig.BatcherAddress, "OP batcher address")
 	pflag.StringVar(&cfg.OPConfig.BatchAuthenticatorAddress, "op.batch-authenticator-address", cfg.OPConfig.BatchAuthenticatorAddress, "Espresso batch authenticator contract address")
 
-	pflag.BoolVar(&cfg.NitroConfig.Enable, "nitro.enable", cfg.NitroConfig.Enable, "enable Nitro verifier mode")
+	pflag.BoolVar(&cfg.NitroConfig.Enable, "nitro.enable", cfg.NitroConfig.Enable, "enable Nitro mode")
 	pflag.StringVar(&cfg.NitroConfig.FeedURL, "nitro.feed-url", cfg.NitroConfig.FeedURL, "Nitro sequencer feed WebSocket URL")
 	pflag.DurationVar(&cfg.NitroConfig.VerificationInterval, "nitro.verification-interval", cfg.NitroConfig.VerificationInterval, "Nitro verification interval")
 	pflag.StringVar(&cfg.NitroConfig.QueryServiceURL, "nitro.query-service-url", cfg.NitroConfig.QueryServiceURL, "Espresso query service URL for Nitro")
