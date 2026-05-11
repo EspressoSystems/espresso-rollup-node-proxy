@@ -85,13 +85,24 @@ func NewNitroEspressoBatchVerifier(
 		startHotshotBlock = espressoState.FallbackHotshotHeight
 	}
 
+	// Upon startup see if finalized is ahead of stored
+	startNitroBlock := espressoState.L2BlockNumber
+	header, err := l2Client.HeaderByNumber(ctx, big.NewInt(int64(rpc.FinalizedBlockNumber)))
+	if err != nil {
+		log.Warn("failed to get nitro finalized on startup", err)
+	} else if header == nil {
+		log.Warn("nitro finalized block not found")
+	} else if header.Number.Uint64() > espressoState.L2BlockNumber {
+		log.Warn("finalized block is ahead of stored espresso. updating", "espresso_height", startNitroBlock, "finalized_height", header.Number.Uint64())
+		startNitroBlock = header.Number.Uint64()
+	}
 	streamer := nitroStreamer.NewEspressoStreamer(
 		config.Namespace,
-		espressoState.L2BlockNumber,
+		startHotshotBlock,
 		client,
 		batcherAddrs,
 		time.Second,
-		startHotshotBlock,
+		startNitroBlock,
 		logger,
 	)
 
