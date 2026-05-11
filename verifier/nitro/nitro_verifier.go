@@ -9,7 +9,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	feedConnector "proxy/verifier/nitro/feed_client"
 	feedclient "proxy/verifier/nitro/feed_client"
 
 	espressoStore "proxy/store"
@@ -92,11 +91,11 @@ func NewNitroEspressoBatchVerifier(
 		client,
 		batcherAddrs,
 		time.Second,
-		espressoState.FallbackHotshotHeight,
+		startHotshotBlock,
 		logger,
 	)
 
-	feed := feedConnector.NewFeedClient(config.FeedURL, espressoState.L2BlockNumber, logger, nil, nil)
+	feed := feedclient.NewFeedClient(config.FeedURL, espressoState.L2BlockNumber, logger, nil, nil)
 
 	return &NitroEspressoBatchVerifier{
 		streamer:      streamer,
@@ -340,6 +339,9 @@ func ValidateNitroVerifierConfig(config *NitroEspressoBatchVerifierConfig) error
 	}
 	if len(config.ValidBatcherAddresses) == 0 {
 		return fmt.Errorf("at least one valid_batcher_address is required")
+	}
+	if config.VerificationInterval <= 0 {
+		return fmt.Errorf("verification_interval must be positive")
 	}
 	return nil
 }
