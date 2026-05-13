@@ -177,6 +177,9 @@ func (c *Config) validate() error {
 		if c.NitroConfig.Namespace == 0 {
 			errs = append(errs, fmt.Errorf("nitro.namespace: must not be zero"))
 		}
+		if c.NitroConfig.VerificationInterval <= 0 {
+			errs = append(errs, fmt.Errorf("nitro.verification-interval: must not be zero"))
+		}
 		if len(c.NitroConfig.ValidBatcherAddresses) == 0 {
 			errs = append(errs, fmt.Errorf("nitro.valid-batcher-addresses: at least one address required"))
 		}

@@ -50,13 +50,7 @@
             "max-delay": "1m",
             "wait-for-max-delay": false,
             "l1-block-bound": "ignore",
-            "parent-chain-wallet": {
-                "private-key": "b6b15c8cb491557369f3c7d2c287b053eb229daa9c22138887752191c9520659"
-            },
             "data-poster": {
-                "redis-signer": {
-                    "signing-key": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-                },
                 "wait-for-l1-finality": false
             },
             "poll-interval": "5s"

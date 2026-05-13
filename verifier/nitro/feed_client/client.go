@@ -3,6 +3,8 @@ package feedclient
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"sync"
@@ -13,43 +15,35 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 )
 
-type FeedClient struct {
-	feedWSURL  string
-	nextSeqNum uint64
-	mu         sync.RWMutex
-	messages   map[uint64]*BroadcastFeedMessage
-	logger     log.Logger
+var ErrIncorrectChainId = errors.New("incorrect chain id")
+var ErrMissingChainId = errors.New("missing chain id")
 
-	reconnectBackoff time.Duration
-	maxBackoff       time.Duration
+type FeedClient struct {
+	feedWSURL   string
+	chainID     uint64
+	nextSeqNum  uint64
+	mu          sync.RWMutex
+	messages    map[uint64]*BroadcastFeedMessage
+	logger      log.Logger
 }
 
 const (
 	headerRequestedSequenceNumber = "Arbitrum-Requested-Sequence-Number"
 	headerFeedClientVersion       = "Arbitrum-Feed-Client-Version"
+	headerChainID                 = "Arbitrum-Chain-Id"
 	feedClientVersion             = "2"
 	broadcastMessageVersion       = 1
+	startBackOff                  = 1 * time.Second
+	maxBackoff                    = 10 * time.Second
 )
 
-var (
-	defaultBackoff    = 1 * time.Second
-	defaultMaxBackoff = 30 * time.Second
-)
-
-func NewFeedClient(feedWSURL string, startSeqNum uint64, logger log.Logger, reconnectBackoff *time.Duration, maxBackoff *time.Duration) *FeedClient {
-	if reconnectBackoff == nil {
-		reconnectBackoff = &defaultBackoff
-	}
-	if maxBackoff == nil {
-		maxBackoff = &defaultMaxBackoff
-	}
+func NewFeedClient(feedWSURL string, chainID uint64, startSeqNum uint64, logger log.Logger) *FeedClient {
 	return &FeedClient{
-		feedWSURL:        feedWSURL,
-		nextSeqNum:       startSeqNum,
-		messages:         make(map[uint64]*BroadcastFeedMessage),
-		logger:           logger,
-		reconnectBackoff: *reconnectBackoff,
-		maxBackoff:       *maxBackoff,
+		feedWSURL:  feedWSURL,
+		chainID:    chainID,
+		nextSeqNum: startSeqNum,
+		messages:   make(map[uint64]*BroadcastFeedMessage),
+		logger:     logger,
 	}
 }
 
@@ -80,11 +74,11 @@ func (fc *FeedClient) Start(ctx context.Context) {
 }
 
 func (fc *FeedClient) readLoop(ctx context.Context) {
-	backoff := fc.reconnectBackoff
-
+	backoff := startBackOff
 	for {
 		select {
 		case <-ctx.Done():
+			log.Info("feed client read loop is closing.")
 			return
 		default:
 		}
@@ -94,22 +88,24 @@ func (fc *FeedClient) readLoop(ctx context.Context) {
 			headerRequestedSequenceNumber: []string{strconv.FormatUint(fc.nextSeqNum, 10)},
 		}
 		dialer := websocket.Dialer{EnableCompression: true}
-		conn, _, err := dialer.DialContext(ctx, fc.feedWSURL, header)
+		conn, resp, err := dialer.DialContext(ctx, fc.feedWSURL, header)
 		if err != nil {
 			fc.logger.Error("failed to connect to the feed", "url", fc.feedWSURL, "error", err)
-			select {
-			case <-time.After(backoff):
-				if backoff < fc.maxBackoff {
-					backoff *= 2
-				}
-			case <-ctx.Done():
-				return
+			time.Sleep(backoff)
+			if backoff < maxBackoff {
+				backoff *= 2
 			}
 			continue
 		}
 
+		if err := fc.verifyChainID(resp); errors.Is(err, ErrIncorrectChainId) || errors.Is(err, ErrMissingChainId) {
+			conn.Close()
+			fc.logger.Crit("feed chain id verification failed", "url", fc.feedWSURL, "error", err)
+			return
+		}
+
 		fc.logger.Info("connected to the feed", "url", fc.feedWSURL)
-		backoff = fc.reconnectBackoff
+		backoff = startBackOff
 		fc.readMessages(ctx, conn)
 		if err := conn.Close(); err != nil {
 			fc.logger.Warn("error closing connection", "err", err)
@@ -117,17 +113,36 @@ func (fc *FeedClient) readLoop(ctx context.Context) {
 	}
 }
 
+func (fc *FeedClient) verifyChainID(resp *http.Response) error {
+	if resp == nil {
+		return ErrMissingChainId
+	}
+	val := resp.Header.Get(headerChainID)
+	if val == "" {
+		return ErrMissingChainId
+	}
+	chainID, err := strconv.ParseUint(val, 0, 64)
+	if err != nil {
+		return fmt.Errorf("malformed %s header: %w", headerChainID, err)
+	}
+	if chainID != fc.chainID {
+		return fmt.Errorf("%w: expected %d, got %d", ErrIncorrectChainId, fc.chainID, chainID)
+	}
+	return nil
+}
+
 func (fc *FeedClient) readMessages(ctx context.Context, conn *websocket.Conn) {
 	for {
 		select {
 		case <-ctx.Done():
+			log.Info("feed client read message loop is closing.")
 			return
 		default:
 		}
 
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
-			fc.logger.Error("error reading message from feed", "error", err)
+			fc.logger.Error("error reading message from feed, will reconnect", "error", err)
 			return
 		}
 
@@ -151,7 +166,6 @@ func (fc *FeedClient) readMessages(ctx context.Context, conn *websocket.Conn) {
 				continue
 			}
 			if fc.messages[feedMsg.SequenceNumber] != nil {
-				fc.logger.Warn("received duplicate message", "seqNum", feedMsg.SequenceNumber)
 				continue
 			}
 			fc.messages[feedMsg.SequenceNumber] = feedMsg

@@ -20,6 +20,11 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 )
 
+type batchVerifier interface {
+	Start(ctx context.Context)
+	Stop()
+}
+
 type statusResponseWriter struct {
 	http.ResponseWriter
 	statusCode int
@@ -90,12 +95,7 @@ func main() {
 		logger.Crit("failed to create espresso store", "error", err)
 	}
 
-	type BatchVerifier interface {
-		Start(ctx context.Context)
-		Stop()
-	}
-
-	var fullNodeVerifier BatchVerifier
+	var fullNodeVerifier batchVerifier
 
 	switch {
 	case cfg.OPConfig.Enable:
