@@ -7,6 +7,8 @@ import (
 
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
+
+	nitroVerifier "proxy/verifier/nitro"
 )
 
 func TestDurationPflag(t *testing.T) {
@@ -41,25 +43,25 @@ func TestDurationUnmarshalJSON(t *testing.T) {
 
 	t.Run("full config json", func(t *testing.T) {
 		raw := []byte(`{"verification_interval": "250ms"}`)
-		var op OPConfig
-		require.NoError(t, json.Unmarshal(raw, &op))
-		require.Equal(t, 250*time.Millisecond, op.VerificationInterval.Duration)
+		var cfg Config
+		require.NoError(t, json.Unmarshal(raw, &cfg))
+		require.Equal(t, 250*time.Millisecond, cfg.VerificationInterval.Duration)
 	})
 }
 
 func TestConfigValidate(t *testing.T) {
 	valid := Config{
 		FullNodeExecutionRPC: "http://localhost:8545",
-		L1RPC:                "ws://localhost:8546",
+		Mode:                 ModeOP,
 		ListenAddr:           ":8080",
 		EspressoTag:          "espresso",
 		StoreFilePath:        "espresso_store.json",
 		LogLevel:             "info",
+		QueryServiceURL:      "https://query.espresso.network",
+		VerificationInterval: Duration{1 * time.Millisecond},
 		OPConfig: OPConfig{
-			Enable:                    true,
+			L1RPC:                     "ws://localhost:8546",
 			FullNodeConsensusRPC:      "http://localhost:9545",
-			VerificationInterval:      Duration{1 * time.Millisecond},
-			QueryServiceURL:           "https://query.espresso.network",
 			LightClientAddress:        "0x1234567890abcdef1234567890abcdef12345678",
 			BatcherAddress:            "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
 			BatchAuthenticatorAddress: "0x1111111111111111111111111111111111111111",
@@ -67,22 +69,22 @@ func TestConfigValidate(t *testing.T) {
 	}
 	require.NoError(t, valid.validate())
 
-	opEnabled := Config{OPConfig: OPConfig{Enable: true}}
-	err := opEnabled.validate()
+	opEmpty := Config{Mode: ModeOP}
+	err := opEmpty.validate()
 	require.Error(t, err)
 	for _, field := range []string{
-		"full-node-execution-rpc", "l1-rpc",
-		"op.full-node-consensus-rpc", "op.query-service-url",
+		"full-node-execution-rpc", "op.l1-rpc",
+		"op.full-node-consensus-rpc", "query-service-url",
 		"op.light-client-address", "op.batcher-address", "op.batch-authenticator-address",
 		"listen-addr", "espresso-tag", "store-file-path",
 	} {
 		require.Contains(t, err.Error(), field)
 	}
 
-	opDisabled := Config{}
-	err = opDisabled.validate()
+	noMode := Config{}
+	err = noMode.validate()
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "full-node-execution-rpc")
+	require.Contains(t, err.Error(), "mode")
 	require.NotContains(t, err.Error(), "op.full-node-consensus-rpc")
 	require.NotContains(t, err.Error(), "op.light-client-address")
 
@@ -105,4 +107,42 @@ func TestConfigValidate(t *testing.T) {
 		goodLogFormat.LogFormat = goodFormat
 		require.NoError(t, goodLogFormat.validate(), "log format %q should be valid", goodFormat)
 	}
+
+	validNitro := Config{
+		FullNodeExecutionRPC: "http://localhost:8547",
+		Mode:                 ModeNitro,
+		ListenAddr:           ":8080",
+		EspressoTag:          "espresso",
+		StoreFilePath:        "espresso_store.json",
+		LogLevel:             "info",
+		QueryServiceURL:      "https://query.espresso.network",
+		VerificationInterval: Duration{1 * time.Millisecond},
+		NitroConfig: NitroConfig{
+			FeedURL:   "ws://localhost:9642",
+			Namespace: 412346,
+			ValidBatcherAddresses: []nitroVerifier.BatcherAddressConfig{
+				{Address: "0x3f1Eae7D46d88F08fc2F8ed27FCb2AB183EB2d0E"},
+			},
+		},
+	}
+	require.NoError(t, validNitro.validate())
+
+	nitroEmpty := Config{Mode: ModeNitro}
+	err = nitroEmpty.validate()
+	require.Error(t, err)
+	for _, field := range []string{
+		"full-node-execution-rpc", "nitro.feed-url",
+		"nitro.namespace", "nitro.valid-batcher-addresses",
+		"query-service-url", "listen-addr", "espresso-tag", "store-file-path",
+	} {
+		require.Contains(t, err.Error(), field)
+	}
+
+	nitroBadAddr := validNitro
+	nitroBadAddr.NitroConfig.ValidBatcherAddresses = []nitroVerifier.BatcherAddressConfig{
+		{Address: "0xNOTANADDR"},
+	}
+	err = nitroBadAddr.validate()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "nitro.valid-batcher-addresses[0].address")
 }

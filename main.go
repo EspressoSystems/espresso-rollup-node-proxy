@@ -97,9 +97,9 @@ func main() {
 
 	var fullNodeVerifier batchVerifier
 
-	switch {
-	case cfg.OPConfig.Enable:
-		l1Client, err := ethclient.DialContext(ctx, cfg.L1RPC)
+	switch cfg.Mode {
+	case ModeOP:
+		l1Client, err := ethclient.DialContext(ctx, cfg.OPConfig.L1RPC)
 		if err != nil {
 			logger.Crit("failed to create L1 client", "error", err)
 		}
@@ -115,7 +115,7 @@ func main() {
 		fullNodeVerifier = v
 		logger.Info("OP verifier enabled")
 
-	case cfg.NitroConfig.Enable:
+	case ModeNitro:
 		v := nitroVerifier.NewNitroEspressoBatchVerifier(ctx, logger, espressoStore, cfg.toNitroVerifierConfig())
 		if v == nil {
 			logger.Crit("failed to create Nitro verifier")
