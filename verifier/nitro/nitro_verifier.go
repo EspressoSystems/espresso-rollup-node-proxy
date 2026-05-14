@@ -16,21 +16,26 @@ import (
 	espressoClient "github.com/EspressoSystems/espresso-network/sdks/go/client"
 	nitroStreamer "github.com/EspressoSystems/espresso-streamers/nitro"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
+type BatcherAddressConfig struct {
+	Address string `json:"address"`
+	From    uint64 `json:"from"`
+	To      uint64 `json:"to"`
+}
+
 type NitroEspressoBatchVerifierConfig struct {
-	FeedURL               string        `json:"feed_url"`
-	FullNodeExecutionRPC  string        `json:"full_node_execution_rpc"`
-	VerificationInterval  time.Duration `json:"verification_interval"`
-	QueryServiceURL       string        `json:"query_service_url"`
-	Namespace             uint64        `json:"namespace"`
-	InitialHotshotBlock   uint64        `json:"initial_hotshot_block"`
-	ValidBatcherAddresses []string      `json:"valid_batcher_addresses"`
+	FeedURL               string                 `json:"feed_url"`
+	FullNodeExecutionRPC  string                 `json:"full_node_execution_rpc"`
+	VerificationInterval  time.Duration          `json:"verification_interval"`
+	QueryServiceURL       string                 `json:"query_service_url"`
+	Namespace             uint64                 `json:"namespace"`
+	InitialHotshotBlock   uint64                 `json:"initial_hotshot_block"`
+	ValidBatcherAddresses []BatcherAddressConfig `json:"valid_batcher_addresses"`
 }
 
 // NitroEspressoBatchVerifier verifies that messages from the Nitro sequencer feed
@@ -85,9 +90,13 @@ func NewNitroEspressoBatchVerifier(
 	}
 	logger.Info("chain ID verified", "chain_id", chainID.Uint64())
 
-	batcherAddrs := make([]common.Address, 0, len(config.ValidBatcherAddresses))
-	for _, addr := range config.ValidBatcherAddresses {
-		batcherAddrs = append(batcherAddrs, common.HexToAddress(addr))
+	addrRanges := make([]nitroStreamer.AddressValidRangeConfig, 0, len(config.ValidBatcherAddresses))
+	for _, a := range config.ValidBatcherAddresses {
+		addrRanges = append(addrRanges, nitroStreamer.AddressValidRangeConfig{
+			Address: a.Address,
+			From:    a.From,
+			To:      a.To,
+		})
 	}
 
 	espressoState := store.GetState()
@@ -111,7 +120,7 @@ func NewNitroEspressoBatchVerifier(
 		config.Namespace,
 		startHotshotBlock,
 		client,
-		batcherAddrs,
+		addrRanges,
 		time.Second,
 		startNitroBlock+1,
 		logger,

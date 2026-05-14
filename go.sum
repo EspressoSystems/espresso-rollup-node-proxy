@@ -10,6 +10,8 @@ github.com/EspressoSystems/espresso-streamers v1.0.3-0.20260505223424-a535b67f2d
 github.com/EspressoSystems/espresso-streamers v1.0.3-0.20260505223424-a535b67f2d7f/go.mod h1:sKRBDnO5UMSEXDvc4kHM18GMfGCuwa5L/DSGBB2l3Qg=
 github.com/EspressoSystems/espresso-streamers v1.0.3-0.20260511200507-aac1b489ff4f h1:fuzJCq1qEPErOMHJ87lgaOtEGiNZYydrncurWES3Y4o=
 github.com/EspressoSystems/espresso-streamers v1.0.3-0.20260511200507-aac1b489ff4f/go.mod h1:sKRBDnO5UMSEXDvc4kHM18GMfGCuwa5L/DSGBB2l3Qg=
+github.com/EspressoSystems/espresso-streamers v1.0.3-0.20260514140306-de351af76254 h1:P4J2fyGfXQBVO+UNrc0Ejc6Ys+1K8TXZoWB48vDdWm4=
+github.com/EspressoSystems/espresso-streamers v1.0.3-0.20260514140306-de351af76254/go.mod h1:XIgEOJXiZmtF7QKda2u8rALuK48XYI3LphJuyDl+StE=
 github.com/EspressoSystems/optimism-espresso-integration v0.0.0-20260320193702-1e85078aed7b h1:7XWJ3ZLlYrf9Oz5BmRssllw9S60LDDF/IFPKtb4mPH4=
 github.com/EspressoSystems/optimism-espresso-integration v0.0.0-20260320193702-1e85078aed7b/go.mod h1:yZLWZ4Vz0KfVVQ7XS2AD1EkSGX51MYxatscuCSQm8Ic=
 github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERoyfY=

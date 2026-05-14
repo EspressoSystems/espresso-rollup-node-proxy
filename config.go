@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"proxy/proxy"
@@ -27,13 +28,13 @@ type OPConfig struct {
 }
 
 type NitroConfig struct {
-	Enable                bool          `json:"enable"`
-	FeedURL               string        `json:"feed_url"`
-	VerificationInterval  time.Duration `json:"verification_interval"`
-	QueryServiceURL       string        `json:"query_service_url"`
-	Namespace             uint64        `json:"namespace"`
-	InitialHotshotBlock   uint64        `json:"initial_hotshot_block"`
-	ValidBatcherAddresses []string      `json:"valid_batcher_addresses"`
+	Enable                bool                                  `json:"enable"`
+	FeedURL               string                                `json:"feed_url"`
+	VerificationInterval  time.Duration                         `json:"verification_interval"`
+	QueryServiceURL       string                                `json:"query_service_url"`
+	Namespace             uint64                                `json:"namespace"`
+	InitialHotshotBlock   uint64                                `json:"initial_hotshot_block"`
+	ValidBatcherAddresses []nitroVerifier.BatcherAddressConfig  `json:"valid_batcher_addresses"`
 }
 
 type Config struct {
@@ -115,9 +116,18 @@ func parseConfig() *Config {
 	pflag.StringVar(&cfg.NitroConfig.QueryServiceURL, "nitro.query-service-url", cfg.NitroConfig.QueryServiceURL, "Espresso query service URL for Nitro")
 	pflag.Uint64Var(&cfg.NitroConfig.Namespace, "nitro.namespace", cfg.NitroConfig.Namespace, "Nitro namespace")
 	pflag.Uint64Var(&cfg.NitroConfig.InitialHotshotBlock, "nitro.initial-hotshot-block", cfg.NitroConfig.InitialHotshotBlock, "initial HotShot block for Nitro streamer")
-	pflag.StringArrayVar(&cfg.NitroConfig.ValidBatcherAddresses, "nitro.valid-batcher-addresses", cfg.NitroConfig.ValidBatcherAddresses, "valid batcher addresses for Nitro verifier")
+	var batcherAddressFlags []string
+	pflag.StringArrayVar(&batcherAddressFlags, "nitro.valid-batcher-addresses", nil, "valid batcher addresses for Nitro verifier (full range; use config file for from/to)")
 
 	pflag.Parse()
+
+	for _, addr := range batcherAddressFlags {
+		cfg.NitroConfig.ValidBatcherAddresses = append(cfg.NitroConfig.ValidBatcherAddresses, nitroVerifier.BatcherAddressConfig{
+			Address: addr,
+			From:    0,
+			To:      math.MaxUint64,
+		})
+	}
 
 	if err := cfg.validate(); err != nil {
 		log.Crit("invalid configuration", "error", err)
@@ -182,6 +192,9 @@ func (c *Config) validate() error {
 		}
 		if len(c.NitroConfig.ValidBatcherAddresses) == 0 {
 			errs = append(errs, fmt.Errorf("nitro.valid-batcher-addresses: at least one address required"))
+		}
+		for i, a := range c.NitroConfig.ValidBatcherAddresses {
+			errs = append(errs, validateAddress(fmt.Sprintf("nitro.valid-batcher-addresses[%d].address", i), a.Address))
 		}
 	}
 

@@ -1,10 +1,12 @@
 services:
   l1-geth:
-    image: ghcr.io/espressosystems/timeboost/geth-l1:rollup-creator-round2
+    image: ${L1_GETH_IMAGE}
     command: --dev --dev.period=1 --verbosity=2
     ports:
       - 8545:8545
       - 8546:8546
+    volumes:
+      - "./l1-config/genesis.json:/genesis.json"
 
   espresso-dev-node:
     image: ${ESPRESSO_DEV_NODE_IMAGE}
@@ -27,7 +29,6 @@ services:
       ESPRESSO_SEQUENCER_L1_PROVIDER: http://l1-geth:${L1_HTTP_PORT}
       ESPRESSO_DEPLOYER_ACCOUNT_INDEX: 0
       ESPRESSO_DEV_NODE_EPOCH_HEIGHT: "4294967295"
-      ESPRESSO_SEQUENCER_ETH_MNEMONIC: "giant issue aisle success illegal bike spike question tent bar rely arctic volcano long crawl hungry vocal artwork sniff fantasy very lucky have athlete"
 
   rollup-creator:
     image: ${ROLLUP_CREATOR_IMAGE}
@@ -44,10 +45,10 @@ services:
       CHILD_CHAIN_NAME: "arb-dev-test"
       DEPLOYER_PRIVKEY: ${DEPLOYER_PRIVATE_KEY}
       MAX_DATA_SIZE: 117964
-      OWNER_ADDRESS: 0x3f1Eae7D46d88F08fc2F8ed27FCb2AB183EB2d0E
-      PARENT_CHAIN_ID: 1337
+      OWNER_ADDRESS: ${BATCH_POSTER_ADDRESS}
+      PARENT_CHAIN_ID: ${L1_CHAIN_ID}
       PARENT_CHAIN_RPC: "http://l1-geth:8545"
-      SEQUENCER_ADDRESS: 0x3f1Eae7D46d88F08fc2F8ed27FCb2AB183EB2d0E
+      SEQUENCER_ADDRESS: ${BATCH_POSTER_ADDRESS}
       WASM_MODULE_ROOT: 0xdb698a2576298f25448bc092e52cf13b1e24141c997135d70f217d674bbeb69a
     command: ["create-rollup-testnode"]
     depends_on:
@@ -105,6 +106,7 @@ services:
       - "./nitro-config:/nitro-config"
     command:
       - --conf.file=/nitro-config/batch_poster_config.json
+      - --node.batch-poster.parent-chain-wallet.private-key=${BATCH_POSTER_PRIVATE_KEY}
     env_file:
       - ./.env
     depends_on:
@@ -143,7 +145,7 @@ services:
           cast send \
             --rpc-url http://sequencer:8547 \
             --private-key ${BATCH_POSTER_PRIVATE_KEY} \
-            0x3f1Eae7D46d88F08fc2F8ed27FCb2AB183EB2d0E \
+            ${BATCH_POSTER_ADDRESS} \
             --value 1 2>&1 || true
           sleep 2
         done

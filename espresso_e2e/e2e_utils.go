@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"math/big"
 	"net"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 	"time"
 
 	espressostore "proxy/store"
+	nitroVerifier "proxy/verifier/nitro"
 
 	espressoClient "github.com/EspressoSystems/espresso-network/sdks/go/client"
 	opStreamer "github.com/EspressoSystems/espresso-streamers/op"
@@ -59,6 +61,7 @@ func (m *mockLightClient) FinalizedState(_ *bind.CallOpts) (opStreamer.Finalized
 	}, nil
 }
 
+// OP
 const (
 	rollupWorkingDir               = "./op"
 	l1GethURL                      = "http://127.0.0.1:8545"
@@ -75,6 +78,18 @@ const (
 	finalizedBlocks                = 200
 	batchAuthenticatorAddress      = "0x4826533b4897376654bb4d4ad88b7fafd0c98528"
 	batchAuthenticatorOwnerAddress = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
+)
+
+// Nitro
+const (
+	nitroWorkingDir      = "./nitro"
+	nitroEspressoURL     = "http://127.0.0.1:24000"
+	nitroL1URL           = "http://127.0.0.1:8545"
+	nitroSeqURL          = "http://127.0.0.1:8547"
+	nitroFullNodeURL     = "http://127.0.0.1:8549"
+	nitroFullNodeFeedURL = "ws://127.0.0.1:9643"
+	nitroNamespace       = uint64(412346)
+	nitroBatchPoster     = "0x3f1Eae7D46d88F08fc2F8ed27FCb2AB183EB2d0E"
 )
 
 func startVerifier(ctx context.Context, t *testing.T, logger log.Logger, store *espressostore.EspressoStore) *verifier.OPEspressoBatchVerifier {
@@ -95,6 +110,25 @@ func startVerifier(ctx context.Context, t *testing.T, logger log.Logger, store *
 			BatchAuthenticatorAddress: batchAuthenticatorAddress,
 		},
 	)
+	v.Start(ctx)
+	return v
+}
+
+func startNitroVerifier(ctx context.Context, t *testing.T, store *espressostore.EspressoStore) *nitroVerifier.NitroEspressoBatchVerifier {
+	t.Helper()
+	v := nitroVerifier.NewNitroEspressoBatchVerifier(ctx, newDefaultLogger(), store,
+		&nitroVerifier.NitroEspressoBatchVerifierConfig{
+			FeedURL:              nitroFullNodeFeedURL,
+			FullNodeExecutionRPC: nitroFullNodeURL,
+			VerificationInterval: 250 * time.Millisecond,
+			QueryServiceURL:      nitroEspressoURL,
+			Namespace:            nitroNamespace,
+			InitialHotshotBlock:  0,
+			ValidBatcherAddresses: []nitroVerifier.BatcherAddressConfig{
+				{Address: nitroBatchPoster, From: 0, To: math.MaxUint64},
+			},
+		})
+	require.NotNil(t, v, "failed to create Nitro verifier")
 	v.Start(ctx)
 	return v
 }
@@ -230,6 +264,16 @@ func waitForRollupServicesReady(t *testing.T) {
 	waitForHTTPReady(t, opNodeSeqURL, 1*time.Minute)
 	waitForHTTPReady(t, opGethFullNode, 1*time.Minute)
 	waitForHTTPReady(t, opNodeFullNode, 1*time.Minute)
+}
+
+func waitForNitroServicesReady(t *testing.T) {
+	t.Helper()
+	// l1-geth must be up before rollup-creator can deploy contracts
+	waitForHTTPReady(t, nitroL1URL, 2*time.Minute)
+	waitForHTTPReady(t, nitroEspressoURL+"/v0/status/block-height", 2*time.Minute)
+	// sequencer only starts after rollup-creator completes so give sufficient time
+	waitForHTTPReady(t, nitroSeqURL, 5*time.Minute)
+	waitForHTTPReady(t, nitroFullNodeURL, 5*time.Minute)
 }
 
 type JSONRPCResponse struct {

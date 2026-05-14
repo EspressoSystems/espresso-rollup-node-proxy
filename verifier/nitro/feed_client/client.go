@@ -19,12 +19,12 @@ var ErrIncorrectChainId = errors.New("incorrect chain id")
 var ErrMissingChainId = errors.New("missing chain id")
 
 type FeedClient struct {
-	feedWSURL   string
-	chainID     uint64
-	nextSeqNum  uint64
-	mu          sync.RWMutex
-	messages    map[uint64]*BroadcastFeedMessage
-	logger      log.Logger
+	feedWSURL  string
+	chainID    uint64
+	nextSeqNum uint64
+	mu         sync.RWMutex
+	messages   map[uint64]*BroadcastFeedMessage
+	logger     log.Logger
 }
 
 const (
@@ -99,8 +99,11 @@ func (fc *FeedClient) readLoop(ctx context.Context) {
 		}
 
 		if err := fc.verifyChainID(resp); errors.Is(err, ErrIncorrectChainId) || errors.Is(err, ErrMissingChainId) {
-			conn.Close()
-			fc.logger.Crit("feed chain id verification failed", "url", fc.feedWSURL, "error", err)
+			closeErr := conn.Close()
+			if closeErr != nil {
+				fc.logger.Warn("error closing connection to feed", "error", closeErr)
+			}
+			fc.logger.Crit("feed chain id verification failed", "url", fc.feedWSURL, "error", err, "")
 			return
 		}
 
