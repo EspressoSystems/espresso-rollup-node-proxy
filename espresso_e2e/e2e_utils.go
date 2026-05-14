@@ -187,6 +187,26 @@ func dockerComposeStop(t *testing.T, workingDir string, service string) {
 	}
 }
 
+func dockerComposeFileStop(t *testing.T, workingDir, composeFile, service string) {
+	t.Helper()
+	cmd := exec.Command("docker", "compose", "-f", composeFile, "stop", service)
+	cmd.Dir = workingDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker compose -f %s stop %s failed: %v\n%s", composeFile, service, err, string(out))
+	}
+}
+
+func dockerComposeFileStart(t *testing.T, workingDir, composeFile, service string) {
+	t.Helper()
+	cmd := exec.Command("docker", "compose", "-f", composeFile, "start", service)
+	cmd.Dir = workingDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker compose -f %s start %s failed: %v\n%s", composeFile, service, err, string(out))
+	}
+}
+
 func dockerComposeStart(t *testing.T, workingDir string, profiles []string, services ...string) {
 	t.Helper()
 	args := []string{"compose"}
