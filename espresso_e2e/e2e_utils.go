@@ -92,7 +92,7 @@ const (
 	nitroBatchPoster     = "0x3f1Eae7D46d88F08fc2F8ed27FCb2AB183EB2d0E"
 )
 
-func startVerifier(ctx context.Context, t *testing.T, logger log.Logger, store *espressostore.EspressoStore) *verifier.OPEspressoBatchVerifier {
+func startOpVerifier(ctx context.Context, t *testing.T, logger log.Logger, store *espressostore.EspressoStore) *verifier.OPEspressoBatchVerifier {
 	t.Helper()
 	l1Client, err := ethclient.DialContext(ctx, l1GethURL)
 	if err != nil {
