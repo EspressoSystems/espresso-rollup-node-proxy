@@ -63,7 +63,7 @@ func (m *mockLightClient) FinalizedState(_ *bind.CallOpts) (opStreamer.Finalized
 
 // OP
 const (
-	rollupWorkingDir               = "./op"
+	opWorkingDir               = "./op"
 	l1GethURL                      = "http://127.0.0.1:8545"
 	espressoURL                    = "http://127.0.0.1:24000"
 	opGethSeqURL                   = "http://127.0.0.1:8546"
