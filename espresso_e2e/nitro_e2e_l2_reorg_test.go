@@ -82,11 +82,11 @@ func TestNitroE2EL2Reorg(t *testing.T) {
 		})
 
 		// Monitor the proxy for the full recovery window — it must never go backwards.
-		previous := monitorStoredBlockProgress(t, espressoStore, blockBeforeReorg, 3*time.Minute, nitroFullNodeURL, func(current uint64) bool {
-			return current > currentBlock
+		previous := monitorStoredBlockProgress(t, espressoStore, blockBeforeReorg, 4*time.Minute, nitroFullNodeURL, func(current uint64) bool {
+			return current > currentBlock+2
 		})
 
-		require.Greater(t, previous, currentBlock,
+		require.Greater(t, previous, currentBlock+2,
 			"proxy did not advance after reorg past %d within timeout (stuck at %d)", currentBlock, previous)
 		t.Logf("Proxy at L2 block %d after sequencer reorg, never moved backwards", previous)
 
@@ -99,7 +99,7 @@ func TestNitroE2EL2Reorg(t *testing.T) {
 
 		// Make sure what was finalized on espresso and l1 was the data sent before the reorg.
 		// With espresso we finalize the first valid message seen
-		t.Log("Verifying Espresso enforced canonical chain: pre-restart hashes restored above finalized boundary")
+		t.Log("Verifying Espresso enforced canonical chain, pre reorg hashes must be what is finalized on l1")
 		for blockNum, expectedHash := range preReorgHashes {
 			result := jsonRPCCall(t, nitroSeqURL, "eth_getBlockByNumber",
 				jsonMarshal(t, []any{fmt.Sprintf("0x%x", blockNum), false}))
@@ -111,6 +111,6 @@ func TestNitroE2EL2Reorg(t *testing.T) {
 				"block %d: expected pre-restart hash %s after Espresso correction, got %s",
 				blockNum, expectedHash, b.Hash)
 		}
-		t.Logf("Espresso canonical chain confirmed for %d blocks above finalized boundary", len(preReorgHashes))
+		t.Logf("Sequencer hash pre-reorg hashes and confirmed for %d blocks above finalized boundary", len(preReorgHashes))
 	})
 }
