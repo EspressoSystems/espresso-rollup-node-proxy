@@ -4,14 +4,8 @@ github.com/DataDog/zstd v1.5.6-0.20230824185856-869dae002e5e h1:ZIWapoIRN1VqT8GR
 github.com/DataDog/zstd v1.5.6-0.20230824185856-869dae002e5e/go.mod h1:g4AWEaM3yOg3HYfnJ3YIawPnVdXJh9QME85blwSAmyw=
 github.com/EspressoSystems/espresso-network/sdks/go v0.3.4 h1:1hf/k2rGqIGEGQW8O3fQFltPIyxSmumph8aKIa6AjCk=
 github.com/EspressoSystems/espresso-network/sdks/go v0.3.4/go.mod h1:kaxR08mJb5Mijy7a2RhWCIWOevFI4PcXwDkzoEbsVTk=
-github.com/EspressoSystems/espresso-streamers v1.0.3-0.20260430130129-62ec38b5d96b h1:uwJlK4OxQRjUM67cULaaFo1BVZ+T9LEZu6Xu98EImps=
-github.com/EspressoSystems/espresso-streamers v1.0.3-0.20260430130129-62ec38b5d96b/go.mod h1:sKRBDnO5UMSEXDvc4kHM18GMfGCuwa5L/DSGBB2l3Qg=
-github.com/EspressoSystems/espresso-streamers v1.0.3-0.20260505223424-a535b67f2d7f h1:JOHzrvN/fMGMBG1WB1C4zi3qKMMYQ2GHsO2MNgE14ek=
-github.com/EspressoSystems/espresso-streamers v1.0.3-0.20260505223424-a535b67f2d7f/go.mod h1:sKRBDnO5UMSEXDvc4kHM18GMfGCuwa5L/DSGBB2l3Qg=
-github.com/EspressoSystems/espresso-streamers v1.0.3-0.20260511200507-aac1b489ff4f h1:fuzJCq1qEPErOMHJ87lgaOtEGiNZYydrncurWES3Y4o=
-github.com/EspressoSystems/espresso-streamers v1.0.3-0.20260511200507-aac1b489ff4f/go.mod h1:sKRBDnO5UMSEXDvc4kHM18GMfGCuwa5L/DSGBB2l3Qg=
-github.com/EspressoSystems/espresso-streamers v1.0.3-0.20260514140306-de351af76254 h1:P4J2fyGfXQBVO+UNrc0Ejc6Ys+1K8TXZoWB48vDdWm4=
-github.com/EspressoSystems/espresso-streamers v1.0.3-0.20260514140306-de351af76254/go.mod h1:XIgEOJXiZmtF7QKda2u8rALuK48XYI3LphJuyDl+StE=
+github.com/EspressoSystems/espresso-streamers v1.1.0 h1:+35Y9I3BCMyVIyFX6DNO6tq8ZKeuyOAve4DrgIhaY2s=
+github.com/EspressoSystems/espresso-streamers v1.1.0/go.mod h1:eDGUEvlyxNey9gdpQhKaswAOp5ZWHPVbhNtWfHkpJvU=
 github.com/EspressoSystems/optimism-espresso-integration v0.0.0-20260320193702-1e85078aed7b h1:7XWJ3ZLlYrf9Oz5BmRssllw9S60LDDF/IFPKtb4mPH4=
 github.com/EspressoSystems/optimism-espresso-integration v0.0.0-20260320193702-1e85078aed7b/go.mod h1:yZLWZ4Vz0KfVVQ7XS2AD1EkSGX51MYxatscuCSQm8Ic=
 github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERoyfY=
