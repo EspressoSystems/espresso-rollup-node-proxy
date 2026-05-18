@@ -35,7 +35,11 @@ func newMockFeedProxy(t *testing.T, upstream string, modifyFunc func(*feedclient
 			http.Error(w, "upstream unavailable", http.StatusBadGateway)
 			return
 		}
-		defer conn.Close()
+		defer func() {
+			if err := conn.Close(); err != nil {
+				t.Logf("mock feed proxy: error closing upstream connection: %v", err)
+			}
+		}()
 
 		respHeader := http.Header{}
 		if resp != nil {
@@ -49,7 +53,11 @@ func newMockFeedProxy(t *testing.T, upstream string, modifyFunc func(*feedclient
 			t.Logf("error upgrading connection to ws: %v", err)
 			return
 		}
-		defer clientConn.Close()
+		defer func() {
+			if err := clientConn.Close(); err != nil {
+				t.Logf("mock feed proxy: error closing client connection: %v", err)
+			}
+		}()
 
 		for {
 			msgType, maybeModifiedMessage, err := conn.ReadMessage()
