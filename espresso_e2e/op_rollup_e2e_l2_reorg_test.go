@@ -46,7 +46,7 @@ func TestOPE2EL2Reorg(t *testing.T) {
 	reorgTarget := currentSeqBlock - reorgBlocks
 	t.Logf("Sequencer at block %d (safe %d), proxy verified at block %d, rewinding to %d", currentSeqBlock, safeBlock, blockBeforeReorg, reorgTarget)
 
-	preReorgHashes := captureBlockHashes(t, "before reorg", reorgTarget, currentSeqBlock)
+	preReorgHashes := captureBlockHashes(t, "before reorg", reorgTarget, currentSeqBlock, opGethSeqURL)
 
 	// Stop sequencer node
 	t.Log("Stopping op-node-sequencer")
@@ -74,7 +74,7 @@ func TestOPE2EL2Reorg(t *testing.T) {
 	})
 	stopLoad()
 
-	captureBlockHashes(t, "after reorg", reorgTarget, currentSeqBlock)
+	captureBlockHashes(t, "after reorg", reorgTarget, currentSeqBlock, opGethSeqURL)
 
 	// Confirm the reorg produced a different hash at the tip
 	newSeqBlockJSON := jsonRPCCall(t, opGethSeqURL, "eth_getBlockByNumber",
@@ -87,7 +87,7 @@ func TestOPE2EL2Reorg(t *testing.T) {
 		"expected hash change at block %d after sequencer reorg", currentSeqBlock)
 	t.Logf("Sequencer reorg confirmed at block %d", currentSeqBlock)
 
-	previous := monitorStoredBlockProgress(t, espressoStore, blockBeforeReorg, 3*time.Minute, func(current uint64) bool {
+	previous := monitorStoredBlockProgress(t, espressoStore, blockBeforeReorg, 3*time.Minute, opGethFullNode, func(current uint64) bool {
 		return current > currentSeqBlock+5
 	})
 

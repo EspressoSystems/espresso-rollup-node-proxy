@@ -191,6 +191,7 @@ services:
     command:
       - --conf.file=/nitro-config/batch_poster_config.json
       - --node.batch-poster.parent-chain-wallet.private-key=${BATCH_POSTER_PRIVATE_KEY}
+      - --node.batch-poster.max-delay=90s
     env_file:
       - ./.env
     depends_on:

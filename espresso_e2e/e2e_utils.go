@@ -115,12 +115,16 @@ func startVerifier(ctx context.Context, t *testing.T, logger log.Logger, store *
 }
 
 func startNitroVerifier(ctx context.Context, t *testing.T, store *espressostore.EspressoStore) *nitroVerifier.NitroEspressoBatchVerifier {
+	return startNitroVerifierWithLogger(ctx, t, newDefaultLogger(), store)
+}
+
+func startNitroVerifierWithLogger(ctx context.Context, t *testing.T, logger log.Logger, store *espressostore.EspressoStore) *nitroVerifier.NitroEspressoBatchVerifier {
 	t.Helper()
-	v := nitroVerifier.NewNitroEspressoBatchVerifier(ctx, newDefaultLogger(), store,
+	v := nitroVerifier.NewNitroEspressoBatchVerifier(ctx, logger, store,
 		&nitroVerifier.NitroEspressoBatchVerifierConfig{
 			FeedURL:              nitroFullNodeFeedURL,
 			FullNodeExecutionRPC: nitroFullNodeURL,
-			VerificationInterval: 10 * time.Millisecond,
+			VerificationInterval: 250 * time.Millisecond,
 			QueryServiceURL:      nitroEspressoURL,
 			Namespace:            nitroNamespace,
 			InitialHotshotBlock:  0,
@@ -207,7 +211,7 @@ func dockerComposeFileStart(t *testing.T, workingDir, composeFile, service strin
 	}
 }
 
-func dockerComposeFileUp(t *testing.T, workingDir, composeFile string, services ...string) {
+func dockerComposeFileUp(t *testing.T, workingDir string, composeFile string, services ...string) {
 	t.Helper()
 	args := append([]string{"compose", "-f", composeFile, "up", "-d", "--no-deps"}, services...)
 	cmd := exec.Command("docker", args...)
@@ -218,9 +222,8 @@ func dockerComposeFileUp(t *testing.T, workingDir, composeFile string, services 
 	}
 }
 
-func dockerComposeFileRm(t *testing.T, workingDir, composeFile, service string) {
+func dockerComposeFileRm(t *testing.T, workingDir string, composeFile string, service string) {
 	t.Helper()
-	// -f: no confirmation prompt, -s: stop before removing
 	cmd := exec.Command("docker", "compose", "-f", composeFile, "rm", "-f", "-s", service)
 	cmd.Dir = workingDir
 	out, err := cmd.CombinedOutput()
@@ -346,8 +349,6 @@ func getBlockByTag(t *testing.T, url string, tag string) uint64 {
 	return num
 }
 
-// tryGetBlockByTag returns (blockNumber, true) on success, or (0, false) if the node
-// returns an error (e.g. "safe block not found" during early startup).
 func tryGetBlockByTag(t *testing.T, url string, tag string) (uint64, bool) {
 	t.Helper()
 	resp := jsonRPCCallRaw(t, url, "eth_getBlockByNumber", jsonMarshal(t, []any{tag, false}))
@@ -520,7 +521,7 @@ func requireProxyTagMatchesDirectBlock(t *testing.T, proxyURL, directURL, tag st
 	require.JSONEq(t, string(directResult), string(proxyResult))
 }
 
-func monitorStoredBlockProgress(t *testing.T, store *espressostore.EspressoStore, initialBlock uint64, timeout time.Duration, stopWhen func(current uint64) bool) uint64 {
+func monitorStoredBlockProgress(t *testing.T, store *espressostore.EspressoStore, initialBlock uint64, timeout time.Duration, fullNodeUrl string, stopWhen func(current uint64) bool) uint64 {
 	t.Helper()
 	previous := initialBlock
 	deadline := time.Now().Add(timeout)
@@ -533,7 +534,7 @@ func monitorStoredBlockProgress(t *testing.T, store *espressostore.EspressoStore
 			previous = current
 		}
 
-		latestFullNodeBlock := getBlockByTag(t, opGethFullNode, "latest")
+		latestFullNodeBlock := getBlockByTag(t, fullNodeUrl, "latest")
 		require.LessOrEqual(t, current, latestFullNodeBlock,
 			"proxy espresso block %d is ahead of OP geth full nodes latest block %d", current, latestFullNodeBlock)
 
@@ -544,12 +545,12 @@ func monitorStoredBlockProgress(t *testing.T, store *espressostore.EspressoStore
 	}
 }
 
-func captureBlockHashes(t *testing.T, label string, from, to uint64) map[uint64]string {
+func captureBlockHashes(t *testing.T, label string, from uint64, to uint64, seqUrl string) map[uint64]string {
 	t.Helper()
 	hashes := make(map[uint64]string)
 	t.Logf("Block hashes %s (blocks %d..%d):", label, from, to)
 	for i := from; i <= to; i++ {
-		result := jsonRPCCall(t, opGethSeqURL, "eth_getBlockByNumber",
+		result := jsonRPCCall(t, seqUrl, "eth_getBlockByNumber",
 			jsonMarshal(t, []any{fmt.Sprintf("0x%x", i), false}))
 		var block struct {
 			Hash string `json:"hash"`
@@ -693,50 +694,6 @@ func matchLogAttrs(capturer *logCapturer, msg string, expected map[string]uint64
 		}
 	}
 	return false
-}
-
-func monitorNitroStoredBlockProgress(t *testing.T, store *espressostore.EspressoStore, initialBlock uint64, timeout time.Duration, stopWhen func(current uint64) bool) uint64 {
-	t.Helper()
-	previous := initialBlock
-	deadline := time.Now().Add(timeout)
-	for {
-		current := getStoredBlock(t, store)
-		require.GreaterOrEqual(t, current, previous,
-			"proxy block moved backwards: was %d, now %d", previous, current)
-		if current > previous {
-			t.Logf("Proxy advanced to L2 block %d", current)
-			previous = current
-		}
-
-		latestFullNodeBlock := getBlockByTag(t, nitroFullNodeURL, "latest")
-		require.LessOrEqual(t, current, latestFullNodeBlock,
-			"proxy espresso block %d is ahead of Nitro full node's latest block %d", current, latestFullNodeBlock)
-
-		if stopWhen(current) || time.Now().After(deadline) {
-			return previous
-		}
-		time.Sleep(time.Second)
-	}
-}
-
-func captureNitroSeqBlockHashes(t *testing.T, from, to uint64) map[uint64]string {
-	t.Helper()
-	hashes := make(map[uint64]string)
-	t.Logf("Block hashes before reorg (blocks %d..%d):", from, to)
-	for i := from; i <= to; i++ {
-		result := jsonRPCCall(t, nitroSeqURL, "eth_getBlockByNumber",
-			jsonMarshal(t, []any{fmt.Sprintf("0x%x", i), false}))
-		var block struct {
-			Hash string `json:"hash"`
-		}
-		if err := json.Unmarshal(result, &block); err != nil || block.Hash == "" {
-			t.Logf("  block %d: <not found>", i)
-		} else {
-			t.Logf("  block %d: %s", i, block.Hash)
-			hashes[i] = block.Hash
-		}
-	}
-	return hashes
 }
 
 func startLoadGen(ctx context.Context, t *testing.T, rpcURL string) func() {

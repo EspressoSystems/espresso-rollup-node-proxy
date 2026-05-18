@@ -63,7 +63,7 @@ func TestNitroE2ERollupEspressoProxyReorg(t *testing.T) {
 		t.Log("L1 reorg triggered successfully")
 
 		t.Log("Monitoring proxy for backwards movement during and after reorg")
-		previous := monitorNitroStoredBlockProgress(t, espressoStore, blockBeforeReorg, 90*time.Second, func(uint64) bool {
+		previous := monitorStoredBlockProgress(t, espressoStore, blockBeforeReorg, 90*time.Second, nitroFullNodeURL, func(uint64) bool {
 			return false
 		})
 
