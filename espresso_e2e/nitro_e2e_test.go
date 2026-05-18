@@ -181,9 +181,9 @@ func TestNitroE2ERollupEspressoProxy(t *testing.T) {
 		proxyURL2, shutdownProxy2 := startTestProxy(ctx, t, nitroFullNodeURL, initialStore, espressoTag)
 
 		firstLogger, firstCapturer := newCapturingLogger()
-		nitroVerifier1 := startNitroVerifierWithLogger(ctx, t, firstLogger, initialStore)
+		nitroVerifier1 := startNitroVerifierWithLogger(ctx, t, firstLogger, initialStore, nitroFullNodeFeedURL)
 		requireLogAttrs(t, firstCapturer, "Starting Nitro Verifier", map[string]uint64{
-			"start_block_number": finalizedL2Block,
+			"start_block_number":   finalizedL2Block,
 			"start_hotshot_height": initialHotshotHeight,
 		})
 
@@ -221,10 +221,10 @@ func TestNitroE2ERollupEspressoProxy(t *testing.T) {
 		require.JSONEq(t, string(directResult), string(proxyResult), "espresso tag should resolve to preRestartBlock after restart")
 
 		secondLogger, secondCapturer := newCapturingLogger()
-		nitroVerifier2 := startNitroVerifierWithLogger(ctx, t, secondLogger, newStore)
+		nitroVerifier2 := startNitroVerifierWithLogger(ctx, t, secondLogger, newStore, nitroFullNodeFeedURL)
 		defer nitroVerifier2.Stop()
 		requireLogAttrs(t, secondCapturer, "Starting Nitro Verifier", map[string]uint64{
-			"start_block_number": preRestartBlock,
+			"start_block_number":   preRestartBlock,
 			"start_hotshot_height": preRestartHotshotHeight,
 		})
 		t.Log("Verified verifier and proxy resumed with correct block number and hotshot height after restart")
