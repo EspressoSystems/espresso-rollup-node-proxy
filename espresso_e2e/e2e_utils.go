@@ -120,7 +120,7 @@ func startNitroVerifier(ctx context.Context, t *testing.T, store *espressostore.
 		&nitroVerifier.NitroEspressoBatchVerifierConfig{
 			FeedURL:              nitroFullNodeFeedURL,
 			FullNodeExecutionRPC: nitroFullNodeURL,
-			VerificationInterval: 250 * time.Millisecond,
+			VerificationInterval: 10 * time.Millisecond,
 			QueryServiceURL:      nitroEspressoURL,
 			Namespace:            nitroNamespace,
 			InitialHotshotBlock:  0,
@@ -204,6 +204,37 @@ func dockerComposeFileStart(t *testing.T, workingDir, composeFile, service strin
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("docker compose -f %s start %s failed: %v\n%s", composeFile, service, err, string(out))
+	}
+}
+
+func dockerComposeFileUp(t *testing.T, workingDir, composeFile string, services ...string) {
+	t.Helper()
+	args := append([]string{"compose", "-f", composeFile, "up", "-d", "--no-deps"}, services...)
+	cmd := exec.Command("docker", args...)
+	cmd.Dir = workingDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker compose -f %s up %v failed: %v\n%s", composeFile, services, err, string(out))
+	}
+}
+
+func dockerComposeFileRm(t *testing.T, workingDir, composeFile, service string) {
+	t.Helper()
+	// -f: no confirmation prompt, -s: stop before removing
+	cmd := exec.Command("docker", "compose", "-f", composeFile, "rm", "-f", "-s", service)
+	cmd.Dir = workingDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker compose -f %s rm %s failed: %v\n%s", composeFile, service, err, string(out))
+	}
+}
+
+func removeDockerVolume(t *testing.T, name string) {
+	t.Helper()
+	cmd := exec.Command("docker", "volume", "rm", name)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker volume rm %s failed: %v\n%s", name, err, string(out))
 	}
 }
 
@@ -313,6 +344,27 @@ func getBlockByTag(t *testing.T, url string, tag string) uint64 {
 	num, err := strconv.ParseUint(strings.TrimPrefix(block.Number, "0x"), 16, 64)
 	require.NoError(t, err)
 	return num
+}
+
+// tryGetBlockByTag returns (blockNumber, true) on success, or (0, false) if the node
+// returns an error (e.g. "safe block not found" during early startup).
+func tryGetBlockByTag(t *testing.T, url string, tag string) (uint64, bool) {
+	t.Helper()
+	resp := jsonRPCCallRaw(t, url, "eth_getBlockByNumber", jsonMarshal(t, []any{tag, false}))
+	if resp.Error != nil && string(resp.Error) != "null" {
+		return 0, false
+	}
+	var block struct {
+		Number string `json:"number"`
+	}
+	if err := json.Unmarshal(resp.Result, &block); err != nil || block.Number == "" {
+		return 0, false
+	}
+	num, err := strconv.ParseUint(strings.TrimPrefix(block.Number, "0x"), 16, 64)
+	if err != nil {
+		return 0, false
+	}
+	return num, true
 }
 
 // jsonRPCCallRaw performs a JSON-RPC call and returns the full response
@@ -641,6 +693,50 @@ func matchLogAttrs(capturer *logCapturer, msg string, expected map[string]uint64
 		}
 	}
 	return false
+}
+
+func monitorNitroStoredBlockProgress(t *testing.T, store *espressostore.EspressoStore, initialBlock uint64, timeout time.Duration, stopWhen func(current uint64) bool) uint64 {
+	t.Helper()
+	previous := initialBlock
+	deadline := time.Now().Add(timeout)
+	for {
+		current := getStoredBlock(t, store)
+		require.GreaterOrEqual(t, current, previous,
+			"proxy block moved backwards: was %d, now %d", previous, current)
+		if current > previous {
+			t.Logf("Proxy advanced to L2 block %d", current)
+			previous = current
+		}
+
+		latestFullNodeBlock := getBlockByTag(t, nitroFullNodeURL, "latest")
+		require.LessOrEqual(t, current, latestFullNodeBlock,
+			"proxy espresso block %d is ahead of Nitro full node's latest block %d", current, latestFullNodeBlock)
+
+		if stopWhen(current) || time.Now().After(deadline) {
+			return previous
+		}
+		time.Sleep(time.Second)
+	}
+}
+
+func captureNitroSeqBlockHashes(t *testing.T, from, to uint64) map[uint64]string {
+	t.Helper()
+	hashes := make(map[uint64]string)
+	t.Logf("Block hashes before reorg (blocks %d..%d):", from, to)
+	for i := from; i <= to; i++ {
+		result := jsonRPCCall(t, nitroSeqURL, "eth_getBlockByNumber",
+			jsonMarshal(t, []any{fmt.Sprintf("0x%x", i), false}))
+		var block struct {
+			Hash string `json:"hash"`
+		}
+		if err := json.Unmarshal(result, &block); err != nil || block.Hash == "" {
+			t.Logf("  block %d: <not found>", i)
+		} else {
+			t.Logf("  block %d: %s", i, block.Hash)
+			hashes[i] = block.Hash
+		}
+	}
+	return hashes
 }
 
 func startLoadGen(ctx context.Context, t *testing.T, rpcURL string) func() {
