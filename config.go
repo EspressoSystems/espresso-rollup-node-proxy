@@ -22,7 +22,7 @@ const (
 	ModeNitro = "nitro"
 )
 
-type Duration struct{ time.Duration }
+type Duration time.Duration
 
 func (d *Duration) UnmarshalJSON(b []byte) error {
 	var s string
@@ -31,10 +31,10 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 		if err != nil {
 			return err
 		}
-		d.Duration = parsed
+		*d = Duration(parsed)
 		return nil
 	}
-	return json.Unmarshal(b, &d.Duration)
+	return json.Unmarshal(b, (*time.Duration)(d))
 }
 
 type OPConfig struct {
@@ -79,7 +79,7 @@ func defaultConfig() *Config {
 		MaxRequestBodySize:   proxy.DefaultMaxRequestBodySize,
 		LogLevel:             "info",
 		LogFormat:            "json",
-		VerificationInterval: Duration{10 * time.Millisecond},
+		VerificationInterval: Duration(10 * time.Millisecond),
 	}
 }
 
@@ -115,7 +115,7 @@ func parseConfig() *Config {
 	pflag.IntVar(&cfg.MaxRequestBodySize, "max-request-body-size", cfg.MaxRequestBodySize, "maximum request body size in bytes (0 = no limit)")
 
 	pflag.StringVar(&cfg.QueryServiceURL, "query-service-url", cfg.QueryServiceURL, "Espresso query service URL")
-	pflag.DurationVar(&cfg.VerificationInterval.Duration, "verification-interval", cfg.VerificationInterval.Duration, "verification interval")
+	pflag.DurationVar((*time.Duration)(&cfg.VerificationInterval), "verification-interval", time.Duration(cfg.VerificationInterval), "verification interval")
 
 	pflag.StringVar(&cfg.Mode, "mode", cfg.Mode, "verifier mode: op or nitro")
 	pflag.StringVar(&cfg.OPConfig.FullNodeConsensusRPC, "op.full-node-consensus-rpc", cfg.OPConfig.FullNodeConsensusRPC, "OP full node consensus RPC URL")
@@ -185,7 +185,7 @@ func (c *Config) validate() error {
 	}
 
 	errs = append(errs, validateURL("query-service-url", c.QueryServiceURL))
-	if c.VerificationInterval.Duration <= 0 {
+	if time.Duration(c.VerificationInterval) <= 0 {
 		errs = append(errs, fmt.Errorf("verification-interval: must not be zero"))
 	}
 
@@ -240,7 +240,7 @@ func (c *Config) toOPVerifierConfig() *opVerifier.OPEspressoBatchVerifierConfig 
 		FullNodeExecutionRPC:      c.FullNodeExecutionRPC,
 		L1RPC:                     c.OPConfig.L1RPC,
 		FullNodeConsensusRPC:      c.OPConfig.FullNodeConsensusRPC,
-		VerificationInterval:      c.VerificationInterval.Duration,
+		VerificationInterval:      time.Duration(c.VerificationInterval),
 		QueryServiceURL:           c.QueryServiceURL,
 		BatcherAddress:            c.OPConfig.BatcherAddress,
 		BatchAuthenticatorAddress: c.OPConfig.BatchAuthenticatorAddress,
@@ -252,7 +252,7 @@ func (c *Config) toNitroVerifierConfig() *nitroVerifier.NitroEspressoBatchVerifi
 	return &nitroVerifier.NitroEspressoBatchVerifierConfig{
 		FeedURL:               c.NitroConfig.FeedURL,
 		FullNodeExecutionRPC:  c.FullNodeExecutionRPC,
-		VerificationInterval:  c.VerificationInterval.Duration,
+		VerificationInterval:  time.Duration(c.VerificationInterval),
 		QueryServiceURL:       c.QueryServiceURL,
 		Namespace:             c.NitroConfig.Namespace,
 		InitialHotshotBlock:   c.NitroConfig.InitialHotshotBlock,

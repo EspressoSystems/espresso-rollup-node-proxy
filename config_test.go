@@ -14,26 +14,26 @@ import (
 func TestDurationPflag(t *testing.T) {
 	var d Duration
 	fs := pflag.NewFlagSet("test", pflag.ContinueOnError)
-	fs.DurationVar(&d.Duration, "interval", 0, "test interval")
+	fs.DurationVar((*time.Duration)(&d), "interval", 0, "test interval")
 
 	require.NoError(t, fs.Parse([]string{"--interval=250ms"}))
-	require.Equal(t, 250*time.Millisecond, d.Duration)
+	require.Equal(t, 250*time.Millisecond, time.Duration(d))
 
 	require.NoError(t, fs.Parse([]string{"--interval", "1m"}))
-	require.Equal(t, time.Minute, d.Duration)
+	require.Equal(t, time.Minute, time.Duration(d))
 }
 
 func TestDurationUnmarshalJSON(t *testing.T) {
 	t.Run("string duration", func(t *testing.T) {
 		var d Duration
 		require.NoError(t, json.Unmarshal([]byte(`"250ms"`), &d))
-		require.Equal(t, 250*time.Millisecond, d.Duration)
+		require.Equal(t, 250*time.Millisecond, time.Duration(d))
 	})
 
 	t.Run("integer nanoseconds", func(t *testing.T) {
 		var d Duration
 		require.NoError(t, json.Unmarshal([]byte(`250000000`), &d))
-		require.Equal(t, 250*time.Millisecond, d.Duration)
+		require.Equal(t, 250*time.Millisecond, time.Duration(d))
 	})
 
 	t.Run("invalid string", func(t *testing.T) {
@@ -45,7 +45,7 @@ func TestDurationUnmarshalJSON(t *testing.T) {
 		raw := []byte(`{"verification_interval": "250ms"}`)
 		var cfg Config
 		require.NoError(t, json.Unmarshal(raw, &cfg))
-		require.Equal(t, 250*time.Millisecond, cfg.VerificationInterval.Duration)
+		require.Equal(t, 250*time.Millisecond, time.Duration(cfg.VerificationInterval))
 	})
 }
 
@@ -58,7 +58,7 @@ func TestConfigValidate(t *testing.T) {
 		StoreFilePath:        "espresso_store.json",
 		LogLevel:             "info",
 		QueryServiceURL:      "https://query.espresso.network",
-		VerificationInterval: Duration{1 * time.Millisecond},
+		VerificationInterval: Duration(1 * time.Millisecond),
 		OPConfig: OPConfig{
 			L1RPC:                     "ws://localhost:8546",
 			FullNodeConsensusRPC:      "http://localhost:9545",
@@ -116,7 +116,7 @@ func TestConfigValidate(t *testing.T) {
 		StoreFilePath:        "espresso_store.json",
 		LogLevel:             "info",
 		QueryServiceURL:      "https://query.espresso.network",
-		VerificationInterval: Duration{1 * time.Millisecond},
+		VerificationInterval: Duration(1 * time.Millisecond),
 		NitroConfig: NitroConfig{
 			FeedURL:   "ws://localhost:9642",
 			Namespace: 412346,
