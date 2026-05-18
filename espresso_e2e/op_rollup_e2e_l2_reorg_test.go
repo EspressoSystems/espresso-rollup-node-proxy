@@ -12,7 +12,7 @@ import (
 
 func TestOPE2EL2Reorg(t *testing.T) {
 	t.Log("Starting rollup nodes")
-	shutdown := runDockerComposeFile(rollupWorkingDir, "docker-compose.yml", []string{"verifier"})
+	shutdown := runDockerComposeFile(opWorkingDir, "docker-compose.yml", []string{"verifier"})
 	defer shutdown()
 
 	// Wait for services to come up
@@ -28,7 +28,7 @@ func TestOPE2EL2Reorg(t *testing.T) {
 	defer shutdownProxy()
 
 	t.Log("Starting OP Verifier")
-	v := startVerifier(ctx, t, newDefaultLogger(), espressoStore)
+	v := startOpVerifier(ctx, t, newDefaultLogger(), espressoStore)
 	defer v.Stop()
 
 	const reorgBlocks = uint64(8)
@@ -50,7 +50,7 @@ func TestOPE2EL2Reorg(t *testing.T) {
 
 	// Stop sequencer node
 	t.Log("Stopping op-node-sequencer")
-	dockerComposeStop(t, rollupWorkingDir, "op-node-sequencer")
+	dockerComposeStop(t, opWorkingDir, "op-node-sequencer")
 
 	// rewind sequencer geth while op sequencer is offline
 	t.Logf("Rewinding op-geth-sequencer from block %d to %d", currentSeqBlock, reorgTarget)
@@ -65,7 +65,7 @@ func TestOPE2EL2Reorg(t *testing.T) {
 
 	// bring back up
 	t.Log("Restarting op-node-sequencer")
-	dockerComposeStart(t, rollupWorkingDir, nil, "op-node-sequencer")
+	dockerComposeStart(t, opWorkingDir, nil, "op-node-sequencer")
 
 	// Wait for sequencer to rebuild past the original block
 	t.Logf("Waiting for sequencer to reach block %d again", currentSeqBlock)

@@ -63,6 +63,33 @@ func recoveryMiddleware(next http.Handler, logger log.Logger) http.Handler {
 	})
 }
 
+func newOPVerifier(ctx context.Context, logger log.Logger, cfg *Config, espressoStore *store.EspressoStore) batchVerifier {
+	l1Client, err := ethclient.DialContext(ctx, cfg.OPConfig.L1RPC)
+	if err != nil {
+		logger.Crit("failed to create L1 client", "error", err)
+	}
+	lightClientAddr := common.HexToAddress(cfg.OPConfig.LightClientAddress)
+	lc, err := espressoLightClient.NewLightclientCaller(lightClientAddr, l1Client)
+	if err != nil || lc == nil {
+		logger.Crit("failed to create light client")
+	}
+	v := opVerifier.NewOPEspressoBatchVerifier(ctx, logger, espressoStore, l1Client, lc, cfg.toOPVerifierConfig())
+	if v == nil {
+		logger.Crit("failed to create OP verifier")
+	}
+	logger.Info("OP verifier enabled")
+	return v
+}
+
+func newNitroVerifier(ctx context.Context, logger log.Logger, cfg *Config, espressoStore *store.EspressoStore) batchVerifier {
+	v := nitroVerifier.NewNitroEspressoBatchVerifier(ctx, logger, espressoStore, cfg.toNitroVerifierConfig())
+	if v == nil {
+		logger.Crit("failed to create Nitro verifier")
+	}
+	logger.Info("Nitro verifier enabled")
+	return v
+}
+
 func main() {
 	cfg := parseConfig()
 
@@ -99,29 +126,10 @@ func main() {
 
 	switch cfg.Mode {
 	case ModeOP:
-		l1Client, err := ethclient.DialContext(ctx, cfg.OPConfig.L1RPC)
-		if err != nil {
-			logger.Crit("failed to create L1 client", "error", err)
-		}
-		lightClientAddr := common.HexToAddress(cfg.OPConfig.LightClientAddress)
-		lc, err := espressoLightClient.NewLightclientCaller(lightClientAddr, l1Client)
-		if err != nil || lc == nil {
-			logger.Crit("failed to create light client")
-		}
-		v := opVerifier.NewOPEspressoBatchVerifier(ctx, logger, espressoStore, l1Client, lc, cfg.toOPVerifierConfig())
-		if v == nil {
-			logger.Crit("failed to create OP verifier")
-		}
-		fullNodeVerifier = v
-		logger.Info("OP verifier enabled")
+		fullNodeVerifier = newOPVerifier(ctx, logger, cfg, espressoStore)
 
 	case ModeNitro:
-		v := nitroVerifier.NewNitroEspressoBatchVerifier(ctx, logger, espressoStore, cfg.toNitroVerifierConfig())
-		if v == nil {
-			logger.Crit("failed to create Nitro verifier")
-		}
-		fullNodeVerifier = v
-		logger.Info("Nitro verifier enabled")
+		fullNodeVerifier = newNitroVerifier(ctx, logger, cfg, espressoStore)
 
 	default:
 		logger.Crit("no verifier enabled: set --op.enable or --nitro.enable")
