@@ -115,14 +115,14 @@ func startVerifier(ctx context.Context, t *testing.T, logger log.Logger, store *
 }
 
 func startNitroVerifier(ctx context.Context, t *testing.T, store *espressostore.EspressoStore) *nitroVerifier.NitroEspressoBatchVerifier {
-	return startNitroVerifierWithLogger(ctx, t, newDefaultLogger(), store)
+	return startNitroVerifierWithLogger(ctx, t, newDefaultLogger(), store, nitroFullNodeFeedURL)
 }
 
-func startNitroVerifierWithLogger(ctx context.Context, t *testing.T, logger log.Logger, store *espressostore.EspressoStore) *nitroVerifier.NitroEspressoBatchVerifier {
+func startNitroVerifierWithLogger(ctx context.Context, t *testing.T, logger log.Logger, store *espressostore.EspressoStore, feedUrl string) *nitroVerifier.NitroEspressoBatchVerifier {
 	t.Helper()
 	v := nitroVerifier.NewNitroEspressoBatchVerifier(ctx, logger, store,
 		&nitroVerifier.NitroEspressoBatchVerifierConfig{
-			FeedURL:              nitroFullNodeFeedURL,
+			FeedURL:              feedUrl,
 			FullNodeExecutionRPC: nitroFullNodeURL,
 			VerificationInterval: 250 * time.Millisecond,
 			QueryServiceURL:      nitroEspressoURL,
