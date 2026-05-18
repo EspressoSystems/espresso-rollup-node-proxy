@@ -29,7 +29,7 @@ func TestNitroE2ERollupEspressoProxy(t *testing.T) {
 		v := startNitroVerifier(ctx, t, espressoStore)
 		defer v.Stop()
 
-		const targetBlock = uint64(20)
+		const targetBlock = 20
 
 		t.Log("Waiting for block 10 on Nitro full node")
 		pollUntil(t, 3*time.Minute, "block 10 not produced on Nitro full node within timeout", func() bool {
