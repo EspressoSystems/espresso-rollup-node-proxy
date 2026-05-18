@@ -40,7 +40,7 @@ func getEspressoBlockFromProxyd(t *testing.T, url string) (uint64, bool) {
 
 func TestOPE2EProxyd(t *testing.T) {
 	t.Log("Starting OP stack + proxyd")
-	shutdown := runDockerComposeFile(rollupWorkingDir, proxydComposeFile, nil)
+	shutdown := runDockerComposeFile(opWorkingDir, proxydComposeFile, nil)
 	defer shutdown()
 
 	t.Log("Waiting for OP stack services to be ready")
@@ -60,7 +60,7 @@ func TestOPE2EProxyd(t *testing.T) {
 		require.Greater(t, initialBlock, uint64(0), "expected initial block from proxyd to be greater than 0")
 		t.Logf("Proxyd espresso tag at block %d, shutting down fullnode-proxy-1", initialBlock)
 
-		dockerComposeFileStop(t, rollupWorkingDir, proxydComposeFile, "fullnode-proxy-1")
+		dockerComposeFileStop(t, opWorkingDir, proxydComposeFile, "fullnode-proxy-1")
 		t.Log("fullnode-proxy-1 stopped")
 
 		previous := initialBlock
@@ -80,7 +80,7 @@ func TestOPE2EProxyd(t *testing.T) {
 
 		blockBeforeRestart := previous
 		t.Logf("Restarting fullnode-proxy-1, espresso tag was at block %d", blockBeforeRestart)
-		dockerComposeFileStart(t, rollupWorkingDir, proxydComposeFile, "fullnode-proxy-1")
+		dockerComposeFileStart(t, opWorkingDir, proxydComposeFile, "fullnode-proxy-1")
 		t.Log("fullnode-proxy-1 restarted")
 
 		pollUntil(t, 2*time.Minute, fmt.Sprintf("proxyd espresso tag did not advance 15 blocks past %d after proxy-1 restart", blockBeforeRestart), func() bool {

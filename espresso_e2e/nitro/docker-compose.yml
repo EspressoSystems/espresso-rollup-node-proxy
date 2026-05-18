@@ -1,0 +1,163 @@
+services:
+  l1-geth:
+    image: ${L1_GETH_IMAGE}
+    command: --dev --dev.period=1 --verbosity=2
+    ports:
+      - 8545:8545
+      - 8546:8546
+    volumes:
+      - "./l1-config/genesis.json:/genesis.json"
+
+  espresso-dev-node:
+    image: ${ESPRESSO_DEV_NODE_IMAGE}
+    depends_on:
+      l1-geth:
+        condition: service_healthy
+    ports:
+      - "${ESPRESSO_SEQUENCER_API_PORT}:${ESPRESSO_SEQUENCER_API_PORT}"
+      - "${ESPRESSO_DEV_NODE_PORT}:${ESPRESSO_DEV_NODE_PORT}"
+      - "${ESPRESSO_BUILDER_PORT}:${ESPRESSO_BUILDER_PORT}"
+    volumes:
+      - espresso-data:/data
+    env_file:
+      - ./.env
+    environment:
+      RUST_LOG: warn
+      ESPRESSO_DEV_NODE_L1_DEPLOYMENT: skip
+      RUST_BACKTRACE: 1
+      ESPRESSO_SEQUENCER_STORAGE_PATH: /data/espresso
+      ESPRESSO_SEQUENCER_L1_PROVIDER: http://l1-geth:${L1_HTTP_PORT}
+      ESPRESSO_DEPLOYER_ACCOUNT_INDEX: 0
+      ESPRESSO_DEV_NODE_EPOCH_HEIGHT: "4294967295"
+
+  rollup-creator:
+    image: ${ROLLUP_CREATOR_IMAGE}
+    platform: linux/amd64
+    volumes:
+      - "config:/config"
+      - "./nitro-config:/nitro-config"
+    env_file:
+      - ./.env
+    environment:
+      AUTHORIZE_VALIDATORS: 10
+      CHAIN_DEPLOYMENT_INFO: "/config/deployment.json"
+      CHILD_CHAIN_CONFIG_PATH: "/nitro-config/l2_chain_config.json"
+      CHILD_CHAIN_INFO: "/config/deployed_chain_info.json"
+      CHILD_CHAIN_NAME: "arb-dev-test"
+      DEPLOYER_PRIVKEY: ${DEPLOYER_PRIVATE_KEY}
+      MAX_DATA_SIZE: 117964
+      OWNER_ADDRESS: ${BATCH_POSTER_ADDRESS}
+      PARENT_CHAIN_ID: ${L1_CHAIN_ID}
+      PARENT_CHAIN_RPC: "http://l1-geth:8545"
+      SEQUENCER_ADDRESS: ${BATCH_POSTER_ADDRESS}
+      WASM_MODULE_ROOT: 0xdb698a2576298f25448bc092e52cf13b1e24141c997135d70f217d674bbeb69a
+    command: ["create-rollup-testnode"]
+    depends_on:
+      l1-geth:
+        condition: service_healthy
+
+  sequencer:
+    image: ${NITRO_IMAGE}
+    platform: linux/amd64
+    entrypoint: /usr/local/bin/nitro
+    ports:
+      - "8547:8547"
+      - "8548:8548"
+      - "9642:9642"
+    volumes:
+      - "nitro-sequencer:/home/user/.arbitrum/local/nitro"
+      - "l1keystore:/home/user/l1keystore"
+      - "config:/config"
+      - "./nitro-config:/nitro-config"
+    command:
+      - --conf.file=/nitro-config/sequencer_config.json
+      - --http.api=net,web3,eth,txpool,debug,timeboost,auctioneer
+      - --graphql.enable
+      - --graphql.vhosts=*
+      - --graphql.corsdomain=*
+    env_file:
+      - ./.env
+    depends_on:
+      rollup-creator:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-s",
+          "-X",
+          "POST",
+          "--data",
+          '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}',
+          "-H",
+          "Content-Type: application/json",
+          "http://localhost:8547",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  batch-poster:
+    image: ${NITRO_IMAGE}
+    platform: linux/amd64
+    entrypoint: /usr/local/bin/nitro
+    volumes:
+      - "nitro-batch-poster:/home/user/.arbitrum/local/nitro"
+      - "l1keystore:/home/user/l1keystore"
+      - "config:/config"
+      - "./nitro-config:/nitro-config"
+    command:
+      - --conf.file=/nitro-config/batch_poster_config.json
+      - --node.batch-poster.parent-chain-wallet.private-key=${BATCH_POSTER_PRIVATE_KEY}
+    env_file:
+      - ./.env
+    depends_on:
+      sequencer:
+        condition: service_healthy
+
+  full-node:
+    image: ${NITRO_IMAGE}
+    platform: linux/amd64
+    entrypoint: /usr/local/bin/nitro
+    ports:
+      - "8549:8547"
+      - "8550:8548"
+      - "9643:9642"
+    volumes:
+      - "nitro-full-node:/home/user/.arbitrum/local/nitro"
+      - "config:/config"
+      - "./nitro-config:/nitro-config"
+    command:
+      - --conf.file=/nitro-config/full_node_config.json
+      - --http.api=net,web3,eth,debug
+    env_file:
+      - ./.env
+    depends_on:
+      sequencer:
+        condition: service_healthy
+
+  tx-generator:
+    image: ghcr.io/foundry-rs/foundry:v1.5.1
+    depends_on:
+      sequencer:
+        condition: service_healthy
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        while true; do
+          cast send \
+            --rpc-url http://sequencer:8547 \
+            --private-key ${BATCH_POSTER_PRIVATE_KEY} \
+            ${BATCH_POSTER_ADDRESS} \
+            --value 1 2>&1 || true
+          sleep 2
+        done
+
+volumes:
+  config:
+  l1keystore:
+  espresso-data:
+  nitro-sequencer:
+  nitro-batch-poster:
+  nitro-full-node:

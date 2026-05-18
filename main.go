@@ -8,7 +8,8 @@ import (
 	"os/signal"
 	"proxy/proxy"
 	"proxy/store"
-	verifier "proxy/verifier/op"
+	nitroVerifier "proxy/verifier/nitro"
+	opVerifier "proxy/verifier/op"
 	"runtime/debug"
 	"syscall"
 	"time"
@@ -18,6 +19,11 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 )
+
+type batchVerifier interface {
+	Start(ctx context.Context)
+	Stop()
+}
 
 type statusResponseWriter struct {
 	http.ResponseWriter
@@ -57,6 +63,33 @@ func recoveryMiddleware(next http.Handler, logger log.Logger) http.Handler {
 	})
 }
 
+func newOPVerifier(ctx context.Context, logger log.Logger, cfg *Config, espressoStore *store.EspressoStore) batchVerifier {
+	l1Client, err := ethclient.DialContext(ctx, cfg.OPConfig.L1RPC)
+	if err != nil {
+		logger.Crit("failed to create L1 client", "error", err)
+	}
+	lightClientAddr := common.HexToAddress(cfg.OPConfig.LightClientAddress)
+	lc, err := espressoLightClient.NewLightclientCaller(lightClientAddr, l1Client)
+	if err != nil || lc == nil {
+		logger.Crit("failed to create light client")
+	}
+	v := opVerifier.NewOPEspressoBatchVerifier(ctx, logger, espressoStore, l1Client, lc, cfg.toOPVerifierConfig())
+	if v == nil {
+		logger.Crit("failed to create OP verifier")
+	}
+	logger.Info("OP verifier enabled")
+	return v
+}
+
+func newNitroVerifier(ctx context.Context, logger log.Logger, cfg *Config, espressoStore *store.EspressoStore) batchVerifier {
+	v := nitroVerifier.NewNitroEspressoBatchVerifier(ctx, logger, espressoStore, cfg.toNitroVerifierConfig())
+	if v == nil {
+		logger.Crit("failed to create Nitro verifier")
+	}
+	logger.Info("Nitro verifier enabled")
+	return v
+}
+
 func main() {
 	cfg := parseConfig()
 
@@ -89,26 +122,21 @@ func main() {
 		logger.Crit("failed to create espresso store", "error", err)
 	}
 
-	// Create an L1 client
-	l1Client, err := ethclient.DialContext(ctx, cfg.L1RPC)
-	if err != nil {
-		logger.Crit("failed to create L1 client", "error", err)
-	}
+	var fullNodeVerifier batchVerifier
 
-	// Create light client interface
-	lightClientAddr := common.HexToAddress(cfg.OPConfig.LightClientAddress)
-	espressoLightClient, err := espressoLightClient.NewLightclientCaller(lightClientAddr, l1Client)
-	if err != nil || espressoLightClient == nil {
-		logger.Crit("failed to create light client")
-	}
+	switch cfg.Mode {
+	case ModeOP:
+		fullNodeVerifier = newOPVerifier(ctx, logger, cfg, espressoStore)
 
-	fullNodeVerifier := verifier.NewOPEspressoBatchVerifier(ctx, logger, espressoStore, l1Client, espressoLightClient, cfg.toOPVerifierConfig())
-	if fullNodeVerifier == nil {
-		logger.Crit("failed to create OP verifier")
+	case ModeNitro:
+		fullNodeVerifier = newNitroVerifier(ctx, logger, cfg, espressoStore)
+
+	default:
+		logger.Crit("no verifier enabled: set --op.enable or --nitro.enable")
 	}
 
 	fullNodeVerifier.Start(ctx)
-	logger.Info("OP Verifier Started")
+	logger.Info("Verifier started")
 	fullNodeProxy := proxy.NewProxy(cfg.toProxyConfig(), espressoStore)
 
 	mux := http.NewServeMux()

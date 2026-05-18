@@ -306,9 +306,9 @@ func (fb *FakeBeacon) recordBlock(block blockInfo) {
 	fb.mu.Lock()
 	defer fb.mu.Unlock()
 	fb.history = append(fb.history, block)
-	// cap entries to 500
-	if len(fb.history) > 500 {
-		fb.history = fb.history[len(fb.history)-500:]
+	// cap entries to 2000
+	if len(fb.history) > 2000 {
+		fb.history = fb.history[len(fb.history)-2000:]
 	}
 }
 

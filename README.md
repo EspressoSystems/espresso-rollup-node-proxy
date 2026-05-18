@@ -34,24 +34,45 @@ go build -o espresso-rollup-node-proxy .
 
 The proxy is configured via CLI flags or a JSON config file (or both — flags override file values). Pass `--config <path>` to load a file first, then apply any additional flags on top.
 
-**Example config file:**
+**Example config file (OP Stack):**
 
 ```json
 {
   "full_node_execution_rpc": "<op-geth-rpc>",
-  "l1_rpc": "<l1-rpc>",
+  "mode": "op",
   "listen_addr": ":8080",
   "espresso_tag": "espresso",
   "store_file_path": "/data/espresso_store.json",
+  "query_service_url": "<espresso-query-service-url>",
+  "verification_interval": "250ms",
   "initial_hotshot_height": 0,
   "op": {
-    "enable": true,
+    "l1_rpc": "<l1-rpc>",
     "full_node_consensus_rpc": "<op-node-rpc>",
-    "query_service_url": "<espresso-query-service-url>",
     "light_client_address": "<light-client-contract-address>",
     "batcher_address": "<batcher-address>",
-    "batch_authenticator_address": "<batch-authenticator-contract-address>",
-    "verification_interval": "250ms"
+    "batch_authenticator_address": "<batch-authenticator-contract-address>"
+  }
+}
+```
+
+**Example config file (Nitro):**
+
+```json
+{
+  "full_node_execution_rpc": "<nitro-rpc>",
+  "mode": "nitro",
+  "listen_addr": ":8080",
+  "espresso_tag": "espresso",
+  "store_file_path": "/data/espresso_store.json",
+  "query_service_url": "<espresso-query-service-url>",
+  "verification_interval": "250ms",
+  "nitro": {
+    "feed_url": "<nitro-sequencer-feed-ws-url>",
+    "namespace": 0,
+    "valid_batcher_addresses": [
+      {"address": "<batcher-address>", "from": 0, "to": 18446744073709551615}
+    ]
   }
 }
 ```
@@ -62,21 +83,36 @@ The proxy is configured via CLI flags or a JSON config file (or both — flags o
 ./espresso-rollup-node-proxy --config config.json
 ```
 
-**Run with flags only:**
+**Run with flags only (OP Stack):**
 
 ```sh
 ./espresso-rollup-node-proxy \
   --full-node-execution-rpc <op-geth-rpc> \
-  --l1-rpc <l1-rpc> \
+  --mode op \
   --listen-addr :8080 \
   --espresso-tag espresso \
   --store-file-path /data/espresso_store.json \
-  --op.enable \
+  --query-service-url <espresso-query-service-url> \
+  --op.l1-rpc <l1-rpc> \
   --op.full-node-consensus-rpc <op-node-rpc> \
-  --op.query-service-url <espresso-query-service-url> \
   --op.light-client-address <light-client-contract-address> \
   --op.batcher-address <batcher-address> \
   --op.batch-authenticator-address <batch-authenticator-contract-address>
+```
+
+**Run with flags only (Nitro):**
+
+```sh
+./espresso-rollup-node-proxy \
+  --full-node-execution-rpc <nitro-rpc> \
+  --mode nitro \
+  --listen-addr :8080 \
+  --espresso-tag espresso \
+  --store-file-path /data/espresso_store.json \
+  --query-service-url <espresso-query-service-url> \
+  --nitro.feed-url <nitro-sequencer-feed-ws-url> \
+  --nitro.namespace <namespace> \
+  --nitro.valid-batcher-addresses <batcher-address>
 ```
 
 ### Docker
@@ -100,11 +136,11 @@ docker run --rm \
   -p 8080:8080 \
   ghcr.io/espressosystems/espresso-rollup-node-proxy:latest \
   --full-node-execution-rpc <op-geth-rpc> \
-  --l1-rpc <l1-rpc> \
+  --mode op \
   --store-file-path /data/espresso_store.json \
-  --op.enable \
+  --query-service-url <espresso-query-service-url> \
+  --op.l1-rpc <l1-rpc> \
   --op.full-node-consensus-rpc <op-node-rpc> \
-  --op.query-service-url <espresso-query-service-url> \
   --op.light-client-address <light-client-contract-address> \
   --op.batcher-address <batcher-address> \
   --op.batch-authenticator-address <batch-authenticator-contract-address>
@@ -125,12 +161,12 @@ services:
       - proxy-data:/data
     command:
       - --full-node-execution-rpc=http://op-geth:8545
-      - --l1-rpc=<l1-rpc>
+      - --mode=op
       - --listen-addr=:8080
       - --store-file-path=/data/espresso_store.json
-      - --op.enable
+      - --query-service-url=<espresso-query-service-url>
+      - --op.l1-rpc=<l1-rpc>
       - --op.full-node-consensus-rpc=http://op-node:9545
-      - --op.query-service-url=<espresso-query-service-url>
       - --op.light-client-address=<light-client-contract-address>
       - --op.batcher-address=<batcher-address>
       - --op.batch-authenticator-address=<batch-authenticator-contract-address>
@@ -158,24 +194,28 @@ Clients should point at the proxy (`http://localhost:8080`) rather than directly
 
 | Flag | JSON key | Default | Description |
 |------|----------|---------|-------------|
-| `--full-node-execution-rpc` | `full_node_execution_rpc` | — | OP execution layer RPC URL (required) |
-| `--l1-rpc` | `l1_rpc` | — | L1 RPC URL (required) |
+| `--full-node-execution-rpc` | `full_node_execution_rpc` | — | Rollup execution layer RPC URL (required) |
+| `--mode` | `mode` | — | Verifier mode: `op` or `nitro` (required) |
 | `--listen-addr` | `listen_addr` | `:8080` | Address the proxy listens on |
 | `--espresso-tag` | `espresso_tag` | `espresso` | JSON-RPC block tag to intercept; set to `finalized` to back the standard finality tag with Espresso |
 | `--store-file-path` | `store_file_path` | `espresso_store.json` | Path to the state persistence file |
+| `--query-service-url` | `query_service_url` | — | Espresso query service URL (required) |
+| `--verification-interval` | `verification_interval` | `10ms` | How often the verifier polls for new confirmed batches |
 | `--initial-hotshot-height` | `initial_hotshot_height` | `0` | HotShot block height to start streaming from on first run |
 | `--max-batch-size` | `max_batch_size` | `1000` | Maximum requests in a JSON-RPC batch (0 = unlimited) |
 | `--max-request-body-size` | `max_request_body_size` | `5242880` | Maximum request body size in bytes (0 = unlimited) |
-| `--op.enable` | `op.enable` | `false` | Enable OP stack mode |
-| `--op.full-node-consensus-rpc` | `op.full_node_consensus_rpc` | — | OP consensus layer (op-node) RPC URL |
-| `--op.query-service-url` | `op.query_service_url` | — | Espresso query service URL |
-| `--op.light-client-address` | `op.light_client_address` | — | Espresso light client contract address on L1 |
-| `--op.batcher-address` | `op.batcher_address` | — | OP batcher address |
-| `--op.batch-authenticator-address` | `op.batch_authenticator_address` | — | Batch Authenticator contract address on L1 |
-| `--op.verification-interval` | `op.verification_interval` | `10ms` | How often the verifier polls for new confirmed batches |
 | `--log-level` | `log_level` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
 | `--log-format` | `log_format` | `json` | Log output format (`text` or `json`) |
 | `--track-batch-latency` | `track_batch_latency` | `false` | Log per-batch and average latency from HotShot finalization to verification |
+| `--op.l1-rpc` | `op.l1_rpc` | — | L1 RPC URL (OP mode, required) |
+| `--op.full-node-consensus-rpc` | `op.full_node_consensus_rpc` | — | OP consensus layer (op-node) RPC URL |
+| `--op.light-client-address` | `op.light_client_address` | — | Espresso light client contract address on L1 |
+| `--op.batcher-address` | `op.batcher_address` | — | OP batcher address |
+| `--op.batch-authenticator-address` | `op.batch_authenticator_address` | — | Batch Authenticator contract address on L1 |
+| `--nitro.feed-url` | `nitro.feed_url` | — | Nitro full node feed WebSocket URL (Nitro mode, required) |
+| `--nitro.namespace` | `nitro.namespace` | — | Nitro Chain Id (Nitro mode, required) |
+| `--nitro.initial-hotshot-block` | `nitro.initial_hotshot_block` | `0` | Initial HotShot block for the Nitro streamer |
+| `--nitro.valid-batcher-addresses` | `nitro.valid_batcher_addresses` | — | Valid batcher addresses (Nitro mode, at least one required) |
 
 ## E2E Tests
 

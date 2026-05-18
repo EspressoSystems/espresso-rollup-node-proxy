@@ -1,0 +1,71 @@
+{
+    "ensure-rollup-deployment": false,
+    "parent-chain": {
+        "connection": {
+            "url": "http://l1-geth:8545"
+        }
+    },
+    "chain": {
+        "id": 412346,
+        "info-files": [
+            "/config/deployed_chain_info.json"
+        ]
+    },
+    "node": {
+        "staker": {
+            "enable": false
+        },
+        "sequencer": true,
+        "dangerous": {
+            "no-sequencer-coordinator": true,
+            "disable-blob-reader": true
+        },
+        "delayed-sequencer": {
+            "enable": true
+        },
+        "seq-coordinator": {
+            "enable": false
+        },
+        "batch-poster": {
+            "enable": false
+        },
+        "block-validator": {
+            "validation-server": {
+                "url": "ws://validation_node:8549",
+                "jwtsecret": "/config/val_jwt.hex"
+            }
+        },
+        "feed": {
+            "input": {
+                "url": []
+            },
+            "output": {
+                "enable": true,
+                "signed": false,
+                "addr": "0.0.0.0",
+                "port": 9642
+            }
+        },
+        "data-availability": {
+            "enable": false
+        }
+    },
+    "execution": {
+        "sequencer": {
+            "enable": true
+        },
+        "forwarding-target": "null"
+    },
+    "persistent": {
+        "chain": "local"
+    },
+    "ws": {
+        "addr": "0.0.0.0"
+    },
+    "http": {
+        "addr": "0.0.0.0",
+        "vhosts": "*",
+        "corsdomain": "*"
+    },
+    "log-level": "INFO"
+}

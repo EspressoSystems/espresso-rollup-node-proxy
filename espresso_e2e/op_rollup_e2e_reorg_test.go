@@ -14,7 +14,7 @@ import (
 
 func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 	t.Log("Starting rollup nodes")
-	shutdown := runDockerComposeFile(rollupWorkingDir, "docker-compose.reorg.yml", nil)
+	shutdown := runDockerComposeFile(opWorkingDir, "docker-compose.reorg.yml", nil)
 	defer shutdown()
 
 	// Wait for services to come up
@@ -30,7 +30,7 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 
 	t.Log("Starting OP Verifier")
 	verifierLogger, defaultCapturer := newCapturingLogger()
-	v := startVerifier(ctx, t, verifierLogger, espressoStore)
+	v := startOpVerifier(ctx, t, verifierLogger, espressoStore)
 	defer v.Stop()
 
 	t.Run("proxy does not go backwords in case of l1 reorg", func(t *testing.T) {

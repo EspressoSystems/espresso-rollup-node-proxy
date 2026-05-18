@@ -13,7 +13,7 @@ import (
 
 func TestOPE2ERollupEspressoProxy(t *testing.T) {
 	t.Log("Starting rollup nodes")
-	shutdown := runDockerCompose(rollupWorkingDir)
+	shutdown := runDockerCompose(opWorkingDir)
 	defer shutdown()
 
 	// Wait for services to come up
@@ -31,7 +31,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 
 	t.Run("basic proxy advances", func(t *testing.T) {
 		t.Log("Starting OP Verifier")
-		v := startVerifier(ctx, t, newDefaultLogger(), espressoStore)
+		v := startOpVerifier(ctx, t, newDefaultLogger(), espressoStore)
 		defer v.Stop()
 		const targetBlockNum = uint64(10)
 
@@ -57,7 +57,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 
 	t.Run("rpc compatibility", func(t *testing.T) {
 		t.Log("Starting OP Verifier")
-		v := startVerifier(ctx, t, newDefaultLogger(), espressoStore)
+		v := startOpVerifier(ctx, t, newDefaultLogger(), espressoStore)
 		defer v.Stop()
 
 		userAddr := "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
@@ -166,7 +166,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 
 	t.Run("proxy restart resumes from persisted state", func(t *testing.T) {
 		t.Log("Starting OP Verifier")
-		v := startVerifier(ctx, t, newDefaultLogger(), espressoStore)
+		v := startOpVerifier(ctx, t, newDefaultLogger(), espressoStore)
 		defer v.Stop()
 		const initialHotshotHeight = uint64(1)
 		const targetBlockNum = uint64(10)
@@ -183,7 +183,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		proxyURL, shutdownProxy := startTestProxy(ctx, t, opGethFullNode, initialStore, espressoTag)
 
 		// Now we start the verifier and check if it starts with finalizedL2Block and initialHotshotHeight, and that it advances the store past block 10.
-		verifier := startVerifier(ctx, t, log.NewLogger(firstCapturer), initialStore)
+		verifier := startOpVerifier(ctx, t, log.NewLogger(firstCapturer), initialStore)
 		requireLogAttrs(t, firstCapturer, "Starting OP Verifier", map[string]uint64{
 			"start block number":               finalizedL2Block,
 			"starting fallback_hotshot_height": initialHotshotHeight,
@@ -229,7 +229,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		require.JSONEq(t, string(directResult), string(proxyResult), "espresso tag should resolve to preRestartBlock")
 
 		secondCapturer := &logCapturer{}
-		verifier = startVerifier(ctx, t, log.NewLogger(secondCapturer), newStore)
+		verifier = startOpVerifier(ctx, t, log.NewLogger(secondCapturer), newStore)
 		defer verifier.Stop()
 		// Check that the verifier starts with the block number and hotshot height from before the restart
 		requireLogAttrs(t, secondCapturer, "Starting OP Verifier", map[string]uint64{
@@ -244,17 +244,17 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 
 		// Switch to fallback batcher so there is no espresso state.
 		t.Log("Stopping espresso batcher and activating fallback batcher")
-		dockerComposeStop(t, rollupWorkingDir, "op-batcher")
+		dockerComposeStop(t, opWorkingDir, "op-batcher")
 		switchBatcher(t)
-		dockerComposeStart(t, rollupWorkingDir, []string{"fallback"}, "op-batcher-fallback")
+		dockerComposeStart(t, opWorkingDir, []string{"fallback"}, "op-batcher-fallback")
 
 		// Cleanup: if the test fails while in fallback mode, restore espresso batcher.
 		fallbackMode := true
 		defer func() {
 			if fallbackMode {
-				dockerComposeStop(t, rollupWorkingDir, "op-batcher-fallback")
+				dockerComposeStop(t, opWorkingDir, "op-batcher-fallback")
 				switchBatcher(t)
-				dockerComposeStart(t, rollupWorkingDir, nil, "op-batcher")
+				dockerComposeStart(t, opWorkingDir, nil, "op-batcher")
 			}
 		}()
 
@@ -280,15 +280,15 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 
 		//  Switch to espresso batcher.
 		t.Log("Stopping fallback batcher and activating espresso batcher")
-		dockerComposeStop(t, rollupWorkingDir, "op-batcher-fallback")
+		dockerComposeStop(t, opWorkingDir, "op-batcher-fallback")
 		switchBatcher(t)
-		dockerComposeStart(t, rollupWorkingDir, nil, "op-batcher")
+		dockerComposeStart(t, opWorkingDir, nil, "op-batcher")
 		fallbackMode = false
 
 		// Start the verifier — it reads FallbackHotshotHeight from the store
 		// (captured before the switch) and immediately picks up new espresso batches.
 		t.Log("Starting verifier to sync from Espresso")
-		v := startVerifier(ctx, t, newDefaultLogger(), store)
+		v := startOpVerifier(ctx, t, newDefaultLogger(), store)
 		defer v.Stop()
 
 		t.Log("Waiting for espresso finalized block to exceed ethereum finalized block")
@@ -312,16 +312,16 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		hotshotHeight := uint64(1)
 
 		t.Log("Stopping espresso batcher and activating fallback batcher")
-		dockerComposeStop(t, rollupWorkingDir, "op-batcher")
+		dockerComposeStop(t, opWorkingDir, "op-batcher")
 		switchBatcher(t)
-		dockerComposeStart(t, rollupWorkingDir, []string{"fallback"}, "op-batcher-fallback")
+		dockerComposeStart(t, opWorkingDir, []string{"fallback"}, "op-batcher-fallback")
 
 		fallbackMode := true
 		defer func() {
 			if fallbackMode {
-				dockerComposeStop(t, rollupWorkingDir, "op-batcher-fallback")
+				dockerComposeStop(t, opWorkingDir, "op-batcher-fallback")
 				switchBatcher(t)
-				dockerComposeStart(t, rollupWorkingDir, nil, "op-batcher")
+				dockerComposeStart(t, opWorkingDir, nil, "op-batcher")
 			}
 		}()
 
@@ -349,13 +349,13 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 
 		//  Switch to espresso batcher.
 		t.Log("Stopping fallback batcher and activating espresso batcher")
-		dockerComposeStop(t, rollupWorkingDir, "op-batcher-fallback")
+		dockerComposeStop(t, opWorkingDir, "op-batcher-fallback")
 		switchBatcher(t)
-		dockerComposeStart(t, rollupWorkingDir, nil, "op-batcher")
+		dockerComposeStart(t, opWorkingDir, nil, "op-batcher")
 		fallbackMode = false
 
 		t.Log("Starting verifier to sync from Espresso")
-		v := startVerifier(ctx, t, newDefaultLogger(), store)
+		v := startOpVerifier(ctx, t, newDefaultLogger(), store)
 		defer v.Stop()
 
 		t.Log("Waiting for espresso finalized block to exceed ethereum finalized block")
@@ -386,7 +386,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		defer shutdownProxy()
 
 		capturer := &logCapturer{}
-		v := startVerifier(ctx, t, log.NewLogger(capturer), store)
+		v := startOpVerifier(ctx, t, log.NewLogger(capturer), store)
 		defer v.Stop()
 
 		t.Log("Waiting for espresso verifier to advance past block 5")
@@ -396,18 +396,18 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		preStopBlock := getStoredBlock(t, store)
 		t.Logf("Espresso advanced to block %d, stopping espresso batcher", preStopBlock)
 
-		dockerComposeStop(t, rollupWorkingDir, "op-batcher")
+		dockerComposeStop(t, opWorkingDir, "op-batcher")
 
 		t.Log("Switching BatchAuthenticator to activate fallback batcher")
 		switchBatcher(t)
 		defer func() {
 			switchBatcher(t)
-			dockerComposeStart(t, rollupWorkingDir, nil, "op-batcher")
+			dockerComposeStart(t, opWorkingDir, nil, "op-batcher")
 		}()
 
 		t.Log("Starting fallback batcher (espresso disabled)")
-		dockerComposeStart(t, rollupWorkingDir, []string{"fallback"}, "op-batcher-fallback")
-		defer dockerComposeStop(t, rollupWorkingDir, "op-batcher-fallback")
+		dockerComposeStart(t, opWorkingDir, []string{"fallback"}, "op-batcher-fallback")
+		defer dockerComposeStop(t, opWorkingDir, "op-batcher-fallback")
 
 		t.Log("Waiting for L2 full node to finalize blocks beyond the pre-stop espresso block")
 		var ethFinalized uint64
