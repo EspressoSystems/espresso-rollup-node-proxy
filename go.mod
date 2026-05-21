@@ -7,6 +7,7 @@ require (
 	github.com/EspressoSystems/espresso-streamers v1.1.0
 	github.com/ethereum-optimism/optimism v1.16.7
 	github.com/ethereum/go-ethereum v1.17.1
+	github.com/google/renameio v1.0.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/spf13/pflag v1.0.6
 	github.com/stretchr/testify v1.11.1

@@ -8,6 +8,8 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/google/renameio"
 )
 
 // EspressoState represents the current metadata associated with the proxy
@@ -115,24 +117,34 @@ func (es *EspressoStore) loadFromDisk() error {
 	return nil
 }
 
+// writeToDisk grabs a snapshot of the current state and writes it to the disk
+// aotmically, by first writing to a temporary file, then renaming the file.
+//
+// NOTE: This is only guaranteed to be atomic if the file system rename
+// operation is guaranteed to be atomic.
+// Should be the case on linux utilizing ext4/XFS.
 func (es *EspressoStore) writeToDisk() error {
-	data, err := json.Marshal(es.state)
-	if err != nil {
-		return fmt.Errorf("failed to marshal block state: %w", err)
-	}
-	tmp := es.filePath + ".tmp"
+	// Grab the local state (locked)
+	state := es.GetState()
 
-	// Since WriteFile requires multiple system calls to complete,
-	// a failure mid-operation can leave the file in a partially written state.
-	// as a reason we write a tmp file first and then rename it to the actual file which is an atomic operation in most operating systems.
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
-		return fmt.Errorf("failed to write temp file: %w", err)
+	pendingFile, err := renameio.TempFile("", es.filePath)
+	if err != nil {
+		return fmt.Errorf("failed to open file to write to: %w", err)
 	}
-	if renameErr := os.Rename(tmp, es.filePath); renameErr != nil {
-		if removeErr := os.Remove(tmp); removeErr != nil {
-			return fmt.Errorf("failed to rename temp file: %w (and failed to remove temp file: %v)", renameErr, removeErr)
+
+	// Create a JSON encoder, wrapping the io.Writer
+	encoder := json.NewEncoder(pendingFile)
+	if encodeErr := encoder.Encode(state); encodeErr != nil {
+		// Attempt to ensure that we close the file
+		if err := pendingFile.Close(); err != nil {
+			return fmt.Errorf("failed to write to file: %w, failed to close file: %w", err, err)
 		}
-		return fmt.Errorf("failed to rename temp file: %w", renameErr)
+		return fmt.Errorf("failed to write to file: %w", encodeErr)
 	}
+
+	if err := pendingFile.CloseAtomicallyReplace(); err != nil {
+		return fmt.Errorf("failed to atomically replace file: %w", err)
+	}
+
 	return nil
 }
