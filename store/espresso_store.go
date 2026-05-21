@@ -124,8 +124,9 @@ func (es *EspressoStore) loadFromDisk() error {
 // operation is guaranteed to be atomic.
 // Should be the case on linux utilizing ext4/XFS.
 func (es *EspressoStore) writeToDisk() error {
-	// Grab the local state (locked)
-	state := es.GetState()
+	// Grab the local state. We're already holding a mutex lock in every
+	// case where this is invoked, with the exception of initialization.
+	state := es.state
 
 	pendingFile, err := renameio.TempFile("", es.filePath)
 	if err != nil {
