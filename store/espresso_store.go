@@ -136,7 +136,7 @@ func (es *EspressoStore) writeToDisk() error {
 	encoder := json.NewEncoder(pendingFile)
 	if encodeErr := encoder.Encode(state); encodeErr != nil {
 		// Attempt to ensure that we close the file
-		if err := pendingFile.Close(); err != nil {
+		if err := pendingFile.Cleanup(); err != nil {
 			return fmt.Errorf("failed to write to file: %w, failed to close file: %w", err, err)
 		}
 		return fmt.Errorf("failed to write to file: %w", encodeErr)
