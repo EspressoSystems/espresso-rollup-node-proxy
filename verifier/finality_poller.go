@@ -47,8 +47,8 @@ func (p *FinalityPoller) Stop() {
 	if p.cancel != nil {
 		p.cancel()
 	}
-	p.client.Close()
 	p.wg.Wait()
+	p.client.Close()
 }
 
 func (p *FinalityPoller) run(ctx context.Context) {
