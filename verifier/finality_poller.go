@@ -15,6 +15,12 @@ import (
 
 const DefaultFinalityPollInterval = time.Second
 
+type FinalityPollerInterface interface {
+	LastFinalized() uint64
+	Start(ctx context.Context)
+	Stop()
+}
+
 type FinalityPoller struct {
 	client *ethclient.Client
 	logger log.Logger

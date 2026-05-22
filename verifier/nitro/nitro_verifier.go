@@ -51,7 +51,7 @@ type NitroEspressoBatchVerifier struct {
 	l2Client       *ethclient.Client
 	espressoStore  *espressoStore.EspressoStore
 	config         *NitroEspressoBatchVerifierConfig
-	finalityPoller *sharedVerifier.FinalityPoller
+	finalityPoller sharedVerifier.FinalityPollerInterface
 	logger         log.Logger
 	cancel         context.CancelFunc
 	runWg          sync.WaitGroup

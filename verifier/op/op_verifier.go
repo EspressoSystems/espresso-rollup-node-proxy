@@ -52,7 +52,7 @@ type OPEspressoBatchVerifier struct {
 	rollupConfig      *rollup.Config
 	logger            log.Logger
 	l1Client          *ethclient.Client
-	finalityPoller    *sharedVerifier.FinalityPoller
+	finalityPoller    sharedVerifier.FinalityPollerInterface
 	cancel            context.CancelFunc
 	runWg             sync.WaitGroup
 	running           atomic.Bool
