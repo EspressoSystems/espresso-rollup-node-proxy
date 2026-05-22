@@ -86,7 +86,6 @@ func TestEspressoStore(t *testing.T) {
 		require.NoError(t, err)
 
 		updated, err = store.UpdateIfGreater(10, 99)
-		require.True(t, updated)
 		require.NoError(t, err)
 		require.False(t, updated, "equal block number should be rejected")
 
