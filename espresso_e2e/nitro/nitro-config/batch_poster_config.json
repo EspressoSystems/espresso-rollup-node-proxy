@@ -47,7 +47,7 @@
         },
         "batch-poster": {
             "enable": true,
-            "max-delay": "1m",
+            "max-delay": "5m",
             "wait-for-max-delay": false,
             "l1-block-bound": "ignore",
             "data-poster": {

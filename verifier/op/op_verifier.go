@@ -21,7 +21,8 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
-	"github.com/ethereum/go-ethereum/rpc"
+
+	sharedVerifier "proxy/verifier"
 
 	espressoClient "github.com/EspressoSystems/espresso-network/sdks/go/client"
 )
@@ -51,6 +52,7 @@ type OPEspressoBatchVerifier struct {
 	rollupConfig      *rollup.Config
 	logger            log.Logger
 	l1Client          *ethclient.Client
+	finalityPoller    *sharedVerifier.FinalityPoller
 	cancel            context.CancelFunc
 	runWg             sync.WaitGroup
 	running           atomic.Bool
@@ -122,6 +124,12 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 
 	bufferedStreamer := opStreamer.NewBufferedEspressoStreamer(streamer)
 
+	l2Client, err := ethclient.DialContext(ctx, opVerifierConfig.FullNodeExecutionRPC)
+	if err != nil {
+		logger.Crit("failed to dial L2 full node for finality poller", "error", err)
+		return nil
+	}
+
 	return &OPEspressoBatchVerifier{
 		streamer:         bufferedStreamer,
 		espressoStore:    store,
@@ -130,6 +138,10 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 		rollupConfig:     rollupConfig,
 		logger:           logger,
 		l1Client:         l1Client,
+		finalityPoller: sharedVerifier.NewFinalityPoller(
+			l2Client,
+			logger,
+		),
 	}
 }
 
@@ -141,6 +153,7 @@ func (v *OPEspressoBatchVerifier) Start(ctx context.Context) {
 
 	ctx, cancel := context.WithCancel(ctx)
 	v.cancel = cancel
+	v.finalityPoller.Start(ctx)
 	v.runWg.Add(1)
 	go v.run(ctx)
 }
@@ -158,7 +171,15 @@ func (v *OPEspressoBatchVerifier) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			v.verifyAndAdvance(ctx)
+			for v.verifyAndAdvance(ctx) {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					// if successful we can have messages queued up in streamer,
+					// try again immediately
+				}
+			}
 		}
 	}
 }
@@ -166,34 +187,32 @@ func (v *OPEspressoBatchVerifier) run(ctx context.Context) {
 // verifyAndAdvance calls VerifyNextBatch to peek the next batch from the OP streamer and verify it against the OP node.
 // If verification succeeds, it advances the OP streamer and updates the espresso state in the store to reflect the new batch number.
 // If verification fails, it logs an error and will try again on the next interval.
-func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
+// Returns true if a batch was verified and the streamer advanced, so the caller can hot-loop.
+func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) bool {
 	v.logger.Debug("Starting OP batch verification")
 
-	ethFinalizedBlockNumber, err := v.getEthereumFinalizedBlockNumber(ctx)
-	if err != nil {
-		v.logger.Error("failed to fetch ethereum finalized block for verifier", "error", err)
-		return
-	}
+	ethFinalizedBlockNumber := v.finalityPoller.LastFinalized()
 
 	var espressoBatch *derivation.EspressoBatch
+	var err error
 	if espressoBatch, err = v.VerifyNextBatch(ctx); err != nil {
 		if err.Error() == "not found" {
 			v.logger.Debug("batch not found on OP node yet, will try again on next interval")
-			return
+			return false
 		} else if strings.Contains(err.Error(), "retryable") {
 			v.logger.Debug("espresso has not finalized the batch yet", "error", err)
-			return
+			return false
 		} else {
 			v.logger.Error("batch verification failed", "error", err)
 		}
-		return
+		return false
 	}
 	if espressoBatch == nil {
 		if err := v.syncEspressoStateWithEthereumFinality(ethFinalizedBlockNumber); err != nil {
 			v.logger.Error("failed to update espresso state to ethereum finalized block", "error", err, "eth_finalized_block", ethFinalizedBlockNumber)
 		}
 		v.logger.Debug("no new batches to verify")
-		return
+		return false
 	}
 
 	batchNumber := espressoBatch.Number()
@@ -206,7 +225,7 @@ func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 
 	if err := v.advanceStreamerAndEspressoState(ctx, batchNumber, ethFinalizedBlockNumber); err != nil {
 		v.logger.Debug("failed to advance streamer and espresso state", "error", err, "batch_number", batchNumber)
-		return
+		return false
 	}
 
 	if v.config.TrackBatchLatency && hashTimestamp {
@@ -218,24 +237,7 @@ func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 	}
 
 	v.logger.Info("Successfully verified and advanced OP batch", "batch_number", batchNumber)
-}
-
-func (v *OPEspressoBatchVerifier) getEthereumFinalizedBlockNumber(ctx context.Context) (uint64, error) {
-	ethClient, err := v.endpointProvider.EthClient(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("failed to get eth client for finalized block check: %w", err)
-	}
-	defer ethClient.Close()
-
-	ethFinalizedBlock, err := ethClient.BlockByNumber(ctx, big.NewInt(int64(rpc.FinalizedBlockNumber)))
-	if err != nil {
-		return 0, fmt.Errorf("failed to fetch ethereum finalized block: %w", err)
-	}
-	if ethFinalizedBlock == nil {
-		return 0, fmt.Errorf("ethereum finalized block not found")
-	}
-
-	return ethFinalizedBlock.NumberU64(), nil
+	return true
 }
 
 func (v *OPEspressoBatchVerifier) syncEspressoStateWithEthereumFinality(ethFinalizedBlockNumber uint64) error {
@@ -404,6 +406,7 @@ func (v *OPEspressoBatchVerifier) Stop() {
 		v.cancel()
 	}
 	v.runWg.Wait()
+	v.finalityPoller.Stop()
 
 	v.endpointProvider.Close()
 	v.l1Client.Close()

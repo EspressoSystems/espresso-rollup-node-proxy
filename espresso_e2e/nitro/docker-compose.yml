@@ -151,7 +151,7 @@ services:
             --private-key ${BATCH_POSTER_PRIVATE_KEY} \
             ${BATCH_POSTER_ADDRESS} \
             --value 1 2>&1 || true
-          sleep 2
+          # sleep 2
         done
 
 volumes:
