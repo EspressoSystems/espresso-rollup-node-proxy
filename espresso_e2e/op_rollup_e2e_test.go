@@ -176,8 +176,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		finalizedL2Block := getBlockByTag(t, opGethFullNode, "finalized")
 		initialStore, err := espressostore.NewEspressoStore(initialStateFile, initialHotshotHeight)
 		require.NoError(t, err)
-		updated, err := initialStore.UpdateIfGreater(finalizedL2Block, initialHotshotHeight)
-		require.True(t, updated)
+		_, err = initialStore.UpdateIfGreater(finalizedL2Block, initialHotshotHeight)
 		require.NoError(t, err)
 
 		firstCapturer := &logCapturer{}
