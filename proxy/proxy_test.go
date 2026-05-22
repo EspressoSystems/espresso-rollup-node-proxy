@@ -18,7 +18,8 @@ func newTestProxy(t *testing.T, upstreamURL string, l2BlockNumber uint64, espres
 	fp := filepath.Join(t.TempDir(), "state.json")
 	store, err := espressoStore.NewEspressoStore(fp, 1)
 	require.NoError(t, err)
-	err = store.Update(l2BlockNumber, 1)
+	updated, err := store.UpdateIfGreater(l2BlockNumber, 1)
+	require.True(t, updated)
 	require.NoError(t, err)
 	return NewProxy(&ProxyConfig{FullNodeExecutionRPC: upstreamURL, EspressoTag: espressoTag, MaxBatchSize: DefaultMaxBatchSize}, store)
 }
@@ -136,7 +137,9 @@ func TestServe(t *testing.T) {
 		fp := filepath.Join(t.TempDir(), "state.json")
 		store, err := espressoStore.NewEspressoStore(fp, 1)
 		require.NoError(t, err)
-		require.NoError(t, store.Update(100, 1))
+		updated, err := store.UpdateIfGreater(100, 1)
+		require.True(t, updated)
+		require.NoError(t, err)
 		p := NewProxy(&ProxyConfig{FullNodeExecutionRPC: "http://unused", EspressoTag: "espresso", MaxBatchSize: 2}, store)
 
 		body := `[{"jsonrpc":"2.0","id":1,"method":"eth_chainId"},{"jsonrpc":"2.0","id":2,"method":"eth_chainId"},{"jsonrpc":"2.0","id":3,"method":"eth_chainId"}]`

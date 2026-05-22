@@ -21,7 +21,8 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 	waitForRollupServicesReady(t)
 
 	espressoStore := newTestStore(t, "espresso-state", 1)
-	err := espressoStore.Update(1, 1)
+	updated, err := espressoStore.UpdateIfGreater(1, 1)
+	require.True(t, updated)
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -175,7 +176,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		finalizedL2Block := getBlockByTag(t, opGethFullNode, "finalized")
 		initialStore, err := espressostore.NewEspressoStore(initialStateFile, initialHotshotHeight)
 		require.NoError(t, err)
-		err = initialStore.Update(finalizedL2Block, initialHotshotHeight)
+		_, err = initialStore.UpdateIfGreater(finalizedL2Block, initialHotshotHeight)
 		require.NoError(t, err)
 
 		firstCapturer := &logCapturer{}
@@ -379,7 +380,8 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 
 	t.Run("fallback to ethereum finality when espresso stops", func(t *testing.T) {
 		store := newTestStore(t, "fallback-state", 1)
-		err := store.Update(1, 1)
+		updated, err := store.UpdateIfGreater(1, 1)
+		require.True(t, updated)
 		require.NoError(t, err)
 
 		proxyURL, shutdownProxy := startTestProxy(ctx, t, opGethFullNode, store, "finalized")

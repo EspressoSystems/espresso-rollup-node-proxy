@@ -50,7 +50,7 @@ func NewEspressoStore(filePath string, hotshotHeight uint64) (*EspressoStore, er
 		FallbackHotshotHeight: hotshotHeight,
 		UpdatedAt:             time.Now(),
 	}
-	if err := store.writeToDisk(); err != nil {
+	if err := store.writeToDisk(store.state); err != nil {
 		return nil, fmt.Errorf("failed to write initial state to disk: %w", err)
 	}
 	return store, nil
@@ -63,40 +63,25 @@ func (es *EspressoStore) GetState() EspressoState {
 	return es.state
 }
 
-// Update updates the L2 block number and fallback hotshot height in the state
-// and persists the updated state to disk.
-// It also updates the UpdatedAt timestamp to the current time.
-func (es *EspressoStore) Update(l2BlockNumber uint64, fallbackHotshotHeight uint64) error {
-	es.mu.Lock()
-	defer es.mu.Unlock()
-	originalState := es.state
-	es.state.L2BlockNumber = l2BlockNumber
-	es.state.FallbackHotshotHeight = fallbackHotshotHeight
-	es.state.UpdatedAt = time.Now()
-
-	if err := es.writeToDisk(); err != nil {
-		// If writing to disk fails, we revert the in-memory state to the original state
-		es.state = originalState
-		return fmt.Errorf("failed to write updated state to disk: %w", err)
-	}
-	return nil
-}
-
 func (es *EspressoStore) UpdateIfGreater(l2BlockNumber uint64, fallbackHotshotHeight uint64) (bool, error) {
-	es.mu.Lock()
-	defer es.mu.Unlock()
-	if es.state.L2BlockNumber >= l2BlockNumber {
+	state := es.GetState()
+	if state.L2BlockNumber >= l2BlockNumber {
 		return false, nil
 	}
-	originalState := es.state
-	es.state.L2BlockNumber = l2BlockNumber
-	es.state.FallbackHotshotHeight = fallbackHotshotHeight
-	es.state.UpdatedAt = time.Now()
 
-	if err := es.writeToDisk(); err != nil {
-		es.state = originalState
+	newState := EspressoState{
+		L2BlockNumber:         l2BlockNumber,
+		FallbackHotshotHeight: fallbackHotshotHeight,
+		UpdatedAt:             time.Now(),
+	}
+
+	if err := es.writeToDisk(newState); err != nil {
+		// dont update state if we fail to write to disk
 		return false, fmt.Errorf("failed to write updated state to disk: %w", err)
 	}
+	es.mu.Lock()
+	defer es.mu.Unlock()
+	es.state = newState
 	return true, nil
 }
 
@@ -123,10 +108,7 @@ func (es *EspressoStore) loadFromDisk() error {
 // NOTE: This is only guaranteed to be atomic if the file system rename
 // operation is guaranteed to be atomic.
 // Should be the case on linux utilizing ext4/XFS.
-func (es *EspressoStore) writeToDisk() error {
-	// Grab the local state. We're already holding a mutex lock in every
-	// case where this is invoked, with the exception of initialization.
-	state := es.state
+func (es *EspressoStore) writeToDisk(newState EspressoState) error {
 
 	pendingFile, err := renameio.TempFile("", es.filePath)
 	if err != nil {
@@ -135,7 +117,7 @@ func (es *EspressoStore) writeToDisk() error {
 
 	// Create a JSON encoder, wrapping the io.Writer
 	encoder := json.NewEncoder(pendingFile)
-	if encodeErr := encoder.Encode(state); encodeErr != nil {
+	if encodeErr := encoder.Encode(newState); encodeErr != nil {
 		// Attempt to ensure that we close the file
 		if err := pendingFile.Cleanup(); err != nil {
 			return fmt.Errorf("failed to write to file: %w, failed to close file: %w", encodeErr, err)

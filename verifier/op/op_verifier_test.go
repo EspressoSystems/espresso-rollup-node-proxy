@@ -203,7 +203,8 @@ func newTestHarness(t *testing.T, logger log.Logger) *testHarness {
 	ethClient := new(mockEthClient)
 	store, err := espressoStore.NewEspressoStore(tempFilePath(t), 1)
 	require.NoError(t, err)
-	err = store.Update(1, 1)
+	updated, err := store.UpdateIfGreater(1, 1)
+	require.True(t, updated)
 	require.NoError(t, err)
 	verifier := &OPEspressoBatchVerifier{
 		streamer:      streamer,
