@@ -50,7 +50,7 @@ func NewEspressoStore(filePath string, hotshotHeight uint64) (*EspressoStore, er
 		FallbackHotshotHeight: hotshotHeight,
 		UpdatedAt:             time.Now(),
 	}
-	if err := store.writeToDisk(&store.state); err != nil {
+	if err := store.writeToDisk(store.state); err != nil {
 		return nil, fmt.Errorf("failed to write initial state to disk: %w", err)
 	}
 	return store, nil
@@ -69,17 +69,19 @@ func (es *EspressoStore) UpdateIfGreater(l2BlockNumber uint64, fallbackHotshotHe
 		return false, nil
 	}
 
-	state.L2BlockNumber = l2BlockNumber
-	state.FallbackHotshotHeight = fallbackHotshotHeight
-	state.UpdatedAt = time.Now()
+	newState := EspressoState{
+		L2BlockNumber:         l2BlockNumber,
+		FallbackHotshotHeight: fallbackHotshotHeight,
+		UpdatedAt:             time.Now(),
+	}
 
-	if err := es.writeToDisk(&state); err != nil {
+	if err := es.writeToDisk(newState); err != nil {
 		// dont update state if we fail to write to disk
 		return false, fmt.Errorf("failed to write updated state to disk: %w", err)
 	}
 	es.mu.Lock()
 	defer es.mu.Unlock()
-	es.state = state
+	es.state = newState
 	return true, nil
 }
 
@@ -106,7 +108,7 @@ func (es *EspressoStore) loadFromDisk() error {
 // NOTE: This is only guaranteed to be atomic if the file system rename
 // operation is guaranteed to be atomic.
 // Should be the case on linux utilizing ext4/XFS.
-func (es *EspressoStore) writeToDisk(newState *EspressoState) error {
+func (es *EspressoStore) writeToDisk(newState EspressoState) error {
 
 	pendingFile, err := renameio.TempFile("", es.filePath)
 	if err != nil {
