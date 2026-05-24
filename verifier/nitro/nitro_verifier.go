@@ -181,70 +181,77 @@ func (v *NitroEspressoBatchVerifier) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			for v.verifyAndAdvance() {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-					// if successful we can have messages queued up in streamer,
-					// try again immediately
-				}
-			}
+			v.verifyAndAdvance(ctx)
 		}
 	}
 }
 
-// verifyAndAdvance verifies the next message from the Nitro feed against the Espresso streamer.
-// Returns true if a message was verified and the streamer advanced, so we retry immediately
-func (v *NitroEspressoBatchVerifier) verifyAndAdvance() bool {
+// verifyAndAdvance drains all available verified messages from the streamer in a tight loop,
+// calling UpdateIfGreater once at the end to minimize disk writes.
+func (v *NitroEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 	v.logger.Debug("Starting Nitro batch verification")
 
-	espressoMsg := v.streamer.Peek()
-	if espressoMsg == nil {
-		nitroFinalizedBlock := v.finalityPoller.LastFinalized()
+	var verifiedMsg *nitroStreamer.MessageWithMetadataAndPos
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		espressoMsg := v.streamer.Peek()
+		if espressoMsg == nil {
+			v.logger.Debug("no new messages to verify")
+			break
+		}
+
+		feedMsg := v.feedClient.GetMessage(espressoMsg.Pos)
+		if feedMsg == nil {
+			v.logger.Debug("feed does not have message yet", "msg_pos", espressoMsg.Pos)
+			break
+		}
+
+		if err := ensureMessagesMatch(&espressoMsg.MessageWithMeta, &feedMsg.Message); err != nil {
+			v.logger.Error("message mismatch between espresso and nitro feed",
+				"msg_pos", espressoMsg.Pos,
+				"error", err,
+			)
+			break
+		}
+
+		v.advance()
+		verifiedMsg = espressoMsg
+	}
+
+	nitroFinalizedBlock := v.finalityPoller.LastFinalized()
+	if verifiedMsg == nil || verifiedMsg.Pos < nitroFinalizedBlock {
 		if err := v.syncEspressoStateWithNitroFinality(nitroFinalizedBlock); err != nil {
 			v.logger.Error("failed to sync espresso state with Nitro finality", "error", err)
 		}
-		v.logger.Debug("no new messages to verify")
-		return false
+		return
 	}
 
-	feedMsg := v.feedClient.GetMessage(espressoMsg.Pos)
-	if feedMsg == nil {
-		nitroFinalizedBlock := v.finalityPoller.LastFinalized()
-		if err := v.syncEspressoStateWithNitroFinality(nitroFinalizedBlock); err != nil {
-			v.logger.Error("failed to sync espresso state with Nitro finality", "error", err)
-		}
-		v.logger.Debug("feed does not have message yet", "msg_pos", espressoMsg.Pos)
-		return false
-	}
-
-	if err := ensureMessagesMatch(&espressoMsg.MessageWithMeta, &feedMsg.Message); err != nil {
-		v.logger.Error("message mismatch between espresso and nitro feed",
-			"msg_pos", espressoMsg.Pos,
-			"error", err,
-		)
-		return false
-	}
-
-	updated, err := v.espressoStore.UpdateIfGreater(espressoMsg.Pos, espressoMsg.HotshotHeight)
+	updated, err := v.espressoStore.UpdateIfGreater(verifiedMsg.Pos, verifiedMsg.HotshotHeight)
 	if err != nil {
 		v.logger.Error("failed to update espresso state in store", "error", err)
-		return false
+		return
 	}
 	if !updated {
-		v.logger.Warn("not updating espresso state in store because message position is not greater than current message position in store",
-			"msg_pos", espressoMsg.Pos)
-		v.advance()
-		return false
-	}
+		state := v.espressoStore.GetState()
+		v.logger.Warn(
+			"not updating espresso state in store because message position is not greater than current message position in store",
+			"msg_pos", verifiedMsg.Pos,
+			"state_pos", state.L2BlockNumber,
+		)
 
-	v.advance()
-	v.logger.Info("successfully verified and advanced Nitro message",
-		"msg_pos", espressoMsg.Pos,
-		"hotshot_height", espressoMsg.HotshotHeight,
+		v.advanceTo(state.L2BlockNumber + 1)
+		return
+	}
+	v.logger.Info("successfully verified and advanced Nitro messages",
+		"msg_pos", verifiedMsg.Pos,
+		"hotshot_height", verifiedMsg.HotshotHeight,
 	)
-	return true
 }
 
 func (v *NitroEspressoBatchVerifier) advance() {
