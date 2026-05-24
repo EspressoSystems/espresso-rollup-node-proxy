@@ -222,6 +222,7 @@ func (v *NitroEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 
 		v.advance()
 		verifiedMsg = espressoMsg
+		v.logger.Info("Successfully verified nitro message", "batch_number", verifiedMsg.Pos)
 	}
 
 	nitroFinalizedBlock := v.finalityPoller.LastFinalized()

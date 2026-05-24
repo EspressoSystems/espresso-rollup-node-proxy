@@ -181,8 +181,6 @@ func (v *OPEspressoBatchVerifier) run(ctx context.Context) {
 func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 	v.logger.Debug("Starting OP batch verification")
 
-	ethFinalizedBlockNumber := v.finalityPoller.LastFinalized()
-
 	var verifiedBatch *derivation.EspressoBatch
 
 	for {
@@ -226,6 +224,7 @@ func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 		v.logger.Info("Successfully verified OP batch", "batch_number", batchNumber)
 	}
 
+	ethFinalizedBlockNumber := v.finalityPoller.LastFinalized()
 	if verifiedBatch == nil || verifiedBatch.Number() < ethFinalizedBlockNumber {
 		if err := v.syncEspressoStateWithEthereumFinality(ethFinalizedBlockNumber); err != nil {
 			v.logger.Error("failed to update espresso state to ethereum finalized block", "error", err, "eth_finalized_block", ethFinalizedBlockNumber)
@@ -246,7 +245,7 @@ func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 			"current_block_number", state.L2BlockNumber)
 		return
 	}
-	v.logger.Info("Successfully verified and advanced OP batches", "last_batch_number", verifiedBatch.Number())
+	v.logger.Info("Successfully verified and advanced OP batches", "last_batch_number", verifiedBatch.Number(), "hotshot_height", hotshotFallbackPos)
 }
 
 func (v *OPEspressoBatchVerifier) syncEspressoStateWithEthereumFinality(ethFinalizedBlockNumber uint64) error {
