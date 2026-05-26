@@ -45,6 +45,17 @@ func (c *logCapturer) Handle(_ context.Context, r slog.Record) error {
 func (c *logCapturer) WithAttrs(_ []slog.Attr) slog.Handler { return c }
 func (c *logCapturer) WithGroup(_ string) slog.Handler      { return c }
 
+type mockFinalityPoller struct {
+	mock.Mock
+}
+
+func (m *mockFinalityPoller) LastFinalized() uint64 {
+	args := m.Called()
+	return args.Get(0).(uint64)
+}
+func (m *mockFinalityPoller) Start(_ context.Context) {}
+func (m *mockFinalityPoller) Stop()                   {}
+
 type mockStreamer struct {
 	mock.Mock
 }
@@ -179,12 +190,13 @@ func (m *mockEthClient) Client() *rpc.Client { return nil }
 func (m *mockEthClient) Close()              {}
 
 type testHarness struct {
-	verifier     *OPEspressoBatchVerifier
-	streamer     *mockStreamer
-	endpointProv *mockEndpointProvider
-	rollupClient *mockRollupClient
-	ethClient    *mockEthClient
-	store        *espressoStore.EspressoStore
+	verifier       *OPEspressoBatchVerifier
+	streamer       *mockStreamer
+	endpointProv   *mockEndpointProvider
+	rollupClient   *mockRollupClient
+	ethClient      *mockEthClient
+	finalityPoller *mockFinalityPoller
+	store          *espressoStore.EspressoStore
 }
 
 func tempFilePath(t *testing.T) string {
@@ -201,6 +213,7 @@ func newTestHarness(t *testing.T, logger log.Logger) *testHarness {
 	endpointProvider := new(mockEndpointProvider)
 	rollupClient := new(mockRollupClient)
 	ethClient := new(mockEthClient)
+	finalityPoller := new(mockFinalityPoller)
 	store, err := espressoStore.NewEspressoStore(tempFilePath(t), 1)
 	require.NoError(t, err)
 	updated, err := store.UpdateIfGreater(1, 1)
@@ -215,37 +228,19 @@ func newTestHarness(t *testing.T, logger log.Logger) *testHarness {
 		endpointProvider: endpointProvider,
 		rollupConfig:     &rollup.Config{},
 		logger:           logger,
+		finalityPoller:   finalityPoller,
 	}
 	return &testHarness{
-		verifier:     verifier,
-		streamer:     streamer,
-		endpointProv: endpointProvider,
-		rollupClient: rollupClient,
-		ethClient:    ethClient,
-		store:        store,
+		verifier:       verifier,
+		streamer:       streamer,
+		endpointProv:   endpointProvider,
+		rollupClient:   rollupClient,
+		ethClient:      ethClient,
+		finalityPoller: finalityPoller,
+		store:          store,
 	}
 }
 
-func newBlockWithNumber(number uint64) *types.Block {
-	return types.NewBlockWithHeader(&types.Header{Number: new(big.Int).SetUint64(number)})
-}
-
-func TestAdvanceStreamerAndEspressoState(t *testing.T) {
-	h := newTestHarness(t, nil)
-	ctx := context.Background()
-
-	h.streamer.On("GetFallbackHotshotPos").Return(uint64(2))
-	h.streamer.On("Next", mock.Anything).Return(nil)
-
-	err := h.verifier.advanceStreamerAndEspressoState(ctx, 100, 99)
-	require.NoError(t, err)
-
-	state := h.store.GetState()
-	require.Equal(t, uint64(2), state.FallbackHotshotHeight)
-	require.Equal(t, uint64(100), state.L2BlockNumber)
-	h.streamer.AssertCalled(t, "Next", mock.Anything)
-	h.streamer.AssertExpectations(t)
-}
 
 func TestPeekNextBatch(t *testing.T) {
 	h := newTestHarness(t, nil)
@@ -310,13 +305,16 @@ func TestVerify(t *testing.T) {
 		},
 	}
 	h.endpointProv.On("RollupClient", mock.Anything).Return(h.rollupClient, nil)
-	h.ethClient.On("BlockByNumber", mock.Anything, big.NewInt(int64(rpc.FinalizedBlockNumber))).Return(newBlockWithNumber(1), nil)
+	h.finalityPoller.On("LastFinalized").Return(uint64(1))
 	h.endpointProv.On("EthClient", mock.Anything).Return(h.ethClient, nil)
 	h.ethClient.On("BlockByNumber", mock.Anything, new(big.Int).SetUint64(100)).Return(block, nil)
 	h.rollupClient.On("SyncStatus", mock.Anything).Return(syncStatus, nil)
 	h.streamer.On("Refresh", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	h.streamer.On("HasNext", mock.Anything).Return(true)
-	h.streamer.On("Peek", mock.Anything).Return(batch)
+	h.streamer.On("HasNext", mock.Anything).Return(true).Once()
+	h.streamer.On("HasNext", mock.Anything).Return(false)
+	h.streamer.On("Peek", mock.Anything).Return(batch).Once()
+	h.streamer.On("Update", mock.Anything).Return(nil)
+	h.streamer.On("Peek", mock.Anything).Return(nil)
 	h.streamer.On("GetFallbackHotshotPos").Return(uint64(2))
 	h.streamer.On("Next", mock.Anything).Return(batch)
 
@@ -330,7 +328,7 @@ func TestVerify(t *testing.T) {
 }
 
 func TestStoresEthereumFinalizedBlockWhenAhead(t *testing.T) {
-	assertEthereumFinalizedBlockStored := func(t *testing.T, h *testHarness, capturer *logCapturer, expectedFallbackPos uint64, expectNextCalled bool) {
+	assertEthereumFinalizedBlockStored := func(t *testing.T, h *testHarness, capturer *logCapturer, expectedFallbackPos uint64) {
 		t.Helper()
 
 		require.Contains(t, capturer.errorMessages, "ethereum finalized block is ahead of espresso finalized block")
@@ -338,12 +336,6 @@ func TestStoresEthereumFinalizedBlockWhenAhead(t *testing.T) {
 		state := h.store.GetState()
 		require.Equal(t, expectedFallbackPos, state.FallbackHotshotHeight)
 		require.Equal(t, uint64(105), state.L2BlockNumber)
-
-		if expectNextCalled {
-			h.streamer.AssertCalled(t, "Next", mock.Anything)
-		} else {
-			h.streamer.AssertNotCalled(t, "Next", mock.Anything)
-		}
 	}
 
 	t.Run("verify and advance with no batches", func(t *testing.T) {
@@ -361,7 +353,7 @@ func TestStoresEthereumFinalizedBlockWhenAhead(t *testing.T) {
 		h.streamer.On("GetFallbackHotshotPos").Return(uint64(1))
 		h.endpointProv.On("EthClient", mock.Anything).Return(h.ethClient, nil)
 		h.endpointProv.On("RollupClient", mock.Anything).Return(h.rollupClient, nil)
-		h.ethClient.On("BlockByNumber", mock.Anything, big.NewInt(int64(rpc.FinalizedBlockNumber))).Return(newBlockWithNumber(105), nil)
+		h.finalityPoller.On("LastFinalized").Return(uint64(105))
 		h.rollupClient.On("SyncStatus", mock.Anything).Return(syncStatus, nil)
 		h.streamer.On("Refresh", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		h.streamer.On("HasNext", mock.Anything).Return(false)
@@ -370,21 +362,8 @@ func TestStoresEthereumFinalizedBlockWhenAhead(t *testing.T) {
 
 		h.verifier.verifyAndAdvance(ctx)
 
-		assertEthereumFinalizedBlockStored(t, h, capturer, 1, false)
-	})
-
-	t.Run("advance streamer and store state", func(t *testing.T) {
-		capturer := &logCapturer{}
-		h := newTestHarness(t, log.NewLogger(capturer))
-		ctx := context.Background()
-
-		h.streamer.On("GetFallbackHotshotPos").Return(uint64(2))
-		h.streamer.On("Next", mock.Anything).Return(nil)
-
-		err := h.verifier.advanceStreamerAndEspressoState(ctx, 100, 105)
-		require.NoError(t, err)
-
-		assertEthereumFinalizedBlockStored(t, h, capturer, 2, true)
+		assertEthereumFinalizedBlockStored(t, h, capturer, 1)
+		h.streamer.AssertNotCalled(t, "Next", mock.Anything)
 	})
 }
 
@@ -403,7 +382,7 @@ func TestProxyUsesEthereumFinalizedBlockWhenEspressoStopsAdvancing(t *testing.T)
 	h.streamer.On("GetFallbackHotshotPos").Return(uint64(1))
 	h.endpointProv.On("EthClient", mock.Anything).Return(h.ethClient, nil)
 	h.endpointProv.On("RollupClient", mock.Anything).Return(h.rollupClient, nil)
-	h.ethClient.On("BlockByNumber", mock.Anything, big.NewInt(int64(rpc.FinalizedBlockNumber))).Return(newBlockWithNumber(105), nil)
+	h.finalityPoller.On("LastFinalized").Return(uint64(105))
 	h.rollupClient.On("SyncStatus", mock.Anything).Return(syncStatus, nil)
 	h.streamer.On("Refresh", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	h.streamer.On("HasNext", mock.Anything).Return(false)

@@ -42,10 +42,24 @@ func TestDurationUnmarshalJSON(t *testing.T) {
 	})
 
 	t.Run("full config json", func(t *testing.T) {
-		raw := []byte(`{"verification_interval": "250ms"}`)
+		raw := []byte(`{"verification_interval": "250ms", "finality_poll_interval": "500ms"}`)
 		var cfg Config
 		require.NoError(t, json.Unmarshal(raw, &cfg))
 		require.Equal(t, 250*time.Millisecond, time.Duration(cfg.VerificationInterval))
+		require.Equal(t, 500*time.Millisecond, time.Duration(cfg.FinalityPollInterval))
+	})
+
+	t.Run("finality poll interval defaults to 1s when unset", func(t *testing.T) {
+		raw := []byte(`{"verification_interval": "250ms"}`)
+		var cfg Config
+		require.NoError(t, json.Unmarshal(raw, &cfg))
+		require.Equal(t, time.Duration(0), time.Duration(cfg.FinalityPollInterval))
+
+		// zero flows into NewFinalityPoller which substitutes the default
+		opCfg := cfg.toOPVerifierConfig()
+		require.Equal(t, time.Duration(0), opCfg.FinalityPollInterval)
+		nitroCfg := cfg.toNitroVerifierConfig()
+		require.Equal(t, time.Duration(0), nitroCfg.FinalityPollInterval)
 	})
 }
 

@@ -110,13 +110,6 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Get the finalized block number to initialize the store
-	client, err := ethclient.DialContext(ctx, cfg.FullNodeExecutionRPC)
-	if err != nil {
-		logger.Crit("failed to dial full node execution RPC", "url", cfg.FullNodeExecutionRPC, "error", err)
-	}
-	defer client.Close()
-
 	espressoStore, err := store.NewEspressoStore(cfg.StoreFilePath, cfg.InitialHotshotHeight)
 	if err != nil {
 		logger.Crit("failed to create espresso store", "error", err)

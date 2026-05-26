@@ -59,7 +59,8 @@ type Config struct {
 	EspressoTag          string      `json:"espresso_tag"`
 	StoreFilePath        string      `json:"store_file_path"`
 	QueryServiceURL      string      `json:"query_service_url"`
-	VerificationInterval Duration    `json:"verification_interval"`
+	VerificationInterval  Duration    `json:"verification_interval"`
+	FinalityPollInterval  Duration    `json:"finality_poll_interval"`
 	InitialHotshotHeight uint64      `json:"initial_hotshot_height"`
 	MaxBatchSize         int         `json:"max_batch_size"`
 	MaxRequestBodySize   int         `json:"max_request_body_size"`
@@ -116,6 +117,7 @@ func parseConfig() *Config {
 
 	pflag.StringVar(&cfg.QueryServiceURL, "query-service-url", cfg.QueryServiceURL, "Espresso query service URL")
 	pflag.DurationVar((*time.Duration)(&cfg.VerificationInterval), "verification-interval", time.Duration(cfg.VerificationInterval), "verification interval")
+	pflag.DurationVar((*time.Duration)(&cfg.FinalityPollInterval), "finality-poll-interval", time.Duration(cfg.FinalityPollInterval), "finality poll interval (default 1s)")
 
 	pflag.StringVar(&cfg.Mode, "mode", cfg.Mode, "verifier mode: op or nitro")
 	pflag.StringVar(&cfg.OPConfig.FullNodeConsensusRPC, "op.full-node-consensus-rpc", cfg.OPConfig.FullNodeConsensusRPC, "OP full node consensus RPC URL")
@@ -245,6 +247,7 @@ func (c *Config) toOPVerifierConfig() *opVerifier.OPEspressoBatchVerifierConfig 
 		BatcherAddress:            c.OPConfig.BatcherAddress,
 		BatchAuthenticatorAddress: c.OPConfig.BatchAuthenticatorAddress,
 		TrackBatchLatency:         c.TrackBatchLatency,
+		FinalityPollInterval:      time.Duration(c.FinalityPollInterval),
 	}
 }
 
@@ -253,6 +256,7 @@ func (c *Config) toNitroVerifierConfig() *nitroVerifier.NitroEspressoBatchVerifi
 		FeedURL:               c.NitroConfig.FeedURL,
 		FullNodeExecutionRPC:  c.FullNodeExecutionRPC,
 		VerificationInterval:  time.Duration(c.VerificationInterval),
+		FinalityPollInterval:  time.Duration(c.FinalityPollInterval),
 		QueryServiceURL:       c.QueryServiceURL,
 		Namespace:             c.NitroConfig.Namespace,
 		InitialHotshotBlock:   c.NitroConfig.InitialHotshotBlock,
