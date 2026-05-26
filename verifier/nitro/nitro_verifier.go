@@ -272,7 +272,7 @@ func (v *NitroEspressoBatchVerifier) verifyDelayedMessage(ctx context.Context, e
 	if !bytes.Equal(delayedMsg, feedMsg.Message.L2msg) {
 		return fmt.Errorf("delayed message L2msg mismatch for messageIndex=%d", messageIndex)
 	}
-	log.Info("delayed message verified", "msg_pos", pos, "l1_block_num", l1BlockNumber, "delayed_msg_num", espressoMsg.DelayedMessagesRead)
+	v.logger.Info("delayed message verified", "msg_pos", pos, "l1_block_num", l1BlockNumber, "delayed_msg_num", espressoMsg.DelayedMessagesRead)
 	return nil
 }
 
