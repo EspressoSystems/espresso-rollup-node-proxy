@@ -32,6 +32,7 @@ type OPEspressoBatchVerifierConfig struct {
 	FullNodeExecutionRPC      string        `json:"full_node_execution_rpc"`
 	FullNodeConsensusRPC      string        `json:"full_node_consensus_rpc"`
 	VerificationInterval      time.Duration `json:"verification_interval"`
+	FinalityPollInterval      time.Duration `json:"finality_poll_interval"`
 	QueryServiceURL           string        `json:"query_service_url"`
 	BatcherAddress            string        `json:"batcher_address"`
 	BatchAuthenticatorAddress string        `json:"batch_authenticator_address"`
@@ -141,6 +142,7 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 		finalityPoller: sharedVerifier.NewFinalityPoller(
 			l2Client,
 			logger,
+			opVerifierConfig.FinalityPollInterval,
 		),
 	}
 }
@@ -176,17 +178,12 @@ func (v *OPEspressoBatchVerifier) run(ctx context.Context) {
 	}
 }
 
-// verifyAndAdvance drains all available verified batches from the streamer in a tight loop,
-// calling UpdateIfGreater once at the end to minimize disk writes.
-func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
-	v.logger.Debug("Starting OP batch verification")
-
+func (v *OPEspressoBatchVerifier) drainAndVerifyBatches(ctx context.Context) *derivation.EspressoBatch {
 	var verifiedBatch *derivation.EspressoBatch
-
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		default:
 		}
 
@@ -223,7 +220,17 @@ func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 		verifiedBatch = espressoBatch
 		v.logger.Info("Successfully verified OP batch", "batch_number", batchNumber)
 	}
+	return verifiedBatch
+}
 
+// verifyAndAdvance call drainAndVerifyBatches to drain all available verified batches from the streamer in a tight loop,
+// then calls UpdateIfGreater once at the end to minimize disk writes.
+func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
+	v.logger.Debug("Starting OP batch verification")
+	verifiedBatch := v.drainAndVerifyBatches(ctx)
+	if ctx.Err() != nil {
+		return
+	}
 	ethFinalizedBlockNumber := v.finalityPoller.LastFinalized()
 	if verifiedBatch == nil || verifiedBatch.Number() < ethFinalizedBlockNumber {
 		if err := v.syncEspressoStateWithEthereumFinality(ethFinalizedBlockNumber); err != nil {

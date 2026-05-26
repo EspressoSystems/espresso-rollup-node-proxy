@@ -22,20 +22,27 @@ type FinalityPollerInterface interface {
 }
 
 type FinalityPoller struct {
-	client *ethclient.Client
-	logger log.Logger
-	last   atomic.Uint64
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	client   *ethclient.Client
+	logger   log.Logger
+	interval time.Duration
+	last     atomic.Uint64
+	running  atomic.Bool
+	cancel   context.CancelFunc
+	wg       sync.WaitGroup
 }
 
 func NewFinalityPoller(
 	client *ethclient.Client,
 	logger log.Logger,
+	interval time.Duration,
 ) *FinalityPoller {
+	if interval == 0 {
+		interval = DefaultFinalityPollInterval
+	}
 	return &FinalityPoller{
-		client: client,
-		logger: logger,
+		client:   client,
+		logger:   logger,
+		interval: interval,
 	}
 }
 
@@ -44,12 +51,21 @@ func (p *FinalityPoller) LastFinalized() uint64 {
 }
 
 func (p *FinalityPoller) Start(ctx context.Context) {
+	if !p.running.CompareAndSwap(false, true) {
+		p.logger.Warn("Finality poller is already running or starting")
+		return
+	}
 	ctx, p.cancel = context.WithCancel(ctx)
 	p.wg.Add(1)
 	go p.run(ctx)
 }
 
 func (p *FinalityPoller) Stop() {
+	if !p.running.CompareAndSwap(true, false) {
+		p.logger.Warn("Finality poller is not running or is already stopping")
+		return
+	}
+	p.logger.Info("Stopping Finality Poller")
 	if p.cancel != nil {
 		p.cancel()
 	}
@@ -59,7 +75,7 @@ func (p *FinalityPoller) Stop() {
 
 func (p *FinalityPoller) run(ctx context.Context) {
 	defer p.wg.Done()
-	ticker := time.NewTicker(DefaultFinalityPollInterval)
+	ticker := time.NewTicker(p.interval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -75,7 +91,7 @@ func (p *FinalityPoller) run(ctx context.Context) {
 				p.logger.Error("failed to fetch finalized block", "error", fmt.Errorf("header is nil"))
 				continue
 			}
-			p.logger.Debug("finality poller updating", "num", header.Number.Uint64())
+			p.logger.Debug("finality poller updating", "block_num", header.Number.Uint64())
 			p.last.Store(header.Number.Uint64())
 		}
 	}

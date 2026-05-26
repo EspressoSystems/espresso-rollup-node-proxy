@@ -33,6 +33,7 @@ type NitroEspressoBatchVerifierConfig struct {
 	FeedURL               string                 `json:"feed_url"`
 	FullNodeExecutionRPC  string                 `json:"full_node_execution_rpc"`
 	VerificationInterval  time.Duration          `json:"verification_interval"`
+	FinalityPollInterval  time.Duration          `json:"finality_poll_interval"`
 	QueryServiceURL       string                 `json:"query_service_url"`
 	Namespace             uint64                 `json:"namespace"`
 	InitialHotshotBlock   uint64                 `json:"initial_hotshot_block"`
@@ -140,6 +141,7 @@ func NewNitroEspressoBatchVerifier(
 		finalityPoller: sharedVerifier.NewFinalityPoller(
 			l2Client,
 			logger,
+			config.FinalityPollInterval,
 		),
 	}
 }
@@ -186,17 +188,13 @@ func (v *NitroEspressoBatchVerifier) run(ctx context.Context) {
 	}
 }
 
-// verifyAndAdvance drains all available verified messages from the streamer in a tight loop,
-// calling UpdateIfGreater once at the end to minimize disk writes.
-func (v *NitroEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
-	v.logger.Debug("Starting Nitro batch verification")
-
+func (v *NitroEspressoBatchVerifier) drainAndVerifyMessages(ctx context.Context) *nitroStreamer.MessageWithMetadataAndPos {
 	var verifiedMsg *nitroStreamer.MessageWithMetadataAndPos
 
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		default:
 		}
 
@@ -224,7 +222,17 @@ func (v *NitroEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 		verifiedMsg = espressoMsg
 		v.logger.Info("Successfully verified nitro message", "batch_number", verifiedMsg.Pos)
 	}
+	return verifiedMsg
+}
 
+// verifyAndAdvance call drainAndVerifyMessages to drain all available verified messages from the streamer in a tight loop,
+// then calls UpdateIfGreater once at the end to minimize disk writes.
+func (v *NitroEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
+	v.logger.Debug("Starting Nitro batch verification")
+	verifiedMsg := v.drainAndVerifyMessages(ctx)
+	if ctx.Err() != nil {
+		return
+	}
 	nitroFinalizedBlock := v.finalityPoller.LastFinalized()
 	if verifiedMsg == nil || verifiedMsg.Pos < nitroFinalizedBlock {
 		if err := v.syncEspressoStateWithNitroFinality(nitroFinalizedBlock); err != nil {

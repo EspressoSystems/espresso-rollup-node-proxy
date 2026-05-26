@@ -201,6 +201,7 @@ Clients should point at the proxy (`http://localhost:8080`) rather than directly
 | `--store-file-path` | `store_file_path` | `espresso_store.json` | Path to the state persistence file |
 | `--query-service-url` | `query_service_url` | — | Espresso query service URL (required) |
 | `--verification-interval` | `verification_interval` | `10ms` | How often the verifier polls for new confirmed batches |
+| `--finality-poll-interval` | `finality_poll_interval` | `1s` | How often the finality poller queries the L2 node for the latest finalized block |
 | `--initial-hotshot-height` | `initial_hotshot_height` | `0` | HotShot block height to start streaming from on first run |
 | `--max-batch-size` | `max_batch_size` | `1000` | Maximum requests in a JSON-RPC batch (0 = unlimited) |
 | `--max-request-body-size` | `max_request_body_size` | `5242880` | Maximum request body size in bytes (0 = unlimited) |
