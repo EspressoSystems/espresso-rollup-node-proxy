@@ -247,6 +247,8 @@ func (v *NitroEspressoBatchVerifier) verifyMessage(ctx context.Context, espresso
 }
 
 func (v *NitroEspressoBatchVerifier) verifyDelayedMessage(ctx context.Context, espressoMsg *nitroStreamer.MessageWithMetadata, feedMsg *nitroStreamer.MessageWithMetadata, pos uint64) error {
+	// Espresso does not have l2 message data for delayed messages, Espresso just confirms a delayed message was processed.
+	// So before advancing the espresso tag, ensure we verify the feed and what is on the L1 match.
 	if espressoMsg.DelayedMessagesRead != feedMsg.DelayedMessagesRead {
 		return fmt.Errorf("delayed message DelayedMessagesRead mismatch: espresso=%d feed=%d",
 			espressoMsg.DelayedMessagesRead, feedMsg.DelayedMessagesRead)
@@ -254,6 +256,8 @@ func (v *NitroEspressoBatchVerifier) verifyDelayedMessage(ctx context.Context, e
 	if espressoMsg.DelayedMessagesRead == 0 {
 		return fmt.Errorf("delayed message has DelayedMessagesRead=0, cannot determine message index")
 	}
+
+	// Get the delayed message data from L1 and verify it matches the feed.
 	l1BlockNumber := espressoMsg.Message.Header.BlockNumber
 	messageIndex := espressoMsg.DelayedMessagesRead - 1
 	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
