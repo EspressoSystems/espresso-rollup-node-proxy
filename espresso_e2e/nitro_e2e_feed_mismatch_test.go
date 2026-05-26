@@ -16,7 +16,7 @@ import (
 )
 
 // newMockFeedProxy starts a websocket proxy that sits between the verifier's feed client
-// and the real Nitro feed. Every BroadcastFeedMessage is passed through tamper before
+// and the real Nitro feed. Every BroadcastFeedMessage is passed through modifyFunc before
 // being forwarded, allowing the test to inject bad data into the feed.
 func newMockFeedProxy(t *testing.T, upstream string, modifyFunc func(*feedclient.BroadcastFeedMessage)) (string, func()) {
 	t.Helper()
@@ -77,11 +77,11 @@ func newMockFeedProxy(t *testing.T, upstream string, modifyFunc func(*feedclient
 						modifyFunc(msg)
 					}
 				}
-				tamperedMessage, err := json.Marshal(broadcast)
+				modifiedMessage, err := json.Marshal(broadcast)
 				if err != nil {
 					t.Logf("error modifying broadcast message: %v", err)
 				} else {
-					maybeModifiedMessage = tamperedMessage
+					maybeModifiedMessage = modifiedMessage
 				}
 			}
 

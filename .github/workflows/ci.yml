@@ -52,7 +52,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: E2E Tests
-        run: just e2e -v -run TestOPE2ERollupEspressoProxy$
+        run: just e2e -v -run ^TestOPE2ERollupEspressoProxy$
 
   e2e-op-reorg:
     runs-on: ubuntu-latest
@@ -75,7 +75,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: E2E Tests
-        run: just e2e -v -run TestOPE2ERollupEspressoProxyReorg
+        run: just e2e -v -run ^TestOPE2ERollupEspressoProxyReorg$
   
   e2e-op-l2-reorg:
     runs-on: ubuntu-latest
@@ -98,7 +98,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: E2E Tests
-        run: just e2e -v -run TestOPE2EL2Reorg
+        run: just e2e -v -run ^TestOPE2EL2Reorg$
 
   e2e-proxyd:
     runs-on: ubuntu-latest
@@ -121,7 +121,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: E2E Tests
-        run: just e2e -v -run TestOPE2EProxyd
+        run: just e2e -v -run ^TestOPE2EProxyd$
 
   e2e-nitro:
     runs-on: ubuntu-latest
@@ -144,7 +144,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: E2E Tests
-        run: just e2e -v -run TestNitroE2ERollupEspressoProxy$
+        run: just e2e -v -run ^TestNitroE2ERollupEspressoProxy$
 
   e2e-nitro-l1-reorg:
     runs-on: ubuntu-latest
@@ -167,7 +167,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: E2E Tests
-        run: just e2e -v -run TestNitroE2ERollupEspressoProxyReorg$
+        run: just e2e -v -run ^TestNitroE2ERollupEspressoProxyReorg$
   e2e-nitro-l2-reorg:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -189,7 +189,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: E2E Tests
-        run: just e2e -v -run TestNitroE2EL2Reorg$
+        run: just e2e -v -run ^TestNitroE2EL2Reorg$
 
   e2e-nitro-feed-mismatch:
     runs-on: ubuntu-latest
@@ -212,4 +212,4 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: E2E Tests
-        run: just e2e -v -run TestNitroE2EFeedMismatch$
+        run: just e2e -v -run ^TestNitroE2EFeedMismatch$

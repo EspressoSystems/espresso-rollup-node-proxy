@@ -175,7 +175,7 @@ func TestNitroE2ERollupEspressoProxy(t *testing.T) {
 		initialStateFile := t.TempDir() + "/initial-proxy-state.json"
 		initialStore, err := espressostore.NewEspressoStore(initialStateFile, initialHotshotHeight)
 		require.NoError(t, err)
-		err = initialStore.Update(finalizedL2Block, initialHotshotHeight)
+		_, err = initialStore.UpdateIfGreater(finalizedL2Block, initialHotshotHeight)
 		require.NoError(t, err)
 
 		proxyURL2, shutdownProxy2 := startTestProxy(ctx, t, nitroFullNodeURL, initialStore, espressoTag)
