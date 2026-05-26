@@ -90,6 +90,7 @@ const (
 	nitroFullNodeFeedURL = "ws://127.0.0.1:9643"
 	nitroNamespace       = uint64(412346)
 	nitroBatchPoster     = "0x3f1Eae7D46d88F08fc2F8ed27FCb2AB183EB2d0E"
+	nitroBridgeAddress   = "0xcfe53426950562347a6D2B90bE99D98167eac32d"
 )
 
 func startOpVerifier(ctx context.Context, t *testing.T, logger log.Logger, store *espressostore.EspressoStore) *verifier.OPEspressoBatchVerifier {
@@ -124,10 +125,12 @@ func startNitroVerifierWithLogger(ctx context.Context, t *testing.T, logger log.
 		&nitroVerifier.NitroEspressoBatchVerifierConfig{
 			FeedURL:              feedUrl,
 			FullNodeExecutionRPC: nitroFullNodeURL,
+			L1RPC:                nitroL1URL,
 			VerificationInterval: 250 * time.Millisecond,
 			QueryServiceURL:      nitroEspressoURL,
 			Namespace:            nitroNamespace,
 			InitialHotshotBlock:  0,
+			BridgeAddress:        nitroBridgeAddress,
 			ValidBatcherAddresses: []nitroVerifier.BatcherAddressConfig{
 				{Address: nitroBatchPoster, From: 0, To: math.MaxUint64},
 			},

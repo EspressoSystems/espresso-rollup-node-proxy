@@ -87,7 +87,7 @@ func fetchBridgeEvent(ctx context.Context, l1Client *ethclient.Client, bridgeAdd
 	if err != nil {
 		return nil, fmt.Errorf("failed to filter Bridge MessageDelivered logs: %w", err)
 	}
-	defer messageDeliveredIter.Close()
+	defer func() { _ = messageDeliveredIter.Close() }()
 	if !messageDeliveredIter.Next() {
 		return nil, fmt.Errorf("no MessageDelivered event for messageIndex=%d at L1 block %d", messageIndex, l1BlockNumber)
 	}
