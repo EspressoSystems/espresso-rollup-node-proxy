@@ -65,7 +65,7 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 		t.Log("L1 reorg triggered successfully")
 
 		t.Log("Monitoring proxy block number for backwards movement during and after reorg")
-		previous := monitorStoredBlockProgress(t, espressoStore, blockBeforeReorg, 1*time.Minute, func(uint64) bool {
+		previous := monitorStoredBlockProgress(t, espressoStore, blockBeforeReorg, 1*time.Minute, opGethFullNode, func(uint64) bool {
 			return false
 		})
 
@@ -126,7 +126,7 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 		t.Log("Monitoring proxy block number for backwards movement during and after reorg")
 		now := time.Now()
 		stop := true
-		monitorStoredBlockProgress(t, espressoStore, blockBeforeFork, 5*time.Minute, func(current uint64) bool {
+		monitorStoredBlockProgress(t, espressoStore, blockBeforeFork, 5*time.Minute, opGethFullNode, func(current uint64) bool {
 			if (time.Since(now) >= 10*time.Second || current >= blockBeforeFork+10) && stop {
 				resp, err = http.Post(p2pAttackUrl+"/stop-fork", "application/json", nil)
 				require.NoError(t, err)
