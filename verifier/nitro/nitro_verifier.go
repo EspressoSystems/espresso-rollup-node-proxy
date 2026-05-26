@@ -10,6 +10,7 @@ import (
 	"time"
 
 	sharedVerifier "proxy/verifier"
+	delayedmessagefetcher "proxy/verifier/nitro/delayed_message_fetcher"
 	feedclient "proxy/verifier/nitro/feed_client"
 
 	espressoStore "proxy/store"
@@ -17,6 +18,7 @@ import (
 	espressoClient "github.com/EspressoSystems/espresso-network/sdks/go/client"
 	nitroStreamer "github.com/EspressoSystems/espresso-streamers/nitro"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
@@ -32,6 +34,8 @@ type BatcherAddressConfig struct {
 type NitroEspressoBatchVerifierConfig struct {
 	FeedURL               string                 `json:"feed_url"`
 	FullNodeExecutionRPC  string                 `json:"full_node_execution_rpc"`
+	L1RPC                 string                 `json:"l1_rpc"`
+	BridgeAddress         string                 `json:"bridge_address"`
 	VerificationInterval  time.Duration          `json:"verification_interval"`
 	FinalityPollInterval  time.Duration          `json:"finality_poll_interval"`
 	QueryServiceURL       string                 `json:"query_service_url"`
@@ -50,6 +54,8 @@ type NitroEspressoBatchVerifier struct {
 	streamer       nitroStreamer.EspressoStreamerInterface
 	feedClient     *feedclient.FeedClient
 	l2Client       *ethclient.Client
+	l1Client       *ethclient.Client
+	bridgeAddress  common.Address
 	espressoStore  *espressoStore.EspressoStore
 	config         *NitroEspressoBatchVerifierConfig
 	finalityPoller sharedVerifier.FinalityPollerInterface
@@ -73,6 +79,12 @@ func NewNitroEspressoBatchVerifier(
 	client := espressoClient.NewClient(config.QueryServiceURL)
 	if client == nil {
 		logger.Crit("failed to create Espresso client")
+		return nil
+	}
+
+	l1Client, err := ethclient.DialContext(ctx, config.L1RPC)
+	if err != nil {
+		logger.Crit("failed to dial Nitro L1 RPC", "url", config.L1RPC, "error", err)
 		return nil
 	}
 
@@ -135,6 +147,8 @@ func NewNitroEspressoBatchVerifier(
 		streamer:      streamer,
 		feedClient:    feed,
 		l2Client:      l2Client,
+		l1Client:      l1Client,
+		bridgeAddress: common.HexToAddress(config.BridgeAddress),
 		espressoStore: store,
 		config:        config,
 		logger:        logger,
@@ -210,7 +224,7 @@ func (v *NitroEspressoBatchVerifier) drainAndVerifyMessages(ctx context.Context)
 			break
 		}
 
-		if err := ensureMessagesMatch(&espressoMsg.MessageWithMeta, &feedMsg.Message); err != nil {
+		if err := v.verifyMessage(ctx, espressoMsg, feedMsg); err != nil {
 			v.logger.Error("message mismatch between espresso and nitro feed",
 				"msg_pos", espressoMsg.Pos,
 				"error", err,
@@ -220,9 +234,46 @@ func (v *NitroEspressoBatchVerifier) drainAndVerifyMessages(ctx context.Context)
 
 		v.advance()
 		verifiedMsg = espressoMsg
-		v.logger.Info("Successfully verified nitro message", "batch_number", verifiedMsg.Pos)
+		v.logger.Info("successfully verified nitro message", "msg_pos", verifiedMsg.Pos)
 	}
 	return verifiedMsg
+}
+
+func (v *NitroEspressoBatchVerifier) verifyMessage(ctx context.Context, espressoMsg *nitroStreamer.MessageWithMetadataAndPos, feedMsg *feedclient.BroadcastFeedMessage) error {
+	if len(espressoMsg.MessageWithMeta.Message.L2msg) == 0 {
+		return v.verifyDelayedMessage(ctx, &espressoMsg.MessageWithMeta, &feedMsg.Message, espressoMsg.Pos)
+	}
+	return ensureMessagesMatch(&espressoMsg.MessageWithMeta, &feedMsg.Message)
+}
+
+func (v *NitroEspressoBatchVerifier) verifyDelayedMessage(ctx context.Context, espressoMsg *nitroStreamer.MessageWithMetadata, feedMsg *nitroStreamer.MessageWithMetadata, pos uint64) error {
+	if espressoMsg.DelayedMessagesRead != feedMsg.DelayedMessagesRead {
+		return fmt.Errorf("delayed message DelayedMessagesRead mismatch: espresso=%d feed=%d",
+			espressoMsg.DelayedMessagesRead, feedMsg.DelayedMessagesRead)
+	}
+	if espressoMsg.DelayedMessagesRead == 0 {
+		return fmt.Errorf("delayed message has DelayedMessagesRead=0, cannot determine message index")
+	}
+	l1BlockNumber := espressoMsg.Message.Header.BlockNumber
+	messageIndex := espressoMsg.DelayedMessagesRead - 1
+	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	delayedMsg, err := delayedmessagefetcher.FetchDelayedMessageFromL1(
+		timeoutCtx,
+		v.l1Client,
+		v.bridgeAddress,
+		l1BlockNumber,
+		messageIndex,
+		v.logger,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to fetch delayed message from L1: %w", err)
+	}
+	if !bytes.Equal(delayedMsg, feedMsg.Message.L2msg) {
+		return fmt.Errorf("delayed message L2msg mismatch for messageIndex=%d", messageIndex)
+	}
+	log.Info("delayed message verified", "msg_pos", pos, "l1_block_num", l1BlockNumber, "delayed_msg_num", espressoMsg.DelayedMessagesRead)
+	return nil
 }
 
 // verifyAndAdvance call drainAndVerifyMessages to drain all available verified messages from the streamer in a tight loop,
@@ -257,7 +308,7 @@ func (v *NitroEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 		v.advanceTo(state.L2BlockNumber + 1)
 		return
 	}
-	v.logger.Info("successfully verified and advanced Nitro messages",
+	v.logger.Info("successfully verified and advanced nitro messages",
 		"msg_pos", verifiedMsg.Pos,
 		"hotshot_height", verifiedMsg.HotshotHeight,
 	)
@@ -332,5 +383,6 @@ func (v *NitroEspressoBatchVerifier) Stop() {
 	v.runWg.Wait()
 	v.finalityPoller.Stop()
 	v.streamer.StopAndWait()
+	v.l1Client.Close()
 	v.logger.Info("Nitro verifier stopped")
 }

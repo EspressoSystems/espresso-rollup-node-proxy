@@ -16,6 +16,10 @@ e2e-op *args:
 e2e-nitro *args:
     go test -timeout 15m -run TestNitroE2E ./espresso_e2e/... {{ args }}
 
+generate-abi:
+    abigen --abi verifier/nitro/abi/sources/bridge_abi.json --pkg nitroabi --type Bridge --out verifier/nitro/abi/bridge_contract_gen.go
+    abigen --abi verifier/nitro/abi/sources/inbox_abi.json  --pkg nitroabi --type Inbox  --out verifier/nitro/abi/inbox_contract_gen.go
+
 fmt:
     gofmt -w .
 

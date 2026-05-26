@@ -64,7 +64,7 @@ func recoveryMiddleware(next http.Handler, logger log.Logger) http.Handler {
 }
 
 func newOPVerifier(ctx context.Context, logger log.Logger, cfg *Config, espressoStore *store.EspressoStore) batchVerifier {
-	l1Client, err := ethclient.DialContext(ctx, cfg.OPConfig.L1RPC)
+	l1Client, err := ethclient.DialContext(ctx, cfg.L1RPC)
 	if err != nil {
 		logger.Crit("failed to create L1 client", "error", err)
 	}

@@ -66,6 +66,7 @@ func TestDurationUnmarshalJSON(t *testing.T) {
 func TestConfigValidate(t *testing.T) {
 	valid := Config{
 		FullNodeExecutionRPC: "http://localhost:8545",
+		L1RPC:                "ws://localhost:8546",
 		Mode:                 ModeOP,
 		ListenAddr:           ":8080",
 		EspressoTag:          "espresso",
@@ -74,7 +75,6 @@ func TestConfigValidate(t *testing.T) {
 		QueryServiceURL:      "https://query.espresso.network",
 		VerificationInterval: Duration(1 * time.Millisecond),
 		OPConfig: OPConfig{
-			L1RPC:                     "ws://localhost:8546",
 			FullNodeConsensusRPC:      "http://localhost:9545",
 			LightClientAddress:        "0x1234567890abcdef1234567890abcdef12345678",
 			BatcherAddress:            "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
@@ -87,7 +87,7 @@ func TestConfigValidate(t *testing.T) {
 	err := opEmpty.validate()
 	require.Error(t, err)
 	for _, field := range []string{
-		"full-node-execution-rpc", "op.l1-rpc",
+		"full-node-execution-rpc", "l1-rpc",
 		"op.full-node-consensus-rpc", "query-service-url",
 		"op.light-client-address", "op.batcher-address", "op.batch-authenticator-address",
 		"listen-addr", "espresso-tag", "store-file-path",
@@ -124,6 +124,7 @@ func TestConfigValidate(t *testing.T) {
 
 	validNitro := Config{
 		FullNodeExecutionRPC: "http://localhost:8547",
+		L1RPC:                "ws://localhost:8546",
 		Mode:                 ModeNitro,
 		ListenAddr:           ":8080",
 		EspressoTag:          "espresso",
@@ -132,8 +133,9 @@ func TestConfigValidate(t *testing.T) {
 		QueryServiceURL:      "https://query.espresso.network",
 		VerificationInterval: Duration(1 * time.Millisecond),
 		NitroConfig: NitroConfig{
-			FeedURL:   "ws://localhost:9642",
-			Namespace: 412346,
+			FeedURL:       "ws://localhost:9642",
+			BridgeAddress: "0x3f1Eae7D46d88F08fc2F8ed27FCb2AB183EB2d0E",
+			Namespace:     412346,
 			ValidBatcherAddresses: []nitroVerifier.BatcherAddressConfig{
 				{Address: "0x3f1Eae7D46d88F08fc2F8ed27FCb2AB183EB2d0E"},
 			},
@@ -145,8 +147,8 @@ func TestConfigValidate(t *testing.T) {
 	err = nitroEmpty.validate()
 	require.Error(t, err)
 	for _, field := range []string{
-		"full-node-execution-rpc", "nitro.feed-url",
-		"nitro.namespace", "nitro.valid-batcher-addresses",
+		"full-node-execution-rpc", "l1-rpc", "nitro.feed-url",
+		"nitro.bridge-address", "nitro.namespace", "nitro.valid-batcher-addresses",
 		"query-service-url", "listen-addr", "espresso-tag", "store-file-path",
 	} {
 		require.Contains(t, err.Error(), field)

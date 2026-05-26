@@ -354,7 +354,7 @@ services:
       - --full-node-execution-rpc=http://op-geth-fullnode:${OP_HTTP_PORT}
       - --mode=op
       - --op.full-node-consensus-rpc=http://op-node-fullnode:9548
-      - --op.l1-rpc=http://l1-anvil:${L1_HTTP_PORT}
+      - --l1-rpc=http://l1-anvil:${L1_HTTP_PORT}
       - --query-service-url=http://espresso-dev-node:${ESPRESSO_SEQUENCER_API_PORT}
       - --op.light-client-address=${ESPRESSO_SEQUENCER_LIGHT_CLIENT_PROXY_ADDRESS}
       - --op.batcher-address=${TEE_BATCHER_ADDRESS}
@@ -378,7 +378,7 @@ services:
       - --full-node-execution-rpc=http://op-geth-fullnode-2:${OP_HTTP_PORT}
       - --mode=op
       - --op.full-node-consensus-rpc=http://op-node-fullnode-2:9548
-      - --op.l1-rpc=http://l1-anvil:${L1_HTTP_PORT}
+      - --l1-rpc=http://l1-anvil:${L1_HTTP_PORT}
       - --query-service-url=http://espresso-dev-node:${ESPRESSO_SEQUENCER_API_PORT}
       - --op.light-client-address=${ESPRESSO_SEQUENCER_LIGHT_CLIENT_PROXY_ADDRESS}
       - --op.batcher-address=${TEE_BATCHER_ADDRESS}
@@ -402,7 +402,7 @@ services:
       - --full-node-execution-rpc=http://op-geth-fullnode-3:${OP_HTTP_PORT}
       - --mode=op
       - --op.full-node-consensus-rpc=http://op-node-fullnode-3:9548
-      - --op.l1-rpc=http://l1-anvil:${L1_HTTP_PORT}
+      - --l1-rpc=http://l1-anvil:${L1_HTTP_PORT}
       - --query-service-url=http://espresso-dev-node:${ESPRESSO_SEQUENCER_API_PORT}
       - --op.light-client-address=${ESPRESSO_SEQUENCER_LIGHT_CLIENT_PROXY_ADDRESS}
       - --op.batcher-address=${TEE_BATCHER_ADDRESS}
