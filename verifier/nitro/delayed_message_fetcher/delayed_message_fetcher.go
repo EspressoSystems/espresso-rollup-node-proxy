@@ -31,7 +31,7 @@ const (
 )
 
 // ErrL1NotFinalized is returned when the L1 block containing the delayed message
-// has not yet been finalized. The caller should retry later without logging an error.
+// has not yet been finalized.
 var ErrL1NotFinalized = errors.New("L1 block not yet finalized")
 
 var (
