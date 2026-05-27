@@ -49,8 +49,8 @@ type NitroConfig struct {
 	BridgeAddress         string                               `json:"bridge_address"`
 	Namespace             uint64                               `json:"namespace"`
 	InitialHotshotBlock   uint64                               `json:"initial_hotshot_block"`
-	ValidBatcherAddresses  []nitroVerifier.BatcherAddressConfig `json:"valid_batcher_addresses"`
-	WaitForL1Finalization  bool                                 `json:"wait_for_l1_finalization"`
+	ValidBatcherAddresses []nitroVerifier.BatcherAddressConfig `json:"valid_batcher_addresses"`
+	WaitForL1Finalization bool                                 `json:"wait_for_l1_finalization"`
 }
 
 type Config struct {
@@ -267,7 +267,7 @@ func (c *Config) toNitroVerifierConfig() *nitroVerifier.NitroEspressoBatchVerifi
 		QueryServiceURL:       c.QueryServiceURL,
 		Namespace:             c.NitroConfig.Namespace,
 		InitialHotshotBlock:   c.NitroConfig.InitialHotshotBlock,
-		ValidBatcherAddresses:  c.NitroConfig.ValidBatcherAddresses,
-		WaitForL1Finalization:  c.NitroConfig.WaitForL1Finalization,
+		ValidBatcherAddresses: c.NitroConfig.ValidBatcherAddresses,
+		WaitForL1Finalization: c.NitroConfig.WaitForL1Finalization,
 	}
 }
