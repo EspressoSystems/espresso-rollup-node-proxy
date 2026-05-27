@@ -220,6 +220,7 @@ Clients should point at the proxy (`http://localhost:8080`) rather than directly
 | `--nitro.namespace` | `nitro.namespace` | — | Nitro Chain Id (Nitro mode, required) |
 | `--nitro.initial-hotshot-block` | `nitro.initial_hotshot_block` | `0` | Initial HotShot block for the Nitro streamer |
 | `--nitro.valid-batcher-addresses` | `nitro.valid_batcher_addresses` | — | Valid batcher addresses (Nitro mode, at least one required) |
+| `--nitro.wait-for-l1-finalization` | `nitro.wait_for_l1_finalization` | `false` | Wait for L1 block finalization before fetching delayed messages |
 
 ## E2E Tests
 

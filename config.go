@@ -49,7 +49,8 @@ type NitroConfig struct {
 	BridgeAddress         string                               `json:"bridge_address"`
 	Namespace             uint64                               `json:"namespace"`
 	InitialHotshotBlock   uint64                               `json:"initial_hotshot_block"`
-	ValidBatcherAddresses []nitroVerifier.BatcherAddressConfig `json:"valid_batcher_addresses"`
+	ValidBatcherAddresses  []nitroVerifier.BatcherAddressConfig `json:"valid_batcher_addresses"`
+	WaitForL1Finalization  bool                                 `json:"wait_for_l1_finalization"`
 }
 
 type Config struct {
@@ -128,6 +129,7 @@ func parseConfig() *Config {
 
 	pflag.StringVar(&cfg.NitroConfig.FeedURL, "nitro.feed-url", cfg.NitroConfig.FeedURL, "Nitro sequencer feed WebSocket URL")
 	pflag.StringVar(&cfg.NitroConfig.BridgeAddress, "nitro.bridge-address", cfg.NitroConfig.BridgeAddress, "Nitro Bridge contract address on L1")
+	pflag.BoolVar(&cfg.NitroConfig.WaitForL1Finalization, "nitro.wait-for-l1-finalization", cfg.NitroConfig.WaitForL1Finalization, "wait for L1 block finalization before fetching delayed messages")
 	pflag.Uint64Var(&cfg.NitroConfig.Namespace, "nitro.namespace", cfg.NitroConfig.Namespace, "Nitro namespace")
 	pflag.Uint64Var(&cfg.NitroConfig.InitialHotshotBlock, "nitro.initial-hotshot-block", cfg.NitroConfig.InitialHotshotBlock, "initial HotShot block for Nitro streamer")
 	var batcherAddressFlags []string
@@ -265,6 +267,7 @@ func (c *Config) toNitroVerifierConfig() *nitroVerifier.NitroEspressoBatchVerifi
 		QueryServiceURL:       c.QueryServiceURL,
 		Namespace:             c.NitroConfig.Namespace,
 		InitialHotshotBlock:   c.NitroConfig.InitialHotshotBlock,
-		ValidBatcherAddresses: c.NitroConfig.ValidBatcherAddresses,
+		ValidBatcherAddresses:  c.NitroConfig.ValidBatcherAddresses,
+		WaitForL1Finalization:  c.NitroConfig.WaitForL1Finalization,
 	}
 }
