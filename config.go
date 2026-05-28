@@ -38,15 +38,15 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 }
 
 type OPConfig struct {
-	FullNodeConsensusRPC      string `json:"full_node_consensus_rpc"`
-	LightClientAddress        string `json:"light_client_address"`
-	BatcherAddress            string `json:"batcher_address"`
-	BatchAuthenticatorAddress string `json:"batch_authenticator_address"`
+	FullNodeConsensusRPC      string         `json:"full_node_consensus_rpc"`
+	LightClientAddress        common.Address `json:"light_client_address"`
+	BatcherAddress            common.Address `json:"batcher_address"`
+	BatchAuthenticatorAddress common.Address `json:"batch_authenticator_address"`
 }
 
 type NitroConfig struct {
 	FeedURL               string                               `json:"feed_url"`
-	BridgeAddress         string                               `json:"bridge_address"`
+	BridgeAddress         common.Address                       `json:"bridge_address"`
 	Namespace             uint64                               `json:"namespace"`
 	InitialHotshotBlock   uint64                               `json:"initial_hotshot_block"`
 	ValidBatcherAddresses []nitroVerifier.BatcherAddressConfig `json:"valid_batcher_addresses"`
@@ -90,7 +90,7 @@ func parseConfig() *Config {
 	cfg := defaultConfig()
 
 	configFlags := pflag.NewFlagSet("config", pflag.ContinueOnError)
-	configFlags.ParseErrorsWhitelist.UnknownFlags = true
+	configFlags.ParseErrorsAllowlist.UnknownFlags = true
 	configFile := configFlags.String("config", "", "path to JSON config file")
 	_ = configFlags.Parse(os.Args[1:])
 
@@ -110,6 +110,9 @@ func parseConfig() *Config {
 	pflag.StringVar(&cfg.ListenAddr, "listen-addr", cfg.ListenAddr, "proxy listen address")
 	pflag.StringVar(&cfg.FullNodeExecutionRPC, "full-node-execution-rpc", cfg.FullNodeExecutionRPC, "full node execution RPC URL")
 	pflag.StringVar(&cfg.L1RPC, "l1-rpc", cfg.L1RPC, "L1 RPC URL")
+	pflag.TextVar(&cfg.OPConfig.LightClientAddress, "op.light-client-address", cfg.OPConfig.LightClientAddress, "Espresso light client contract address")
+	pflag.TextVar(&cfg.OPConfig.BatcherAddress, "op.batcher-address", cfg.OPConfig.BatcherAddress, "OP batcher address")
+	pflag.TextVar(&cfg.OPConfig.BatchAuthenticatorAddress, "op.batch-authenticator-address", cfg.OPConfig.BatchAuthenticatorAddress, "Espresso batch authenticator contract address")
 	pflag.StringVar(&cfg.EspressoTag, "espresso-tag", cfg.EspressoTag, "espresso tag")
 	pflag.StringVar(&cfg.StoreFilePath, "store-file-path", cfg.StoreFilePath, "path to state persistence file")
 	pflag.Uint64Var(&cfg.InitialHotshotHeight, "initial-hotshot-height", cfg.InitialHotshotHeight, "initial hotshot height")
@@ -123,12 +126,9 @@ func parseConfig() *Config {
 
 	pflag.StringVar(&cfg.Mode, "mode", cfg.Mode, "verifier mode: op or nitro")
 	pflag.StringVar(&cfg.OPConfig.FullNodeConsensusRPC, "op.full-node-consensus-rpc", cfg.OPConfig.FullNodeConsensusRPC, "OP full node consensus RPC URL")
-	pflag.StringVar(&cfg.OPConfig.LightClientAddress, "op.light-client-address", cfg.OPConfig.LightClientAddress, "Espresso light client contract address")
-	pflag.StringVar(&cfg.OPConfig.BatcherAddress, "op.batcher-address", cfg.OPConfig.BatcherAddress, "OP batcher address")
-	pflag.StringVar(&cfg.OPConfig.BatchAuthenticatorAddress, "op.batch-authenticator-address", cfg.OPConfig.BatchAuthenticatorAddress, "Espresso batch authenticator contract address")
 
 	pflag.StringVar(&cfg.NitroConfig.FeedURL, "nitro.feed-url", cfg.NitroConfig.FeedURL, "Nitro sequencer feed WebSocket URL")
-	pflag.StringVar(&cfg.NitroConfig.BridgeAddress, "nitro.bridge-address", cfg.NitroConfig.BridgeAddress, "Nitro Bridge contract address on L1")
+	pflag.TextVar(&cfg.NitroConfig.BridgeAddress, "nitro.bridge-address", cfg.NitroConfig.BridgeAddress, "Nitro Bridge contract address on L1")
 	pflag.BoolVar(&cfg.NitroConfig.WaitForL1Finalization, "nitro.wait-for-l1-finalization", cfg.NitroConfig.WaitForL1Finalization, "wait for L1 block finalization before fetching delayed messages")
 	pflag.Uint64Var(&cfg.NitroConfig.Namespace, "nitro.namespace", cfg.NitroConfig.Namespace, "Nitro namespace")
 	pflag.Uint64Var(&cfg.NitroConfig.InitialHotshotBlock, "nitro.initial-hotshot-block", cfg.NitroConfig.InitialHotshotBlock, "initial HotShot block for Nitro streamer")
@@ -169,12 +169,19 @@ func validateURL(field, s string) error {
 	return nil
 }
 
-func validateAddress(field, s string) error {
+func validateAddressString(field, s string) error {
 	if s == "" {
 		return fmt.Errorf("%s: must not be empty", field)
 	}
 	if !common.IsHexAddress(s) {
 		return fmt.Errorf("%s: invalid Ethereum address %q", field, s)
+	}
+	return nil
+}
+
+func validateAddress(field string, a common.Address) error {
+	if a == (common.Address{}) {
+		return fmt.Errorf("%s: must not be empty", field)
 	}
 	return nil
 }
@@ -213,7 +220,7 @@ func (c *Config) validate() error {
 			errs = append(errs, fmt.Errorf("nitro.valid-batcher-addresses: at least one address required"))
 		}
 		for i, a := range c.NitroConfig.ValidBatcherAddresses {
-			errs = append(errs, validateAddress(fmt.Sprintf("nitro.valid-batcher-addresses[%d].address", i), a.Address))
+			errs = append(errs, validateAddressString(fmt.Sprintf("nitro.valid-batcher-addresses[%d].address", i), a.Address))
 		}
 	}
 

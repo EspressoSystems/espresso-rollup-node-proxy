@@ -107,8 +107,8 @@ func startOpVerifier(ctx context.Context, t *testing.T, logger log.Logger, store
 			FullNodeConsensusRPC:      opNodeFullNode,
 			VerificationInterval:      250 * time.Millisecond,
 			QueryServiceURL:           espressoURL,
-			BatcherAddress:            "0x976EA74026E726554dB657fA54763abd0C3a0aa9",
-			BatchAuthenticatorAddress: batchAuthenticatorAddress,
+			BatcherAddress:            common.HexToAddress("0x976EA74026E726554dB657fA54763abd0C3a0aa9"),
+			BatchAuthenticatorAddress: common.HexToAddress(batchAuthenticatorAddress),
 		},
 	)
 	v.Start(ctx)
@@ -130,7 +130,7 @@ func startNitroVerifierWithLogger(ctx context.Context, t *testing.T, logger log.
 			QueryServiceURL:      nitroEspressoURL,
 			Namespace:            nitroNamespace,
 			InitialHotshotBlock:  0,
-			BridgeAddress:        nitroBridgeAddress,
+			BridgeAddress:        common.HexToAddress(nitroBridgeAddress),
 			ValidBatcherAddresses: []nitroVerifier.BatcherAddressConfig{
 				{Address: nitroBatchPoster, From: 0, To: math.MaxUint64},
 			},

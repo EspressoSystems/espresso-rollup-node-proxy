@@ -38,7 +38,7 @@ type NitroEspressoBatchVerifierConfig struct {
 	FeedURL               string                 `json:"feed_url"`
 	FullNodeExecutionRPC  string                 `json:"full_node_execution_rpc"`
 	L1RPC                 string                 `json:"l1_rpc"`
-	BridgeAddress         string                 `json:"bridge_address"`
+	BridgeAddress         common.Address         `json:"bridge_address"`
 	VerificationInterval  time.Duration          `json:"verification_interval"`
 	FinalityPollInterval  time.Duration          `json:"finality_poll_interval"`
 	QueryServiceURL       string                 `json:"query_service_url"`
@@ -163,7 +163,7 @@ func NewNitroEspressoBatchVerifier(
 		),
 		delayedMsgFetcher: delayedmessagefetcher.NewDelayedMessageFetcher(
 			l1Client,
-			common.HexToAddress(config.BridgeAddress),
+			config.BridgeAddress,
 			config.WaitForL1Finalization,
 			logger,
 		),

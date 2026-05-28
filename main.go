@@ -15,7 +15,6 @@ import (
 	"time"
 
 	espressoLightClient "github.com/EspressoSystems/espresso-network/sdks/go/light-client"
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 )
@@ -68,8 +67,7 @@ func newOPVerifier(ctx context.Context, logger log.Logger, cfg *Config, espresso
 	if err != nil {
 		logger.Crit("failed to create L1 client", "error", err)
 	}
-	lightClientAddr := common.HexToAddress(cfg.OPConfig.LightClientAddress)
-	lc, err := espressoLightClient.NewLightclientCaller(lightClientAddr, l1Client)
+	lc, err := espressoLightClient.NewLightclientCaller(cfg.OPConfig.LightClientAddress, l1Client)
 	if err != nil || lc == nil {
 		logger.Crit("failed to create light client")
 	}

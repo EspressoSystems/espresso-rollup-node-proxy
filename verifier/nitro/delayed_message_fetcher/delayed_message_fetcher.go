@@ -34,13 +34,6 @@ const (
 // has not yet been finalized.
 var ErrL1NotFinalized = errors.New("L1 block not yet finalized")
 
-var (
-	inboxMessageDeliveredTopic common.Hash
-	inboxFromOriginTopic       common.Hash
-	sendL2FromOriginInputs     abi.Arguments
-	sendL2FromOriginSelector   []byte
-)
-
 type sendL2MessageFromOrigin struct {
 	MessageData []byte
 }
@@ -50,6 +43,11 @@ type DelayedMessageFetcher struct {
 	bridgeAddress   common.Address
 	waitForFinality bool
 	logger          log.Logger
+
+	inboxMessageDeliveredTopic common.Hash
+	inboxFromOriginTopic       common.Hash
+	sendL2FromOriginInputs     abi.Arguments
+	sendL2FromOriginSelector   []byte
 }
 
 func NewDelayedMessageFetcher(l1Client *ethclient.Client, bridgeAddress common.Address, waitForFinality bool, logger log.Logger) *DelayedMessageFetcher {
@@ -57,16 +55,16 @@ func NewDelayedMessageFetcher(l1Client *ethclient.Client, bridgeAddress common.A
 	if err != nil {
 		panic("error getting inbox ABI: " + err.Error())
 	}
-	inboxMessageDeliveredTopic = inboxAbi.Events[eventInboxMessageDelivered].ID
-	inboxFromOriginTopic = inboxAbi.Events[eventInboxFromOrigin].ID
-	sendL2FromOriginInputs = inboxAbi.Methods[methodSendL2FromOrigin].Inputs
-	sendL2FromOriginSelector = inboxAbi.Methods[methodSendL2FromOrigin].ID
 
 	return &DelayedMessageFetcher{
-		l1Client:        l1Client,
-		bridgeAddress:   bridgeAddress,
-		waitForFinality: waitForFinality,
-		logger:          logger,
+		l1Client:                   l1Client,
+		bridgeAddress:              bridgeAddress,
+		waitForFinality:            waitForFinality,
+		logger:                     logger,
+		inboxMessageDeliveredTopic: inboxAbi.Events[eventInboxMessageDelivered].ID,
+		inboxFromOriginTopic:       inboxAbi.Events[eventInboxFromOrigin].ID,
+		sendL2FromOriginInputs:     inboxAbi.Methods[methodSendL2FromOrigin].Inputs,
+		sendL2FromOriginSelector:   inboxAbi.Methods[methodSendL2FromOrigin].ID,
 	}
 }
 
@@ -82,11 +80,8 @@ func (f *DelayedMessageFetcher) FetchDelayedMessageFromL1(
 		if err != nil {
 			return nil, fmt.Errorf("failed to get L1 finalized block: %w", err)
 		}
-		if finalizedHeader == nil {
-			return nil, fmt.Errorf("finalized header is nil: %w", ErrL1NotFinalized)
-		}
 		if l1BlockNumber > finalizedHeader.Number.Uint64() {
-			return nil, fmt.Errorf("%w: block=%d finalized=%d", ErrL1NotFinalized, l1BlockNumber, finalizedHeader.Number.Uint64())
+			return nil, fmt.Errorf("block=%d finalized=%d: %w", l1BlockNumber, finalizedHeader.Number.Uint64(), ErrL1NotFinalized)
 		}
 	}
 	delivered, err := f.fetchBridgeEvent(ctx, l1BlockNumber, messageIndex)
@@ -142,7 +137,7 @@ func (f *DelayedMessageFetcher) fetchInboxData(
 		FromBlock: block,
 		ToBlock:   block,
 		Addresses: []common.Address{inboxAddress},
-		Topics:    [][]common.Hash{{inboxMessageDeliveredTopic, inboxFromOriginTopic}, {msgIdxHash}},
+		Topics:    [][]common.Hash{{f.inboxMessageDeliveredTopic, f.inboxFromOriginTopic}, {msgIdxHash}},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to filter Inbox logs: %w", err)
@@ -164,50 +159,53 @@ func (f *DelayedMessageFetcher) extractInboxData(
 	ethLog types.Log,
 ) ([]byte, error) {
 	switch ethLog.Topics[0] {
-	case inboxMessageDeliveredTopic:
-		event, err := filterer.ParseInboxMessageDelivered(ethLog)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse InboxMessageDelivered: %w", err)
-		}
-		f.logger.Info(
-			"fetched delayed message via InboxMessageDelivered",
-			"l1_block_num", ethLog.BlockNumber,
-			"tx_hash", ethLog.TxHash.Hex(),
-			"data_len", len(event.Data),
-		)
-		return event.Data, nil
-
-	case inboxFromOriginTopic:
-		tx, _, err := f.l1Client.TransactionByHash(ctx, ethLog.TxHash)
-		if err != nil {
-			return nil, fmt.Errorf("failed to fetch tx for InboxMessageDeliveredFromOrigin: %w", err)
-		}
-
-		// verify selector and unpack data
-		data := tx.Data()
-		if len(data) < abiSelectorLen {
-			return nil, fmt.Errorf("tx data too short for sendL2MessageFromOrigin")
-		}
-		if !bytes.Equal(data[:abiSelectorLen], sendL2FromOriginSelector) {
-			return nil, fmt.Errorf("tx selector mismatch: expected sendL2MessageFromOrigin (%x), got %x", sendL2FromOriginSelector, data[:abiSelectorLen])
-		}
-
-		values, err := sendL2FromOriginInputs.Unpack(data[abiSelectorLen:])
-		if err != nil {
-			return nil, fmt.Errorf("failed to unpack sendL2MessageFromOrigin calldata: %w", err)
-		}
-		var l2Msg sendL2MessageFromOrigin
-		if err := sendL2FromOriginInputs.Copy(&l2Msg, values); err != nil {
-			return nil, fmt.Errorf("failed to copy sendL2MessageFromOrigin: %w", err)
-		}
-		f.logger.Info(
-			"fetched delayed message from sendL2MessageFromOrigin",
-			"l1_block_num", ethLog.BlockNumber,
-			"tx_hash", ethLog.TxHash.Hex(),
-			"data_len", len(l2Msg.MessageData),
-		)
-		return l2Msg.MessageData, nil
+	case f.inboxMessageDeliveredTopic:
+		return f.extractFromInboxMessageDelivered(filterer, ethLog)
+	case f.inboxFromOriginTopic:
+		return f.extractFromInboxFromOrigin(ctx, ethLog)
 	default:
 		return nil, fmt.Errorf("unexpected inbox log topic: %s", ethLog.Topics[0].Hex())
 	}
+}
+
+func (f *DelayedMessageFetcher) extractFromInboxMessageDelivered(filterer *nitroabi.InboxFilterer, ethLog types.Log) ([]byte, error) {
+	event, err := filterer.ParseInboxMessageDelivered(ethLog)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse InboxMessageDelivered: %w", err)
+	}
+	f.logger.Info(
+		"fetched delayed message via InboxMessageDelivered",
+		"l1_block_num", ethLog.BlockNumber,
+		"tx_hash", ethLog.TxHash.Hex(),
+		"data_len", len(event.Data),
+	)
+	return event.Data, nil
+}
+
+func (f *DelayedMessageFetcher) extractFromInboxFromOrigin(ctx context.Context, ethLog types.Log) ([]byte, error) {
+	tx, _, err := f.l1Client.TransactionByHash(ctx, ethLog.TxHash)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch tx for InboxMessageDeliveredFromOrigin: %w", err)
+	}
+
+	data := tx.Data()
+	if !bytes.HasPrefix(data, f.sendL2FromOriginSelector) {
+		return nil, fmt.Errorf("tx selector mismatch: expected sendL2MessageFromOrigin (%x), got %x", f.sendL2FromOriginSelector, data[:min(len(data), abiSelectorLen)])
+	}
+
+	values, err := f.sendL2FromOriginInputs.Unpack(data[abiSelectorLen:])
+	if err != nil {
+		return nil, fmt.Errorf("failed to unpack sendL2MessageFromOrigin calldata: %w", err)
+	}
+	var l2Msg sendL2MessageFromOrigin
+	if err := f.sendL2FromOriginInputs.Copy(&l2Msg, values); err != nil {
+		return nil, fmt.Errorf("failed to copy sendL2MessageFromOrigin: %w", err)
+	}
+	f.logger.Info(
+		"fetched delayed message from sendL2MessageFromOrigin",
+		"l1_block_num", ethLog.BlockNumber,
+		"tx_hash", ethLog.TxHash.Hex(),
+		"data_len", len(l2Msg.MessageData),
+	)
+	return l2Msg.MessageData, nil
 }

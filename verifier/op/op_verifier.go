@@ -28,15 +28,15 @@ import (
 )
 
 type OPEspressoBatchVerifierConfig struct {
-	L1RPC                     string        `json:"l1_rpc"`
-	FullNodeExecutionRPC      string        `json:"full_node_execution_rpc"`
-	FullNodeConsensusRPC      string        `json:"full_node_consensus_rpc"`
-	VerificationInterval      time.Duration `json:"verification_interval"`
-	FinalityPollInterval      time.Duration `json:"finality_poll_interval"`
-	QueryServiceURL           string        `json:"query_service_url"`
-	BatcherAddress            string        `json:"batcher_address"`
-	BatchAuthenticatorAddress string        `json:"batch_authenticator_address"`
-	TrackBatchLatency         bool          `json:"track_batch_latency"`
+	L1RPC                     string         `json:"l1_rpc"`
+	FullNodeExecutionRPC      string         `json:"full_node_execution_rpc"`
+	FullNodeConsensusRPC      string         `json:"full_node_consensus_rpc"`
+	VerificationInterval      time.Duration  `json:"verification_interval"`
+	FinalityPollInterval      time.Duration  `json:"finality_poll_interval"`
+	QueryServiceURL           string         `json:"query_service_url"`
+	BatcherAddress            common.Address `json:"batcher_address"`
+	BatchAuthenticatorAddress common.Address `json:"batch_authenticator_address"`
+	TrackBatchLatency         bool           `json:"track_batch_latency"`
 }
 
 // OPEspressoBatchVerifier is responsible for verifying that the batches produced by the OP full node match what the OP streamer has in its buffer.
@@ -100,7 +100,6 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 
 	espressoState := store.GetState()
 
-	batchAuthenticatorAddr := common.HexToAddress(opVerifierConfig.BatchAuthenticatorAddress)
 	l1Adapter := NewAdaptL1BlockRefClient(l1Client)
 
 	// Create the OP streamer
@@ -114,7 +113,7 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 		derivation.CreateEspressoBatchUnmarshaler(),
 		espressoState.FallbackHotshotHeight,
 		espressoState.L2BlockNumber,
-		batchAuthenticatorAddr,
+		opVerifierConfig.BatchAuthenticatorAddress,
 		opVerifierConfig.TrackBatchLatency,
 	)
 
@@ -371,26 +370,7 @@ func (v *OPEspressoBatchVerifier) peekNextBatch(ctx context.Context) (*derivatio
 		return nil, err
 	}
 
-	if syncStatus == nil {
-		v.logger.Error("sync status is nil")
-		return nil, fmt.Errorf("sync status is nil")
-	}
-
-	// Refresh the streamer with the latest finalized L1 block and safe L2 block from the OP node.
-	// If the safe L2 block from the OP node is behind the espresso state then,
-	// take the espresso state block number as the fallback position to avoid refreshing
-	// the streamer backwards which would cause it to re-fetch previously
-	// verified batches and cause unnecessary catchup behavior.
-	state := v.espressoStore.GetState()
-	fallbackPos := syncStatus.SafeL2.Number
-	if syncStatus.SafeL2.Number < state.L2BlockNumber {
-		v.logger.Warn("OP node is behind the current espresso state, using state l2 block number for refresh",
-			"op_safe_l2_block", syncStatus.SafeL2.Number,
-			"current_espresso_block", state.L2BlockNumber)
-		fallbackPos = state.L2BlockNumber
-	}
-
-	err = v.streamer.Refresh(ctx, syncStatus.FinalizedL1, fallbackPos, syncStatus.SafeL2.L1Origin)
+	err = v.streamer.Refresh(ctx, syncStatus.FinalizedL1, syncStatus.SafeL2.Number, syncStatus.SafeL2.L1Origin)
 	if err != nil {
 		v.logger.Error("failed to refresh OP streamer", "error", err)
 		return nil, err

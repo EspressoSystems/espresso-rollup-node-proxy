@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
 
@@ -76,9 +77,9 @@ func TestConfigValidate(t *testing.T) {
 		VerificationInterval: Duration(1 * time.Millisecond),
 		OPConfig: OPConfig{
 			FullNodeConsensusRPC:      "http://localhost:9545",
-			LightClientAddress:        "0x1234567890abcdef1234567890abcdef12345678",
-			BatcherAddress:            "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
-			BatchAuthenticatorAddress: "0x1111111111111111111111111111111111111111",
+			LightClientAddress:        common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678"),
+			BatcherAddress:            common.HexToAddress("0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"),
+			BatchAuthenticatorAddress: common.HexToAddress("0x1111111111111111111111111111111111111111"),
 		},
 	}
 	require.NoError(t, valid.validate())
@@ -104,11 +105,17 @@ func TestConfigValidate(t *testing.T) {
 
 	malformed := valid
 	malformed.FullNodeExecutionRPC = "notaurl"
-	malformed.OPConfig.LightClientAddress = "0xTOOSHORT"
+	malformed.OPConfig.LightClientAddress = common.Address{}
 	err = malformed.validate()
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "missing scheme")
-	require.Contains(t, err.Error(), "invalid Ethereum address")
+	require.Contains(t, err.Error(), "op.light-client-address: must not be empty")
+
+	t.Run("malformed address rejected at JSON unmarshal", func(t *testing.T) {
+		raw := []byte(`{"op":{"light_client_address":"0xTOOSHORT"}}`)
+		var cfg Config
+		require.Error(t, json.Unmarshal(raw, &cfg))
+	})
 
 	badLogFormat := valid
 	badLogFormat.LogFormat = "yaml"
@@ -134,7 +141,7 @@ func TestConfigValidate(t *testing.T) {
 		VerificationInterval: Duration(1 * time.Millisecond),
 		NitroConfig: NitroConfig{
 			FeedURL:       "ws://localhost:9642",
-			BridgeAddress: "0x3f1Eae7D46d88F08fc2F8ed27FCb2AB183EB2d0E",
+			BridgeAddress: common.HexToAddress("0x3f1Eae7D46d88F08fc2F8ed27FCb2AB183EB2d0E"),
 			Namespace:     412346,
 			ValidBatcherAddresses: []nitroVerifier.BatcherAddressConfig{
 				{Address: "0x3f1Eae7D46d88F08fc2F8ed27FCb2AB183EB2d0E"},
