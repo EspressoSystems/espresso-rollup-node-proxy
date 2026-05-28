@@ -78,7 +78,7 @@ func (f *DelayedMessageFetcher) FetchDelayedMessageFromL1(
 	messageIndex uint64,
 ) ([]byte, error) {
 	if f.waitForFinality {
-		finalizedHeader, err := f.l1Client.HeaderByNumber(ctx, big.NewInt(int64(rpc.FinalizedBlockNumber)))
+		finalizedHeader, err := f.l1Client.HeaderByNumber(ctx, big.NewInt(rpc.FinalizedBlockNumber.Int64()))
 		if err != nil {
 			return nil, fmt.Errorf("failed to get L1 finalized block: %w", err)
 		}
