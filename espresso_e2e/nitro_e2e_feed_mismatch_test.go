@@ -137,7 +137,7 @@ func TestNitroE2EFeedMismatch(t *testing.T) {
 		// Tampering starts after message 20, so the first mismatch should be at maliciousFeedAt + 1.
 		t.Log("Waiting for mismatch to be detected at msg_pos 21")
 		pollUntil(t, 2*time.Minute, "verifier did not log a feed mismatch at msg_pos 21", func() bool {
-			return matchLogAttrs(mismatchCapturer, "message mismatch between espresso and nitro feed", map[string]uint64{"msg_pos": maliciousFeedAt + 1})
+			return matchLogAttrs(mismatchCapturer, "error verifying message", map[string]uint64{"msg_pos": maliciousFeedAt + 1})
 		})
 		t.Log("Feed mismatch detected at msg_pos 21")
 

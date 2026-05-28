@@ -82,7 +82,7 @@ func (p *FinalityPoller) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			header, err := p.client.HeaderByNumber(ctx, big.NewInt(int64(rpc.FinalizedBlockNumber)))
+			header, err := p.client.HeaderByNumber(ctx, big.NewInt(rpc.FinalizedBlockNumber.Int64()))
 			if err != nil {
 				p.logger.Error("failed to fetch finalized block", "error", err)
 				continue

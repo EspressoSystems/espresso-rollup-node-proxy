@@ -241,7 +241,6 @@ func newTestHarness(t *testing.T, logger log.Logger) *testHarness {
 	}
 }
 
-
 func TestPeekNextBatch(t *testing.T) {
 	h := newTestHarness(t, nil)
 	ctx := context.Background()

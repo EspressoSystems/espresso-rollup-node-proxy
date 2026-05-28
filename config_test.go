@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
 
@@ -66,6 +67,7 @@ func TestDurationUnmarshalJSON(t *testing.T) {
 func TestConfigValidate(t *testing.T) {
 	valid := Config{
 		FullNodeExecutionRPC: "http://localhost:8545",
+		L1RPC:                "ws://localhost:8546",
 		Mode:                 ModeOP,
 		ListenAddr:           ":8080",
 		EspressoTag:          "espresso",
@@ -74,11 +76,10 @@ func TestConfigValidate(t *testing.T) {
 		QueryServiceURL:      "https://query.espresso.network",
 		VerificationInterval: Duration(1 * time.Millisecond),
 		OPConfig: OPConfig{
-			L1RPC:                     "ws://localhost:8546",
 			FullNodeConsensusRPC:      "http://localhost:9545",
-			LightClientAddress:        "0x1234567890abcdef1234567890abcdef12345678",
-			BatcherAddress:            "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
-			BatchAuthenticatorAddress: "0x1111111111111111111111111111111111111111",
+			LightClientAddress:        common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678"),
+			BatcherAddress:            common.HexToAddress("0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"),
+			BatchAuthenticatorAddress: common.HexToAddress("0x1111111111111111111111111111111111111111"),
 		},
 	}
 	require.NoError(t, valid.validate())
@@ -87,7 +88,7 @@ func TestConfigValidate(t *testing.T) {
 	err := opEmpty.validate()
 	require.Error(t, err)
 	for _, field := range []string{
-		"full-node-execution-rpc", "op.l1-rpc",
+		"full-node-execution-rpc", "l1-rpc",
 		"op.full-node-consensus-rpc", "query-service-url",
 		"op.light-client-address", "op.batcher-address", "op.batch-authenticator-address",
 		"listen-addr", "espresso-tag", "store-file-path",
@@ -104,11 +105,17 @@ func TestConfigValidate(t *testing.T) {
 
 	malformed := valid
 	malformed.FullNodeExecutionRPC = "notaurl"
-	malformed.OPConfig.LightClientAddress = "0xTOOSHORT"
+	malformed.OPConfig.LightClientAddress = common.Address{}
 	err = malformed.validate()
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "missing scheme")
-	require.Contains(t, err.Error(), "invalid Ethereum address")
+	require.Contains(t, err.Error(), "op.light-client-address: must not be empty")
+
+	t.Run("malformed address rejected at JSON unmarshal", func(t *testing.T) {
+		raw := []byte(`{"op":{"light_client_address":"0xTOOSHORT"}}`)
+		var cfg Config
+		require.Error(t, json.Unmarshal(raw, &cfg))
+	})
 
 	badLogFormat := valid
 	badLogFormat.LogFormat = "yaml"
@@ -124,6 +131,7 @@ func TestConfigValidate(t *testing.T) {
 
 	validNitro := Config{
 		FullNodeExecutionRPC: "http://localhost:8547",
+		L1RPC:                "ws://localhost:8546",
 		Mode:                 ModeNitro,
 		ListenAddr:           ":8080",
 		EspressoTag:          "espresso",
@@ -132,8 +140,9 @@ func TestConfigValidate(t *testing.T) {
 		QueryServiceURL:      "https://query.espresso.network",
 		VerificationInterval: Duration(1 * time.Millisecond),
 		NitroConfig: NitroConfig{
-			FeedURL:   "ws://localhost:9642",
-			Namespace: 412346,
+			FeedURL:       "ws://localhost:9642",
+			BridgeAddress: common.HexToAddress("0x3f1Eae7D46d88F08fc2F8ed27FCb2AB183EB2d0E"),
+			Namespace:     412346,
 			ValidBatcherAddresses: []nitroVerifier.BatcherAddressConfig{
 				{Address: "0x3f1Eae7D46d88F08fc2F8ed27FCb2AB183EB2d0E"},
 			},
@@ -145,8 +154,8 @@ func TestConfigValidate(t *testing.T) {
 	err = nitroEmpty.validate()
 	require.Error(t, err)
 	for _, field := range []string{
-		"full-node-execution-rpc", "nitro.feed-url",
-		"nitro.namespace", "nitro.valid-batcher-addresses",
+		"full-node-execution-rpc", "l1-rpc", "nitro.feed-url",
+		"nitro.bridge-address", "nitro.namespace", "nitro.valid-batcher-addresses",
 		"query-service-url", "listen-addr", "espresso-tag", "store-file-path",
 	} {
 		require.Contains(t, err.Error(), field)

@@ -3,6 +3,7 @@ package verifier
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	sharedVerifier "proxy/verifier"
+	delayedmessagefetcher "proxy/verifier/nitro/delayed_message_fetcher"
 	feedclient "proxy/verifier/nitro/feed_client"
 
 	espressoStore "proxy/store"
@@ -17,11 +19,14 @@ import (
 	espressoClient "github.com/EspressoSystems/espresso-network/sdks/go/client"
 	nitroStreamer "github.com/EspressoSystems/espresso-streamers/nitro"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
 )
+
+const l1FinalityWaitLogInterval = 5 * time.Second
 
 type BatcherAddressConfig struct {
 	Address string `json:"address"`
@@ -32,12 +37,15 @@ type BatcherAddressConfig struct {
 type NitroEspressoBatchVerifierConfig struct {
 	FeedURL               string                 `json:"feed_url"`
 	FullNodeExecutionRPC  string                 `json:"full_node_execution_rpc"`
+	L1RPC                 string                 `json:"l1_rpc"`
+	BridgeAddress         common.Address         `json:"bridge_address"`
 	VerificationInterval  time.Duration          `json:"verification_interval"`
 	FinalityPollInterval  time.Duration          `json:"finality_poll_interval"`
 	QueryServiceURL       string                 `json:"query_service_url"`
 	Namespace             uint64                 `json:"namespace"`
 	InitialHotshotBlock   uint64                 `json:"initial_hotshot_block"`
 	ValidBatcherAddresses []BatcherAddressConfig `json:"valid_batcher_addresses"`
+	WaitForL1Finalization bool                   `json:"wait_for_l1_finalization"`
 }
 
 // NitroEspressoBatchVerifier verifies that messages from the Nitro sequencer feed
@@ -47,16 +55,19 @@ type NitroEspressoBatchVerifierConfig struct {
 // When the feed has cleaned a message, it falls back to advancing on Nitro L2 finality,
 // So we take the max(espresso, nitro finalized).
 type NitroEspressoBatchVerifier struct {
-	streamer       nitroStreamer.EspressoStreamerInterface
-	feedClient     *feedclient.FeedClient
-	l2Client       *ethclient.Client
-	espressoStore  *espressoStore.EspressoStore
-	config         *NitroEspressoBatchVerifierConfig
-	finalityPoller sharedVerifier.FinalityPollerInterface
-	logger         log.Logger
-	cancel         context.CancelFunc
-	runWg          sync.WaitGroup
-	running        atomic.Bool
+	streamer            nitroStreamer.EspressoStreamerInterface
+	feedClient          *feedclient.FeedClient
+	l2Client            *ethclient.Client
+	l1Client            *ethclient.Client
+	espressoStore       *espressoStore.EspressoStore
+	config              *NitroEspressoBatchVerifierConfig
+	finalityPoller      sharedVerifier.FinalityPollerInterface
+	delayedMsgFetcher   *delayedmessagefetcher.DelayedMessageFetcher
+	logger              log.Logger
+	cancel              context.CancelFunc
+	runWg               sync.WaitGroup
+	running             atomic.Bool
+	lastFinalityWaitLog time.Time
 }
 
 func NewNitroEspressoBatchVerifier(
@@ -73,6 +84,12 @@ func NewNitroEspressoBatchVerifier(
 	client := espressoClient.NewClient(config.QueryServiceURL)
 	if client == nil {
 		logger.Crit("failed to create Espresso client")
+		return nil
+	}
+
+	l1Client, err := ethclient.DialContext(ctx, config.L1RPC)
+	if err != nil {
+		logger.Crit("failed to dial Nitro L1 RPC", "url", config.L1RPC, "error", err)
 		return nil
 	}
 
@@ -135,6 +152,7 @@ func NewNitroEspressoBatchVerifier(
 		streamer:      streamer,
 		feedClient:    feed,
 		l2Client:      l2Client,
+		l1Client:      l1Client,
 		espressoStore: store,
 		config:        config,
 		logger:        logger,
@@ -142,6 +160,12 @@ func NewNitroEspressoBatchVerifier(
 			l2Client,
 			logger,
 			config.FinalityPollInterval,
+		),
+		delayedMsgFetcher: delayedmessagefetcher.NewDelayedMessageFetcher(
+			l1Client,
+			config.BridgeAddress,
+			config.WaitForL1Finalization,
+			logger,
 		),
 	}
 }
@@ -173,7 +197,8 @@ func (v *NitroEspressoBatchVerifier) run(ctx context.Context) {
 	defer ticker.Stop()
 
 	espressoState := v.espressoStore.GetState()
-	v.logger.Info("Starting Nitro Verifier",
+	v.logger.Info(
+		"Starting Nitro Verifier",
 		"start_block_number", espressoState.L2BlockNumber,
 		"start_hotshot_height", espressoState.FallbackHotshotHeight,
 	)
@@ -210,19 +235,64 @@ func (v *NitroEspressoBatchVerifier) drainAndVerifyMessages(ctx context.Context)
 			break
 		}
 
-		if err := ensureMessagesMatch(&espressoMsg.MessageWithMeta, &feedMsg.Message); err != nil {
-			v.logger.Error("message mismatch between espresso and nitro feed",
-				"msg_pos", espressoMsg.Pos,
-				"error", err,
-			)
+		if err := v.verifyMessage(ctx, espressoMsg, feedMsg); err != nil {
+			if errors.Is(err, delayedmessagefetcher.ErrL1NotFinalized) {
+				// This can get noisy so rate limit because if sequencer is set to safe block
+				// then we may be waiting another 7 minutes for L1 finalization
+				if time.Since(v.lastFinalityWaitLog) > l1FinalityWaitLogInterval {
+					v.logger.Warn("waiting for L1 finalization", "msg_pos", espressoMsg.Pos, "error", err)
+					v.lastFinalityWaitLog = time.Now()
+				}
+			} else {
+				v.logger.Error("error verifying message", "msg_pos", espressoMsg.Pos, "error", err)
+			}
 			break
 		}
 
 		v.advance()
 		verifiedMsg = espressoMsg
-		v.logger.Info("Successfully verified nitro message", "batch_number", verifiedMsg.Pos)
+		v.logger.Info("successfully verified nitro message", "msg_pos", verifiedMsg.Pos)
 	}
 	return verifiedMsg
+}
+
+func (v *NitroEspressoBatchVerifier) verifyMessage(ctx context.Context, espressoMsg *nitroStreamer.MessageWithMetadataAndPos, feedMsg *feedclient.BroadcastFeedMessage) error {
+	if len(espressoMsg.MessageWithMeta.Message.L2msg) == 0 {
+		return v.verifyDelayedMessage(ctx, &espressoMsg.MessageWithMeta, &feedMsg.Message, espressoMsg.Pos)
+	}
+	return ensureMessagesMatch(&espressoMsg.MessageWithMeta, &feedMsg.Message)
+}
+
+func (v *NitroEspressoBatchVerifier) verifyDelayedMessage(ctx context.Context, espressoMsg *nitroStreamer.MessageWithMetadata, feedMsg *nitroStreamer.MessageWithMetadata, pos uint64) error {
+	// Espresso does not have l2 message data for delayed messages, Espresso just confirms a delayed message was processed.
+	// So before advancing the espresso tag, ensure we verify the feed and what is on the L1 match.
+	if espressoMsg.DelayedMessagesRead != feedMsg.DelayedMessagesRead {
+		return fmt.Errorf("delayed message DelayedMessagesRead mismatch: espresso=%d feed=%d",
+			espressoMsg.DelayedMessagesRead, feedMsg.DelayedMessagesRead)
+	}
+	if espressoMsg.DelayedMessagesRead == 0 {
+		return fmt.Errorf("delayed message has DelayedMessagesRead=0, cannot determine message index")
+	}
+
+	// Get the delayed message data from L1 and verify it matches the feed.
+	l1BlockNumber := espressoMsg.Message.Header.BlockNumber
+	messageIndex := espressoMsg.DelayedMessagesRead - 1
+
+	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	delayedMsg, err := v.delayedMsgFetcher.FetchDelayedMessageFromL1(
+		timeoutCtx,
+		l1BlockNumber,
+		messageIndex,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to fetch delayed message from L1: %w", err)
+	}
+	if !bytes.Equal(delayedMsg, feedMsg.Message.L2msg) {
+		return fmt.Errorf("delayed message L2msg mismatch for messageIndex=%d", messageIndex)
+	}
+	v.logger.Info("delayed message verified", "msg_pos", pos, "l1_block_num", l1BlockNumber, "delayed_msg_num", espressoMsg.DelayedMessagesRead)
+	return nil
 }
 
 // verifyAndAdvance call drainAndVerifyMessages to drain all available verified messages from the streamer in a tight loop,
@@ -241,13 +311,13 @@ func (v *NitroEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 		return
 	}
 
+	state := v.espressoStore.GetState()
 	updated, err := v.espressoStore.UpdateIfGreater(verifiedMsg.Pos, verifiedMsg.HotshotHeight)
 	if err != nil {
 		v.logger.Error("failed to update espresso state in store", "error", err)
 		return
 	}
 	if !updated {
-		state := v.espressoStore.GetState()
 		v.logger.Warn(
 			"not updating espresso state in store because message position is not greater than current message position in store",
 			"msg_pos", verifiedMsg.Pos,
@@ -257,7 +327,9 @@ func (v *NitroEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 		v.advanceTo(state.L2BlockNumber + 1)
 		return
 	}
-	v.logger.Info("successfully verified and advanced Nitro messages",
+	v.logger.Info(
+		"successfully verified and advanced nitro messages",
+		"prev_msg_pos", state.L2BlockNumber,
 		"msg_pos", verifiedMsg.Pos,
 		"hotshot_height", verifiedMsg.HotshotHeight,
 	)
@@ -295,17 +367,6 @@ func (v *NitroEspressoBatchVerifier) syncEspressoStateWithNitroFinality(nitroFin
 }
 
 func ensureMessagesMatch(espresso *nitroStreamer.MessageWithMetadata, feed *nitroStreamer.MessageWithMetadata) error {
-	// If the Espresso message has no L2msg it is a delayed message — the payload
-	// lives in the L1 delayed inbox and is not included in the HotShot batch.
-	// DelayedMessagesRead uniquely identifies which inbox entry this is, so that's sufficient.
-	if len(espresso.Message.L2msg) == 0 {
-		if espresso.DelayedMessagesRead != feed.DelayedMessagesRead {
-			return fmt.Errorf("delayed message mismatch: espresso=%d feed=%d",
-				espresso.DelayedMessagesRead, feed.DelayedMessagesRead)
-		}
-		return nil
-	}
-
 	espressoBytes, err := rlp.EncodeToBytes(espresso)
 	if err != nil {
 		return fmt.Errorf("failed to RLP-encode Espresso message: %w", err)
@@ -332,5 +393,7 @@ func (v *NitroEspressoBatchVerifier) Stop() {
 	v.runWg.Wait()
 	v.finalityPoller.Stop()
 	v.streamer.StopAndWait()
+	v.l1Client.Close()
+	v.l2Client.Close()
 	v.logger.Info("Nitro verifier stopped")
 }

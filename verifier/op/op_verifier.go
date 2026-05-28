@@ -28,15 +28,15 @@ import (
 )
 
 type OPEspressoBatchVerifierConfig struct {
-	L1RPC                     string        `json:"l1_rpc"`
-	FullNodeExecutionRPC      string        `json:"full_node_execution_rpc"`
-	FullNodeConsensusRPC      string        `json:"full_node_consensus_rpc"`
-	VerificationInterval      time.Duration `json:"verification_interval"`
-	FinalityPollInterval      time.Duration `json:"finality_poll_interval"`
-	QueryServiceURL           string        `json:"query_service_url"`
-	BatcherAddress            string        `json:"batcher_address"`
-	BatchAuthenticatorAddress string        `json:"batch_authenticator_address"`
-	TrackBatchLatency         bool          `json:"track_batch_latency"`
+	L1RPC                     string         `json:"l1_rpc"`
+	FullNodeExecutionRPC      string         `json:"full_node_execution_rpc"`
+	FullNodeConsensusRPC      string         `json:"full_node_consensus_rpc"`
+	VerificationInterval      time.Duration  `json:"verification_interval"`
+	FinalityPollInterval      time.Duration  `json:"finality_poll_interval"`
+	QueryServiceURL           string         `json:"query_service_url"`
+	BatcherAddress            common.Address `json:"batcher_address"`
+	BatchAuthenticatorAddress common.Address `json:"batch_authenticator_address"`
+	TrackBatchLatency         bool           `json:"track_batch_latency"`
 }
 
 // OPEspressoBatchVerifier is responsible for verifying that the batches produced by the OP full node match what the OP streamer has in its buffer.
@@ -100,7 +100,6 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 
 	espressoState := store.GetState()
 
-	batchAuthenticatorAddr := common.HexToAddress(opVerifierConfig.BatchAuthenticatorAddress)
 	l1Adapter := NewAdaptL1BlockRefClient(l1Client)
 
 	// Create the OP streamer
@@ -114,7 +113,7 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 		derivation.CreateEspressoBatchUnmarshaler(),
 		espressoState.FallbackHotshotHeight,
 		espressoState.L2BlockNumber,
-		batchAuthenticatorAddr,
+		opVerifierConfig.BatchAuthenticatorAddress,
 		opVerifierConfig.TrackBatchLatency,
 	)
 

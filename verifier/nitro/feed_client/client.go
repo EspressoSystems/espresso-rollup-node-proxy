@@ -129,7 +129,7 @@ func (fc *FeedClient) verifyChainID(resp *http.Response) error {
 		return fmt.Errorf("malformed %s header: %w", headerChainID, err)
 	}
 	if chainID != fc.chainID {
-		return fmt.Errorf("%w: expected %d, got %d", ErrIncorrectChainId, fc.chainID, chainID)
+		return fmt.Errorf("expected %d, got %d: %w", fc.chainID, chainID, ErrIncorrectChainId)
 	}
 	return nil
 }

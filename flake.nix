@@ -18,11 +18,12 @@
             pkgs.gopls
             pkgs.golangci-lint
             pkgs.just
+            (pkgs.writeShellScriptBin "abigen" "exec ${pkgs.go-ethereum}/bin/abigen \"$@\"")
           ];
 
           shellHook = ''
             export GOPATH="$HOME/go"
-            export PATH="$GOPATH/bin:$PATH"
+            export PATH="$PATH:$GOPATH/bin"
           '';
         };
       });
