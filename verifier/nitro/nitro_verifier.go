@@ -251,7 +251,7 @@ func (v *NitroEspressoBatchVerifier) drainAndVerifyMessages(ctx context.Context)
 			break
 		}
 
-		v.advance()
+		v.advance(espressoMsg.MessageWithMeta.DelayedMessagesRead - 1)
 		verifiedMsg = espressoMsg
 		v.logger.Info("successfully verified nitro message", "msg_pos", verifiedMsg.Pos)
 	}
@@ -333,9 +333,10 @@ func (v *NitroEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 	)
 }
 
-func (v *NitroEspressoBatchVerifier) advance() {
+func (v *NitroEspressoBatchVerifier) advance(messageIndex uint64) {
 	v.streamer.Advance()
 	v.feedClient.Advance()
+	v.delayedMsgFetcher.Advance(messageIndex)
 }
 
 func (v *NitroEspressoBatchVerifier) advanceTo(pos uint64) {
