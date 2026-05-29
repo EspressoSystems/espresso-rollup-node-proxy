@@ -6,13 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -24,188 +26,378 @@ const (
 	eventInboxMessageDelivered = "InboxMessageDelivered"
 	eventInboxFromOrigin       = "InboxMessageDeliveredFromOrigin"
 	methodSendL2FromOrigin     = "sendL2MessageFromOrigin"
+	maxBlocksPerScan           = 10000
+	startBlockLookback         = 20000
 
 	// abiSelectorLen is the number of bytes used by the ABI function selector
 	// (first 4 bytes of keccak256 of the function signature).
 	abiSelectorLen = 4
 )
 
-// ErrL1NotFinalized is returned when the L1 block containing the delayed message
+// ErrParentBlockNotFinalized is returned when the Parent block containing the delayed message
 // has not yet been finalized.
-var ErrL1NotFinalized = errors.New("L1 block not yet finalized")
+var ErrParentBlockNotFinalized = errors.New("parent block not yet finalized")
+
+// ErrDelayedMessageNotFound is returned when the delayed message has not yet been found
+var ErrDelayedMessageNotFound = errors.New("delayed message not yet found")
 
 type sendL2MessageFromOrigin struct {
 	MessageData []byte
 }
 
+type delayedMessage struct {
+	data        []byte
+	parentBlock uint64
+}
+
 type DelayedMessageFetcher struct {
-	l1Client        *ethclient.Client
-	bridgeAddress   common.Address
-	waitForFinality bool
-	logger          log.Logger
+	l1Client          *ethclient.Client
+	bridgeAddress     common.Address
+	waitForFinality   bool
+	parentBlockNumber uint64
+	bridgeFilterer    *nitroabi.BridgeFilterer
+	delayedMessages   map[uint64]*delayedMessage
+
+	cancel  context.CancelFunc
+	runWg   sync.WaitGroup
+	running atomic.Bool
 
 	inboxMessageDeliveredTopic common.Hash
 	inboxFromOriginTopic       common.Hash
 	sendL2FromOriginInputs     abi.Arguments
 	sendL2FromOriginSelector   []byte
+
+	logger log.Logger
 }
 
-func NewDelayedMessageFetcher(l1Client *ethclient.Client, bridgeAddress common.Address, waitForFinality bool, logger log.Logger) *DelayedMessageFetcher {
+func NewDelayedMessageFetcher(
+	ctx context.Context,
+	l1Client *ethclient.Client,
+	bridgeAddress common.Address,
+	waitForFinality bool,
+	logger log.Logger,
+) *DelayedMessageFetcher {
 	inboxAbi, err := nitroabi.InboxMetaData.GetAbi()
 	if err != nil {
 		panic("error getting inbox ABI: " + err.Error())
 	}
 
+	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	finalized, err := l1Client.HeaderByNumber(timeoutCtx, big.NewInt(rpc.FinalizedBlockNumber.Int64()))
+	if err != nil {
+		panic(fmt.Sprintf("failed to fetch L1 header: %v", err))
+	}
+
+	filterer, err := nitroabi.NewBridgeFilterer(bridgeAddress, l1Client)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create bridge filterer: %v", err))
+	}
+
+	finalizedBlock := finalized.Number.Uint64()
+	var startBlock uint64
+	if finalizedBlock > startBlockLookback {
+		startBlock = finalizedBlock - startBlockLookback
+	}
+
+	logger.Info(
+		"delayed message fetcher starting from finalized parent block",
+		"start_parent_chain_block", startBlock,
+		"finalized_parent_chain_block", finalizedBlock,
+	)
+
 	return &DelayedMessageFetcher{
 		l1Client:                   l1Client,
 		bridgeAddress:              bridgeAddress,
 		waitForFinality:            waitForFinality,
-		logger:                     logger,
+		parentBlockNumber:          startBlock,
+		bridgeFilterer:             filterer,
+		delayedMessages:            make(map[uint64]*delayedMessage),
 		inboxMessageDeliveredTopic: inboxAbi.Events[eventInboxMessageDelivered].ID,
 		inboxFromOriginTopic:       inboxAbi.Events[eventInboxFromOrigin].ID,
 		sendL2FromOriginInputs:     inboxAbi.Methods[methodSendL2FromOrigin].Inputs,
 		sendL2FromOriginSelector:   inboxAbi.Methods[methodSendL2FromOrigin].ID,
+		logger:                     logger,
 	}
 }
 
-// FetchDelayedMessageFromL1 fetches the full L2msg bytes for the delayed message at
-// messageIndex from the Bridge and Inbox contracts at the given L1 block.
-func (f *DelayedMessageFetcher) FetchDelayedMessageFromL1(
-	ctx context.Context,
-	l1BlockNumber uint64,
-	messageIndex uint64,
-) ([]byte, error) {
+func (f *DelayedMessageFetcher) GetDelayedMessage(ctx context.Context, messageIndex uint64) ([]byte, error) {
+	delayedMsg := f.delayedMessages[messageIndex]
+	if delayedMsg == nil {
+		return nil, fmt.Errorf(
+			"messageIndex=%d parentBlock=%d: %w",
+			messageIndex,
+			f.parentBlockNumber,
+			ErrDelayedMessageNotFound,
+		)
+	}
 	if f.waitForFinality {
-		finalizedHeader, err := f.l1Client.HeaderByNumber(ctx, big.NewInt(rpc.FinalizedBlockNumber.Int64()))
+		err := f.verifyFinality(ctx, delayedMsg, messageIndex)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get L1 finalized block: %w", err)
+			return nil, err
 		}
-		if l1BlockNumber > finalizedHeader.Number.Uint64() {
-			return nil, fmt.Errorf("block=%d finalized=%d: %w", l1BlockNumber, finalizedHeader.Number.Uint64(), ErrL1NotFinalized)
-		}
-	}
-	delivered, err := f.fetchBridgeEvent(ctx, l1BlockNumber, messageIndex)
-	if err != nil {
-		return nil, err
+		return delayedMsg.data, nil
 	}
 
-	data, err := f.fetchInboxData(ctx, delivered.Inbox, l1BlockNumber, messageIndex)
-	if err != nil {
-		return nil, err
-	}
-
-	if crypto.Keccak256Hash(data) != delivered.MessageDataHash {
-		return nil, fmt.Errorf("message data hash mismatch for messageIndex=%d", messageIndex)
-	}
-	return data, nil
+	f.logger.Info(
+		"delayed message retrieved",
+		"message_index", messageIndex,
+		"parent_block", delayedMsg.parentBlock,
+	)
+	return delayedMsg.data, nil
 }
 
-func (f *DelayedMessageFetcher) fetchBridgeEvent(ctx context.Context, l1BlockNumber uint64, messageIndex uint64) (*nitroabi.BridgeMessageDelivered, error) {
-	filterer, err := nitroabi.NewBridgeFilterer(f.bridgeAddress, f.l1Client)
+func (f *DelayedMessageFetcher) verifyFinality(ctx context.Context, delayedMsg *delayedMessage, messageIndex uint64) error {
+	finalizedHeader, err := f.l1Client.HeaderByNumber(ctx, big.NewInt(rpc.FinalizedBlockNumber.Int64()))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create bridge filterer: %w", err)
+		return err
 	}
-	messageDeliveredIter, err := filterer.FilterMessageDelivered(
-		&bind.FilterOpts{Context: ctx, Start: l1BlockNumber, End: &l1BlockNumber},
-		[]*big.Int{new(big.Int).SetUint64(messageIndex)},
+	if delayedMsg.parentBlock > finalizedHeader.Number.Uint64() {
+		return fmt.Errorf(
+			"msgIndex=%d, parentBlock=%d, finalizedBlock=%d: %w",
+			messageIndex,
+			delayedMsg.parentBlock,
+			finalizedHeader.Number.Uint64(),
+			ErrParentBlockNotFinalized,
+		)
+	}
+
+	f.logger.Info(
+		"delayed message retrieved",
+		"message_index", messageIndex,
+		"parent_block", delayedMsg.parentBlock,
+		"finalized_block", finalizedHeader.Number.Uint64(),
+	)
+	return nil
+}
+
+func (f *DelayedMessageFetcher) fetchDelayedMessageFromParent(
+	ctx context.Context,
+	endBlock uint64,
+) error {
+	delivered, err := f.fetchBridgeEvents(ctx, endBlock)
+	if err != nil {
+		return err
+	}
+	if len(delivered) == 0 {
+		f.logger.Debug(
+			"no bridge message delivered events found, advancing parent block number",
+			"old_parent_block_number", f.parentBlockNumber,
+			"new_parent_block_number", endBlock+1,
+		)
+		f.parentBlockNumber = endBlock + 1
+		return nil
+	}
+
+	if err = f.fetchInboxData(ctx, delivered, endBlock); err != nil {
+		return err
+	}
+	f.parentBlockNumber = endBlock + 1
+
+	return nil
+}
+
+func (f *DelayedMessageFetcher) fetchBridgeEvents(ctx context.Context, endBlock uint64) ([]*nitroabi.BridgeMessageDelivered, error) {
+	messageDeliveredIter, err := f.bridgeFilterer.FilterMessageDelivered(
+		&bind.FilterOpts{Context: ctx, Start: f.parentBlockNumber, End: &endBlock},
+		nil,
 		nil,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to filter Bridge MessageDelivered logs: %w", err)
 	}
 	defer func() { _ = messageDeliveredIter.Close() }()
-	if !messageDeliveredIter.Next() {
-		if err := messageDeliveredIter.Error(); err != nil {
-			return nil, fmt.Errorf("error iterating MessageDelivered events: %w", err)
-		}
-		return nil, fmt.Errorf("no MessageDelivered event for messageIndex=%d at L1 block %d", messageIndex, l1BlockNumber)
+
+	var events []*nitroabi.BridgeMessageDelivered
+	for messageDeliveredIter.Next() {
+		events = append(events, messageDeliveredIter.Event)
 	}
-	return messageDeliveredIter.Event, nil
+	if err := messageDeliveredIter.Error(); err != nil {
+		return nil, fmt.Errorf("error iterating MessageDelivered events: %w", err)
+	}
+	return events, nil
 }
 
 func (f *DelayedMessageFetcher) fetchInboxData(
 	ctx context.Context,
-	inboxAddress common.Address,
-	l1BlockNumber uint64,
-	messageIndex uint64,
-) ([]byte, error) {
-	block := new(big.Int).SetUint64(l1BlockNumber)
-	msgIdxHash := common.BigToHash(new(big.Int).SetUint64(messageIndex))
+	delivered []*nitroabi.BridgeMessageDelivered,
+	endBlock uint64,
+) error {
+	startBlock := new(big.Int).SetUint64(f.parentBlockNumber)
+	end := new(big.Int).SetUint64(endBlock)
 
-	// We know the l1 block number from the feed, if it is not found, we do not advance espresso tag
+	addresses := make([]common.Address, 0, len(delivered))
+	seen := make(map[common.Address]bool)
+
+	for _, event := range delivered {
+		if !seen[event.Inbox] {
+			seen[event.Inbox] = true
+			addresses = append(addresses, event.Inbox)
+		}
+	}
+
 	logs, err := f.l1Client.FilterLogs(ctx, ethereum.FilterQuery{
-		FromBlock: block,
-		ToBlock:   block,
-		Addresses: []common.Address{inboxAddress},
-		Topics:    [][]common.Hash{{f.inboxMessageDeliveredTopic, f.inboxFromOriginTopic}, {msgIdxHash}},
+		FromBlock: startBlock,
+		ToBlock:   end,
+		Addresses: addresses,
+		Topics:    [][]common.Hash{{f.inboxMessageDeliveredTopic, f.inboxFromOriginTopic}},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to filter Inbox logs: %w", err)
+		return fmt.Errorf("failed to filter Inbox logs: %w", err)
 	}
 	if len(logs) == 0 {
-		return nil, fmt.Errorf("no Inbox event for messageIndex=%d at L1 block %d", messageIndex, l1BlockNumber)
+		f.logger.Info(
+			"no Inbox events found for message, advancing parent block number",
+			"old_parent_block_number", f.parentBlockNumber,
+			"new_parent_block_number", endBlock+1,
+		)
+		f.parentBlockNumber = endBlock + 1
+		return nil
 	}
 
-	filterer, err := nitroabi.NewInboxFilterer(inboxAddress, f.l1Client)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create inbox filterer: %w", err)
+	// Cache a filterer per inbox so we can dispatch parsing to the right ABI binding.
+	filterers := make(map[common.Address]*nitroabi.InboxFilterer, len(addresses))
+	for _, addr := range addresses {
+		filterer, err := nitroabi.NewInboxFilterer(addr, f.l1Client)
+		if err != nil {
+			return fmt.Errorf("failed to create inbox filterer for %s: %w", addr.Hex(), err)
+		}
+		filterers[addr] = filterer
 	}
-	return f.extractInboxData(ctx, filterer, logs[0])
+
+	return f.extractInboxData(ctx, filterers, logs)
 }
 
 func (f *DelayedMessageFetcher) extractInboxData(
 	ctx context.Context,
-	filterer *nitroabi.InboxFilterer,
-	ethLog types.Log,
-) ([]byte, error) {
-	switch ethLog.Topics[0] {
-	case f.inboxMessageDeliveredTopic:
-		return f.extractFromInboxMessageDelivered(filterer, ethLog)
-	case f.inboxFromOriginTopic:
-		return f.extractFromInboxFromOrigin(ctx, ethLog)
-	default:
-		return nil, fmt.Errorf("unexpected inbox log topic: %s", ethLog.Topics[0].Hex())
+	filterers map[common.Address]*nitroabi.InboxFilterer,
+	ethLogs []types.Log,
+) error {
+	for _, ethLog := range ethLogs {
+		if len(ethLog.Topics) < 2 {
+			return fmt.Errorf("inbox log missing messageIndex topic")
+		}
+		msgIndex := ethLog.Topics[1].Big().Uint64()
+		filterer, ok := filterers[ethLog.Address]
+		if !ok {
+			return fmt.Errorf("no filterer registered for inbox %s", ethLog.Address.Hex())
+		}
+		switch ethLog.Topics[0] {
+		case f.inboxMessageDeliveredTopic:
+			if err := f.extractFromInboxMessageDelivered(filterer, ethLog, msgIndex); err != nil {
+				return err
+			}
+		case f.inboxFromOriginTopic:
+			if err := f.extractFromInboxFromOrigin(ctx, ethLog, msgIndex); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("unexpected inbox log topic: %s", ethLog.Topics[0].Hex())
+		}
 	}
+	return nil
 }
 
-func (f *DelayedMessageFetcher) extractFromInboxMessageDelivered(filterer *nitroabi.InboxFilterer, ethLog types.Log) ([]byte, error) {
+func (f *DelayedMessageFetcher) extractFromInboxMessageDelivered(filterer *nitroabi.InboxFilterer, ethLog types.Log, msgIndex uint64) error {
 	event, err := filterer.ParseInboxMessageDelivered(ethLog)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse InboxMessageDelivered: %w", err)
+		return fmt.Errorf("failed to parse InboxMessageDelivered: %w", err)
 	}
 	f.logger.Info(
 		"fetched delayed message via InboxMessageDelivered",
-		"l1_block_num", ethLog.BlockNumber,
+		"message_index", msgIndex,
+		"parent_block_num", ethLog.BlockNumber,
 		"tx_hash", ethLog.TxHash.Hex(),
 		"data_len", len(event.Data),
 	)
-	return event.Data, nil
+	f.delayedMessages[msgIndex] = &delayedMessage{
+		data:        event.Data,
+		parentBlock: ethLog.BlockNumber,
+	}
+	return nil
 }
 
-func (f *DelayedMessageFetcher) extractFromInboxFromOrigin(ctx context.Context, ethLog types.Log) ([]byte, error) {
+func (f *DelayedMessageFetcher) extractFromInboxFromOrigin(ctx context.Context, ethLog types.Log, msgIndex uint64) error {
 	tx, _, err := f.l1Client.TransactionByHash(ctx, ethLog.TxHash)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch tx for InboxMessageDeliveredFromOrigin: %w", err)
+		return fmt.Errorf("failed to fetch tx for InboxMessageDeliveredFromOrigin: %w", err)
 	}
 
 	data := tx.Data()
 	if !bytes.HasPrefix(data, f.sendL2FromOriginSelector) {
-		return nil, fmt.Errorf("tx selector mismatch: expected sendL2MessageFromOrigin (%x), got %x", f.sendL2FromOriginSelector, data[:min(len(data), abiSelectorLen)])
+		return fmt.Errorf("tx selector mismatch: expected sendL2MessageFromOrigin (%x), got %x", f.sendL2FromOriginSelector, data[:min(len(data), abiSelectorLen)])
 	}
 
 	values, err := f.sendL2FromOriginInputs.Unpack(data[abiSelectorLen:])
 	if err != nil {
-		return nil, fmt.Errorf("failed to unpack sendL2MessageFromOrigin calldata: %w", err)
+		return fmt.Errorf("failed to unpack sendL2MessageFromOrigin calldata: %w", err)
 	}
 	var l2Msg sendL2MessageFromOrigin
 	if err := f.sendL2FromOriginInputs.Copy(&l2Msg, values); err != nil {
-		return nil, fmt.Errorf("failed to copy sendL2MessageFromOrigin: %w", err)
+		return fmt.Errorf("failed to copy sendL2MessageFromOrigin: %w", err)
 	}
 	f.logger.Info(
 		"fetched delayed message from sendL2MessageFromOrigin",
-		"l1_block_num", ethLog.BlockNumber,
+		"message_index", msgIndex,
+		"parent_block_num", ethLog.BlockNumber,
 		"tx_hash", ethLog.TxHash.Hex(),
 		"data_len", len(l2Msg.MessageData),
 	)
-	return l2Msg.MessageData, nil
+	f.delayedMessages[msgIndex] = &delayedMessage{
+		data:        l2Msg.MessageData,
+		parentBlock: ethLog.BlockNumber,
+	}
+	return nil
+}
+
+func (f *DelayedMessageFetcher) run(ctx context.Context) {
+	defer f.runWg.Done()
+	ticker := time.NewTicker(time.Second * 5)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			latestHeader, err := f.l1Client.HeaderByNumber(ctx, nil)
+			if err != nil {
+				f.logger.Warn("failed to fetch L1 latest header", "error", err)
+				continue
+			}
+			endBlock := latestHeader.Number.Uint64()
+			if endBlock-f.parentBlockNumber >= maxBlocksPerScan {
+				endBlock = f.parentBlockNumber + maxBlocksPerScan
+			}
+			if err := f.fetchDelayedMessageFromParent(ctx, endBlock); err != nil {
+				f.logger.Warn("failed to fetch delayed messages", "error", err)
+			}
+		}
+	}
+}
+
+func (f *DelayedMessageFetcher) Start(ctx context.Context) {
+	if !f.running.CompareAndSwap(false, true) {
+		f.logger.Warn("Delayed message fetcher is already running")
+		return
+	}
+
+	log.Info("started Delayed Message fetcher")
+
+	ctx, cancel := context.WithCancel(ctx)
+	f.cancel = cancel
+	f.runWg.Add(1)
+	go f.run(ctx)
+}
+
+func (f *DelayedMessageFetcher) Stop() {
+	if !f.running.CompareAndSwap(true, false) {
+		f.logger.Warn("Delayed message fetcher is not running")
+		return
+	}
+	f.logger.Info("Stopping Delayed Message fetcher")
+	if f.cancel != nil {
+		f.cancel()
+	}
+	f.runWg.Wait()
 }

@@ -162,6 +162,7 @@ func NewNitroEspressoBatchVerifier(
 			config.FinalityPollInterval,
 		),
 		delayedMsgFetcher: delayedmessagefetcher.NewDelayedMessageFetcher(
+			ctx,
 			l1Client,
 			config.BridgeAddress,
 			config.WaitForL1Finalization,
@@ -186,6 +187,7 @@ func (v *NitroEspressoBatchVerifier) Start(ctx context.Context) {
 
 	v.feedClient.Start(ctx)
 	v.finalityPoller.Start(ctx)
+	v.delayedMsgFetcher.Start(ctx)
 
 	v.runWg.Add(1)
 	go v.run(ctx)
@@ -236,11 +238,11 @@ func (v *NitroEspressoBatchVerifier) drainAndVerifyMessages(ctx context.Context)
 		}
 
 		if err := v.verifyMessage(ctx, espressoMsg, feedMsg); err != nil {
-			if errors.Is(err, delayedmessagefetcher.ErrL1NotFinalized) {
+			if errors.Is(err, delayedmessagefetcher.ErrParentBlockNotFinalized) || errors.Is(err, delayedmessagefetcher.ErrDelayedMessageNotFound) {
 				// This can get noisy so rate limit because if sequencer is set to safe block
 				// then we may be waiting another 7 minutes for L1 finalization
 				if time.Since(v.lastFinalityWaitLog) > l1FinalityWaitLogInterval {
-					v.logger.Warn("waiting for L1 finalization", "msg_pos", espressoMsg.Pos, "error", err)
+					v.logger.Warn("error verifying delayed message", "msg_pos", espressoMsg.Pos, "error", err)
 					v.lastFinalityWaitLog = time.Now()
 				}
 			} else {
@@ -275,23 +277,19 @@ func (v *NitroEspressoBatchVerifier) verifyDelayedMessage(ctx context.Context, e
 	}
 
 	// Get the delayed message data from L1 and verify it matches the feed.
-	l1BlockNumber := espressoMsg.Message.Header.BlockNumber
 	messageIndex := espressoMsg.DelayedMessagesRead - 1
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	delayedMsg, err := v.delayedMsgFetcher.FetchDelayedMessageFromL1(
-		timeoutCtx,
-		l1BlockNumber,
+	delayedMsg, err := v.delayedMsgFetcher.GetDelayedMessage(
+		ctx,
 		messageIndex,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to fetch delayed message from L1: %w", err)
+		return fmt.Errorf("failed to fetch delayed message from parent chain: %w", err)
 	}
 	if !bytes.Equal(delayedMsg, feedMsg.Message.L2msg) {
 		return fmt.Errorf("delayed message L2msg mismatch for messageIndex=%d", messageIndex)
 	}
-	v.logger.Info("delayed message verified", "msg_pos", pos, "l1_block_num", l1BlockNumber, "delayed_msg_num", espressoMsg.DelayedMessagesRead)
+	v.logger.Info("delayed message verified", "msg_pos", pos, "delayed_msg_num", espressoMsg.DelayedMessagesRead)
 	return nil
 }
 
@@ -392,6 +390,7 @@ func (v *NitroEspressoBatchVerifier) Stop() {
 	}
 	v.runWg.Wait()
 	v.finalityPoller.Stop()
+	v.delayedMsgFetcher.Stop()
 	v.streamer.StopAndWait()
 	v.l1Client.Close()
 	v.l2Client.Close()
