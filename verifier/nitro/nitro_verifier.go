@@ -286,8 +286,10 @@ func (v *NitroEspressoBatchVerifier) verifyDelayedMessage(ctx context.Context, e
 	if err != nil {
 		return fmt.Errorf("failed to fetch delayed message from parent chain: %w", err)
 	}
-	if !bytes.Equal(delayedMsg, feedMsg.Message.L2msg) {
-		return fmt.Errorf("delayed message L2msg mismatch for messageIndex=%d", messageIndex)
+
+	espressoMsg.Message.L2msg = delayedMsg
+	if err := ensureMessagesMatch(espressoMsg, feedMsg); err != nil {
+		return fmt.Errorf("failed to verify delayed message: %w", err)
 	}
 	v.logger.Info("delayed message verified", "msg_pos", pos, "delayed_msg_num", espressoMsg.DelayedMessagesRead)
 	return nil

@@ -28,18 +28,28 @@ const (
 	methodSendL2FromOrigin     = "sendL2MessageFromOrigin"
 	maxBlocksPerScan           = 10000
 	startBlockLookback         = 20000
+	timeoutPerCall             = 10 * time.Second
+	pollInterval               = 5 * time.Second
+
+	// Two events are:
+	// `event InboxMessageDelivered(uint256 indexed messageNum, bytes data)`
+	// `event InboxMessageDeliveredFromOrigin(uint256 indexed messageNum)`
+	// Both have message number indexed at the topic index 1.
+	messageIndexTopicPos = 1
 
 	// abiSelectorLen is the number of bytes used by the ABI function selector
 	// (first 4 bytes of keccak256 of the function signature).
 	abiSelectorLen = 4
 )
 
-// ErrParentBlockNotFinalized is returned when the Parent block containing the delayed message
-// has not yet been finalized.
-var ErrParentBlockNotFinalized = errors.New("parent block not yet finalized")
+var (
+	// ErrParentBlockNotFinalized is returned when the Parent block containing the delayed message
+	// has not yet been finalized.
+	ErrParentBlockNotFinalized = errors.New("parent block not yet finalized")
 
-// ErrDelayedMessageNotFound is returned when the delayed message has not yet been found
-var ErrDelayedMessageNotFound = errors.New("delayed message not yet found")
+	// ErrDelayedMessageNotFound is returned when the delayed message has not yet been found
+	ErrDelayedMessageNotFound = errors.New("delayed message not yet found")
+)
 
 type sendL2MessageFromOrigin struct {
 	MessageData []byte
@@ -85,7 +95,7 @@ func NewDelayedMessageFetcher(
 		panic("error getting inbox ABI: " + err.Error())
 	}
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeoutPerCall)
 	defer cancel()
 	finalized, err := l1Client.HeaderByNumber(timeoutCtx, big.NewInt(rpc.FinalizedBlockNumber.Int64()))
 	if err != nil {
@@ -157,16 +167,24 @@ func (f *DelayedMessageFetcher) GetDelayedMessage(ctx context.Context, messageIn
 func (f *DelayedMessageFetcher) Advance(messageIndex uint64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if len(f.delayedMessages) == 0 {
+		return
+	}
 	for _, msg := range f.delayedMessages {
 		if msg.messageIndex <= messageIndex {
 			delete(f.delayedMessages, msg.messageIndex)
-			f.logger.Info("delayed message advanced", "message_index", msg.messageIndex)
+			if msg.messageIndex == messageIndex {
+				f.logger.Info("delayed message advanced", "message_index", messageIndex)
+			}
 		}
 	}
+
 }
 
 func (f *DelayedMessageFetcher) verifyFinality(ctx context.Context, delayedMsg *delayedMessage, messageIndex uint64) error {
-	finalizedHeader, err := f.l1Client.HeaderByNumber(ctx, big.NewInt(rpc.FinalizedBlockNumber.Int64()))
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeoutPerCall)
+	defer cancel()
+	finalizedHeader, err := f.l1Client.HeaderByNumber(timeoutCtx, big.NewInt(rpc.FinalizedBlockNumber.Int64()))
 	if err != nil {
 		return err
 	}
@@ -224,7 +242,11 @@ func (f *DelayedMessageFetcher) fetchBridgeEvents(ctx context.Context, endBlock 
 	if err != nil {
 		return nil, fmt.Errorf("failed to filter Bridge MessageDelivered logs: %w", err)
 	}
-	defer func() { _ = messageDeliveredIter.Close() }()
+	defer func() {
+		if err := messageDeliveredIter.Close(); err != nil {
+			f.logger.Warn("failed to close message delivered iterator", "error", err)
+		}
+	}()
 
 	var events []*nitroabi.BridgeMessageDelivered
 	for messageDeliveredIter.Next() {
@@ -280,6 +302,7 @@ func (f *DelayedMessageFetcher) fetchInboxData(
 		if err != nil {
 			return fmt.Errorf("failed to create inbox filterer for %s: %w", addr.Hex(), err)
 		}
+
 		filterers[addr] = filterer
 	}
 
@@ -289,28 +312,32 @@ func (f *DelayedMessageFetcher) fetchInboxData(
 func (f *DelayedMessageFetcher) extractInboxData(
 	ctx context.Context,
 	filterers map[common.Address]*nitroabi.InboxFilterer,
-	ethLogs []types.Log,
+	eventLogs []types.Log,
 ) error {
-	for _, ethLog := range ethLogs {
-		if len(ethLog.Topics) < 2 {
+	for _, eventLog := range eventLogs {
+		// Length of topics needs to be at least messageIndexPos + 1
+		// Because signature is at index 0, and message index is at index 1
+		if len(eventLog.Topics) < messageIndexTopicPos+1 {
 			return fmt.Errorf("inbox log missing messageIndex topic")
 		}
-		msgIndex := ethLog.Topics[1].Big().Uint64()
-		filterer, ok := filterers[ethLog.Address]
+		msgIndex := eventLog.Topics[messageIndexTopicPos].Big().Uint64()
+
+		filterer, ok := filterers[eventLog.Address]
 		if !ok {
-			return fmt.Errorf("no filterer registered for inbox %s", ethLog.Address.Hex())
+			return fmt.Errorf("no filterer registered for inbox %s", eventLog.Address.Hex())
 		}
-		switch ethLog.Topics[0] {
+
+		switch eventLog.Topics[0] {
 		case f.inboxMessageDeliveredTopic:
-			if err := f.extractFromInboxMessageDelivered(filterer, ethLog, msgIndex); err != nil {
+			if err := f.extractFromInboxMessageDelivered(filterer, eventLog, msgIndex); err != nil {
 				return err
 			}
 		case f.inboxFromOriginTopic:
-			if err := f.extractFromInboxFromOrigin(ctx, ethLog, msgIndex); err != nil {
+			if err := f.extractFromInboxFromOrigin(ctx, eventLog, msgIndex); err != nil {
 				return err
 			}
 		default:
-			return fmt.Errorf("unexpected inbox log topic: %s", ethLog.Topics[0].Hex())
+			return fmt.Errorf("unexpected inbox log topic: %s", eventLog.Topics[0].Hex())
 		}
 	}
 	return nil
@@ -342,8 +369,8 @@ func (f *DelayedMessageFetcher) extractFromInboxMessageDelivered(
 	return nil
 }
 
-func (f *DelayedMessageFetcher) extractFromInboxFromOrigin(ctx context.Context, ethLog types.Log, msgIndex uint64) error {
-	tx, _, err := f.l1Client.TransactionByHash(ctx, ethLog.TxHash)
+func (f *DelayedMessageFetcher) extractFromInboxFromOrigin(ctx context.Context, eventLog types.Log, msgIndex uint64) error {
+	tx, _, err := f.l1Client.TransactionByHash(ctx, eventLog.TxHash)
 	if err != nil {
 		return fmt.Errorf("failed to fetch tx for InboxMessageDeliveredFromOrigin: %w", err)
 	}
@@ -364,15 +391,15 @@ func (f *DelayedMessageFetcher) extractFromInboxFromOrigin(ctx context.Context, 
 	f.logger.Info(
 		"fetched delayed message from sendL2MessageFromOrigin",
 		"message_index", msgIndex,
-		"parent_block_num", ethLog.BlockNumber,
-		"tx_hash", ethLog.TxHash.Hex(),
+		"parent_block_num", eventLog.BlockNumber,
+		"tx_hash", eventLog.TxHash.Hex(),
 		"data_len", len(l2Msg.MessageData),
 	)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.delayedMessages[msgIndex] = &delayedMessage{
 		data:         l2Msg.MessageData,
-		parentBlock:  ethLog.BlockNumber,
+		parentBlock:  eventLog.BlockNumber,
 		messageIndex: msgIndex,
 	}
 	return nil
@@ -380,7 +407,7 @@ func (f *DelayedMessageFetcher) extractFromInboxFromOrigin(ctx context.Context, 
 
 func (f *DelayedMessageFetcher) run(ctx context.Context) {
 	defer f.runWg.Done()
-	ticker := time.NewTicker(time.Second * 5)
+	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
 	for {
@@ -388,7 +415,9 @@ func (f *DelayedMessageFetcher) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			latestHeader, err := f.l1Client.HeaderByNumber(ctx, nil)
+			timeoutCtx, cancel := context.WithTimeout(ctx, timeoutPerCall)
+			defer cancel()
+			latestHeader, err := f.l1Client.HeaderByNumber(timeoutCtx, nil)
 			if err != nil {
 				f.logger.Warn("failed to fetch L1 latest header", "error", err)
 				continue
@@ -398,7 +427,7 @@ func (f *DelayedMessageFetcher) run(ctx context.Context) {
 			if endBlock-parentBlock >= maxBlocksPerScan {
 				endBlock = parentBlock + maxBlocksPerScan
 			}
-			if err := f.fetchDelayedMessageFromParent(ctx, endBlock); err != nil {
+			if err := f.fetchDelayedMessageFromParent(timeoutCtx, endBlock); err != nil {
 				f.logger.Warn("failed to fetch delayed messages", "error", err)
 			}
 		}
