@@ -15,6 +15,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -268,12 +269,14 @@ func (f *DelayedMessageFetcher) fetchInboxData(
 
 	addresses := make([]common.Address, 0, len(delivered))
 	seen := make(map[common.Address]bool)
+	dataHashes := make(map[uint64]common.Hash, len(delivered))
 
 	for _, event := range delivered {
 		if !seen[event.Inbox] {
 			seen[event.Inbox] = true
 			addresses = append(addresses, event.Inbox)
 		}
+		dataHashes[event.MessageIndex.Uint64()] = common.Hash(event.MessageDataHash)
 	}
 
 	logs, err := f.l1Client.FilterLogs(ctx, ethereum.FilterQuery{
@@ -306,12 +309,13 @@ func (f *DelayedMessageFetcher) fetchInboxData(
 		filterers[addr] = filterer
 	}
 
-	return f.extractInboxData(ctx, filterers, logs)
+	return f.extractInboxData(ctx, filterers, dataHashes, logs)
 }
 
 func (f *DelayedMessageFetcher) extractInboxData(
 	ctx context.Context,
 	filterers map[common.Address]*nitroabi.InboxFilterer,
+	dataHashes map[uint64]common.Hash,
 	eventLogs []types.Log,
 ) error {
 	for _, eventLog := range eventLogs {
@@ -327,18 +331,36 @@ func (f *DelayedMessageFetcher) extractInboxData(
 			return fmt.Errorf("no filterer registered for inbox %s", eventLog.Address.Hex())
 		}
 
+		var data []byte
+		var err error
 		switch eventLog.Topics[0] {
 		case f.inboxMessageDeliveredTopic:
-			if err := f.extractFromInboxMessageDelivered(filterer, eventLog, msgIndex); err != nil {
-				return err
-			}
+			data, err = f.extractFromInboxMessageDelivered(filterer, eventLog, msgIndex)
 		case f.inboxFromOriginTopic:
-			if err := f.extractFromInboxFromOrigin(ctx, eventLog, msgIndex); err != nil {
-				return err
-			}
+			data, err = f.extractFromInboxFromOrigin(ctx, eventLog, msgIndex)
 		default:
 			return fmt.Errorf("unexpected inbox log topic: %s", eventLog.Topics[0].Hex())
 		}
+		if err != nil {
+			return err
+		}
+
+		// Check the data matches the bridge's committed MessageDataHash for specified message index
+		expected, ok := dataHashes[msgIndex]
+		if !ok {
+			return fmt.Errorf("no MessageDelivered hash for messageIndex=%d", msgIndex)
+		}
+		if crypto.Keccak256Hash(data) != expected {
+			return fmt.Errorf("message data hash mismatch for messageIndex=%d", msgIndex)
+		}
+
+		f.mu.Lock()
+		f.delayedMessages[msgIndex] = &delayedMessage{
+			data:         data,
+			parentBlock:  eventLog.BlockNumber,
+			messageIndex: msgIndex,
+		}
+		f.mu.Unlock()
 	}
 	return nil
 }
@@ -347,10 +369,10 @@ func (f *DelayedMessageFetcher) extractFromInboxMessageDelivered(
 	filterer *nitroabi.InboxFilterer,
 	ethLog types.Log,
 	msgIndex uint64,
-) error {
+) ([]byte, error) {
 	event, err := filterer.ParseInboxMessageDelivered(ethLog)
 	if err != nil {
-		return fmt.Errorf("failed to parse InboxMessageDelivered: %w", err)
+		return nil, fmt.Errorf("failed to parse InboxMessageDelivered: %w", err)
 	}
 	f.logger.Info(
 		"fetched delayed message via InboxMessageDelivered",
@@ -359,34 +381,27 @@ func (f *DelayedMessageFetcher) extractFromInboxMessageDelivered(
 		"tx_hash", ethLog.TxHash.Hex(),
 		"data_len", len(event.Data),
 	)
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.delayedMessages[msgIndex] = &delayedMessage{
-		data:         event.Data,
-		parentBlock:  ethLog.BlockNumber,
-		messageIndex: msgIndex,
-	}
-	return nil
+	return event.Data, nil
 }
 
-func (f *DelayedMessageFetcher) extractFromInboxFromOrigin(ctx context.Context, eventLog types.Log, msgIndex uint64) error {
+func (f *DelayedMessageFetcher) extractFromInboxFromOrigin(ctx context.Context, eventLog types.Log, msgIndex uint64) ([]byte, error) {
 	tx, _, err := f.l1Client.TransactionByHash(ctx, eventLog.TxHash)
 	if err != nil {
-		return fmt.Errorf("failed to fetch tx for InboxMessageDeliveredFromOrigin: %w", err)
+		return nil, fmt.Errorf("failed to fetch tx for InboxMessageDeliveredFromOrigin: %w", err)
 	}
 
-	data := tx.Data()
-	if !bytes.HasPrefix(data, f.sendL2FromOriginSelector) {
-		return fmt.Errorf("tx selector mismatch: expected sendL2MessageFromOrigin (%x), got %x", f.sendL2FromOriginSelector, data[:min(len(data), abiSelectorLen)])
+	txData := tx.Data()
+	if !bytes.HasPrefix(txData, f.sendL2FromOriginSelector) {
+		return nil, fmt.Errorf("tx selector mismatch: expected sendL2MessageFromOrigin (%x), got %x", f.sendL2FromOriginSelector, txData[:min(len(txData), abiSelectorLen)])
 	}
 
-	values, err := f.sendL2FromOriginInputs.Unpack(data[abiSelectorLen:])
+	values, err := f.sendL2FromOriginInputs.Unpack(txData[abiSelectorLen:])
 	if err != nil {
-		return fmt.Errorf("failed to unpack sendL2MessageFromOrigin calldata: %w", err)
+		return nil, fmt.Errorf("failed to unpack sendL2MessageFromOrigin calldata: %w", err)
 	}
 	var l2Msg sendL2MessageFromOrigin
 	if err := f.sendL2FromOriginInputs.Copy(&l2Msg, values); err != nil {
-		return fmt.Errorf("failed to copy sendL2MessageFromOrigin: %w", err)
+		return nil, fmt.Errorf("failed to copy sendL2MessageFromOrigin: %w", err)
 	}
 	f.logger.Info(
 		"fetched delayed message from sendL2MessageFromOrigin",
@@ -395,14 +410,7 @@ func (f *DelayedMessageFetcher) extractFromInboxFromOrigin(ctx context.Context, 
 		"tx_hash", eventLog.TxHash.Hex(),
 		"data_len", len(l2Msg.MessageData),
 	)
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.delayedMessages[msgIndex] = &delayedMessage{
-		data:         l2Msg.MessageData,
-		parentBlock:  eventLog.BlockNumber,
-		messageIndex: msgIndex,
-	}
-	return nil
+	return l2Msg.MessageData, nil
 }
 
 func (f *DelayedMessageFetcher) run(ctx context.Context) {
