@@ -270,6 +270,7 @@ func (f *DelayedMessageFetcher) fetchInboxData(
 	addresses := make([]common.Address, 0, len(delivered))
 	seen := make(map[common.Address]bool)
 	dataHashes := make(map[uint64]common.Hash, len(delivered))
+	messageIds := make([]common.Hash, 0, len(delivered))
 
 	for _, event := range delivered {
 		if !seen[event.Inbox] {
@@ -277,13 +278,14 @@ func (f *DelayedMessageFetcher) fetchInboxData(
 			addresses = append(addresses, event.Inbox)
 		}
 		dataHashes[event.MessageIndex.Uint64()] = common.Hash(event.MessageDataHash)
+		messageIds = append(messageIds, common.BigToHash(event.MessageIndex))
 	}
 
 	logs, err := f.l1Client.FilterLogs(ctx, ethereum.FilterQuery{
 		FromBlock: startBlock,
 		ToBlock:   end,
 		Addresses: addresses,
-		Topics:    [][]common.Hash{{f.inboxMessageDeliveredTopic, f.inboxFromOriginTopic}},
+		Topics:    [][]common.Hash{{f.inboxMessageDeliveredTopic, f.inboxFromOriginTopic}, messageIds},
 	})
 	if err != nil {
 		return fmt.Errorf("failed to filter Inbox logs: %w", err)
