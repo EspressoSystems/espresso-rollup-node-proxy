@@ -2,21 +2,19 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
-	"errors"
-	"io"
 	"net/http"
-	"net/http/httputil"
 	"net/url"
+
+	proxyhttp "proxy/http"
+	"proxy/jsonrpcv2"
 	espressoStore "proxy/store"
 
 	"github.com/ethereum/go-ethereum/log"
 )
 
 const (
-	PARSE_ERROR_CODE          = -32700
-	INVALID_REQUEST_CODE      = -32600
-	INTERNAL_ERROR_CODE       = -32603
 	DefaultMaxBatchSize       = 1000
 	DefaultMaxRequestBodySize = 5 * 1024 * 1024 // 5MB, matches go-ethereum defaultBodyLimit
 )
@@ -29,9 +27,10 @@ type ProxyConfig struct {
 }
 
 type Proxy struct {
-	interceptor        *Interceptor
-	reverseProxy       *httputil.ReverseProxy
-	maxRequestBodySize int
+	interceptor             *Interceptor
+	fullNodeExecutionRPCURL *url.URL
+	client                  *http.Client
+	maxRequestBodySize      int
 }
 
 func NewProxy(cfg *ProxyConfig, store *espressoStore.EspressoStore) *Proxy {
@@ -41,79 +40,63 @@ func NewProxy(cfg *ProxyConfig, store *espressoStore.EspressoStore) *Proxy {
 	}
 
 	p := &Proxy{
-		interceptor:        NewInterceptor(store, cfg.EspressoTag, cfg.MaxBatchSize),
-		maxRequestBodySize: cfg.MaxRequestBodySize,
-	}
-
-	p.reverseProxy = &httputil.ReverseProxy{
-		Rewrite: func(pr *httputil.ProxyRequest) {
-			pr.SetURL(target)
-			pr.Out.Host = target.Host
-		},
+		interceptor:             NewInterceptor(store, cfg.EspressoTag, cfg.MaxBatchSize),
+		maxRequestBodySize:      cfg.MaxRequestBodySize,
+		fullNodeExecutionRPCURL: target,
+		client:                  http.DefaultClient,
 	}
 
 	return p
 }
 
-func (p *Proxy) Serve(w http.ResponseWriter, r *http.Request) {
-	if r.Body != nil {
-		defer func() {
-			err := r.Body.Close()
-			if err != nil {
-				log.Warn("failed to close request body", "error", err)
-			}
-		}()
+func forwardRequest[Req any, Res any](ctx context.Context, p *Proxy, req Req) (res Res, err error) {
+	body := new(bytes.Buffer)
+	enc := json.NewEncoder(body)
+	if err := enc.Encode(req); err != nil {
+		return res, err
 	}
 
-	reader := io.Reader(r.Body)
-	if p.maxRequestBodySize > 0 {
-		reader = io.LimitReader(r.Body, int64(p.maxRequestBodySize)+1)
-	}
-	body, err := io.ReadAll(reader)
+	r, err := http.NewRequestWithContext(ctx, http.MethodPost, p.fullNodeExecutionRPCURL.String(), body)
 	if err != nil {
-		log.Error("failed to read request body", "error", err)
-		writeJSONRPCError(w, nil, PARSE_ERROR_CODE, "failed to read request body")
-		return
+		return res, err
 	}
 
-	if p.maxRequestBodySize > 0 && len(body) > p.maxRequestBodySize {
-		writeJSONRPCError(w, nil, INVALID_REQUEST_CODE, "content length too large")
-		return
-	}
-
-	interceptedBody, err := p.interceptor.Intercept(body)
-	if err != nil {
-		var batchErr *BatchTooLargeError
-		if errors.As(err, &batchErr) {
-			writeJSONRPCError(w, nil, INVALID_REQUEST_CODE, "batch too large")
-			return
+	rawHeadersRetrieval := ctx.Value(proxyhttp.KeyContextHTTPHeader{})
+	if cast, castOK := rawHeadersRetrieval.(http.Header); castOK {
+		for k, values := range cast {
+			r.Header[k] = values
 		}
-		log.Error("failed to intercept request", "error", err)
-		writeJSONRPCError(w, nil, INTERNAL_ERROR_CODE, "failed to intercept request")
-		return
 	}
 
-	r.Body = io.NopCloser(bytes.NewReader(interceptedBody))
-	r.ContentLength = int64(len(interceptedBody))
-	p.reverseProxy.ServeHTTP(w, r)
+	if r.Header.Get("Content-Type") == "" {
+		r.Header.Add("Content-Type", "application/json")
+	}
+
+	response, err := p.client.Do(r)
+	if err != nil {
+		return res, err
+	}
+
+	dec := json.NewDecoder(response.Body)
+	if err := dec.Decode(&res); err != nil {
+		return res, err
+	}
+
+	return res, nil
 }
 
-// writeJSONRPCError writes a JSON-RPC error response with the given id, code, and message.
-// If the id is nil, it defaults to "null" as per the JSON-RPC specification
-// https://www.jsonrpc.org/specification#error_object
-func writeJSONRPCError(w http.ResponseWriter, id json.RawMessage, code int, msg string) {
-	if id == nil {
-		id = json.RawMessage("null")
-	}
-	resp := JSONRPCResponse{
-		Version: "2.0",
-		ID:      id,
-		Error:   &JSONRPCError{Code: code, Message: msg},
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	err := json.NewEncoder(w).Encode(resp)
+func (p *Proxy) ServeJSONRPC(ctx context.Context, rawRequest jsonrpcv2.Request) (jsonrpcv2.Response, error) {
+	request, err := p.interceptor.InterceptRequest(rawRequest)
 	if err != nil {
-		log.Error("failed to encode json rpc error", "error", err)
+		return jsonrpcv2.Response{}, err
 	}
+	return forwardRequest[jsonrpcv2.Request, jsonrpcv2.Response](ctx, p, request)
+}
+
+func (p *Proxy) ServerJSONRPCBatch(ctx context.Context, rawRequests []jsonrpcv2.Request) ([]jsonrpcv2.Response, error) {
+	requests, err := p.interceptor.InterceptBatchRequests(rawRequests)
+	if err != nil {
+		return nil, err
+	}
+	return forwardRequest[[]jsonrpcv2.Request, []jsonrpcv2.Response](ctx, p, requests)
 }

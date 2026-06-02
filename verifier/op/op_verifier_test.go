@@ -10,9 +10,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	proxyPkg "proxy/proxy"
 	"testing"
 	"time"
+
+	proxyhttp "proxy/http"
+	"proxy/jsonrpcv2"
+	proxypkg "proxy/proxy"
 
 	espressoStore "proxy/store"
 
@@ -64,6 +67,7 @@ func (m *mockStreamer) Update(ctx context.Context) error {
 	args := m.Called(ctx)
 	return args.Error(0)
 }
+
 func (m *mockStreamer) Refresh(ctx context.Context, finalizedL1 eth.L1BlockRef, safeBatchNumber uint64, safeL1Origin eth.BlockID) error {
 	args := m.Called(ctx, finalizedL1, safeBatchNumber, safeL1Origin)
 	return args.Error(0)
@@ -72,6 +76,7 @@ func (m *mockStreamer) Refresh(ctx context.Context, finalizedL1 eth.L1BlockRef, 
 func (m *mockStreamer) RefreshSafeL1Origin(safeL1Origin eth.BlockID) {
 	m.Called(safeL1Origin)
 }
+
 func (m *mockStreamer) Reset() {
 	m.Called()
 }
@@ -393,46 +398,54 @@ func TestProxyUsesEthereumFinalizedBlockWhenEspressoStopsAdvancing(t *testing.T)
 		body, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 
-		var req proxyPkg.JSONRPCRequest
+		var req jsonrpcv2.Request
 		require.NoError(t, json.Unmarshal(body, &req))
 
-		var params []any
-		require.NoError(t, json.Unmarshal(req.Params, &params))
+		params, castOK := req.Params.([]any)
+		require.True(t, castOK)
 		require.Len(t, params, 2)
 
 		tag, ok := params[0].(string)
 		require.True(t, ok)
 		upstreamSeenTags = append(upstreamSeenTags, tag)
 
-		resp := proxyPkg.JSONRPCResponse{
-			Version: "2.0",
-			ID:      req.ID,
-			Result:  json.RawMessage(`{"number":"` + tag + `"}`),
+		resp := jsonrpcv2.Response{
+			ID:     req.ID,
+			Result: json.RawMessage(`{"number":"` + tag + `"}`),
 		}
 		w.Header().Set("Content-Type", "application/json")
 		require.NoError(t, json.NewEncoder(w).Encode(resp))
 	}))
 	defer upstream.Close()
 
-	proxy := proxyPkg.NewProxy(&proxyPkg.ProxyConfig{FullNodeExecutionRPC: upstream.URL, EspressoTag: "finalized", MaxBatchSize: proxyPkg.DefaultMaxBatchSize}, h.store)
+	proxy := proxypkg.NewProxy(&proxypkg.ProxyConfig{FullNodeExecutionRPC: upstream.URL, EspressoTag: "finalized", MaxBatchSize: proxypkg.DefaultMaxBatchSize}, h.store)
+	handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), 10_000, proxyhttp.JSONRPCBridge(log.Root(), proxy))
 	callProxy := func() string {
 		reqBody := `{"jsonrpc":"2.0","id":1,"method":"eth_getBlockByNumber","params":["finalized",false]}`
 		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 
-		proxy.Serve(rec, req)
+		handler.ServeHTTP(rec, req)
 		require.Equal(t, http.StatusOK, rec.Code)
 
-		var resp proxyPkg.JSONRPCResponse
+		var resp jsonrpcv2.Response
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 		require.Nil(t, resp.Error)
 
-		var block struct {
-			Number string `json:"number"`
-		}
-		require.NoError(t, json.Unmarshal(resp.Result, &block))
-		return block.Number
+		require.Nil(t, resp.Error)
+		cast, castOK := resp.Result.(map[string]any)
+		require.True(t, castOK)
+		require.NotNil(t, cast)
+		require.Contains(t, cast, "number")
+
+		numberField, ok := cast["number"]
+		require.True(t, ok)
+
+		number, castOK := numberField.(string)
+		require.True(t, castOK)
+
+		return number
 	}
 
 	require.Equal(t, "0x1", callProxy())

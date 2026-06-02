@@ -7,10 +7,11 @@ import (
 	"math"
 	"net/url"
 	"os"
+	"time"
+
 	"proxy/proxy"
 	nitroVerifier "proxy/verifier/nitro"
 	opVerifier "proxy/verifier/op"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
@@ -58,6 +59,7 @@ type Config struct {
 	L1RPC                string      `json:"l1_rpc"`
 	Mode                 string      `json:"mode"`
 	ListenAddr           string      `json:"listen_addr"`
+	WsListenAddr         string      `json:"ws_listen_addr"`
 	EspressoTag          string      `json:"espresso_tag"`
 	StoreFilePath        string      `json:"store_file_path"`
 	QueryServiceURL      string      `json:"query_service_url"`
@@ -76,6 +78,7 @@ type Config struct {
 func defaultConfig() *Config {
 	return &Config{
 		ListenAddr:           ":8080",
+		WsListenAddr:         ":8081",
 		EspressoTag:          "espresso",
 		StoreFilePath:        "espresso_store.json",
 		MaxBatchSize:         proxy.DefaultMaxBatchSize,
@@ -108,6 +111,7 @@ func parseConfig() *Config {
 	pflag.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "logging level (e.g., debug, info, warn, error)")
 	pflag.StringVar(&cfg.LogFormat, "log-format", cfg.LogFormat, "log output format (text or json)")
 	pflag.StringVar(&cfg.ListenAddr, "listen-addr", cfg.ListenAddr, "proxy listen address")
+	pflag.StringVar(&cfg.WsListenAddr, "ws-listen-addr", cfg.WsListenAddr, "proxy WebSocket listen address")
 	pflag.StringVar(&cfg.FullNodeExecutionRPC, "full-node-execution-rpc", cfg.FullNodeExecutionRPC, "full node execution RPC URL")
 	pflag.StringVar(&cfg.L1RPC, "l1-rpc", cfg.L1RPC, "L1 RPC URL")
 	pflag.TextVar(&cfg.OPConfig.LightClientAddress, "op.light-client-address", cfg.OPConfig.LightClientAddress, "Espresso light client contract address")
@@ -226,6 +230,9 @@ func (c *Config) validate() error {
 
 	if c.ListenAddr == "" {
 		errs = append(errs, fmt.Errorf("listen-addr: must not be empty"))
+	}
+	if c.WsListenAddr == "" {
+		errs = append(errs, fmt.Errorf("ws-listen-addr: must not be empty"))
 	}
 	if c.EspressoTag == "" {
 		errs = append(errs, fmt.Errorf("espresso-tag: must not be empty"))

@@ -14,13 +14,16 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"proxy/proxy"
-	verifier "proxy/verifier/op"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	proxyhttp "proxy/http"
+	"proxy/jsonrpcv2"
+	"proxy/proxy"
+	verifier "proxy/verifier/op"
 
 	espressostore "proxy/store"
 	nitroVerifier "proxy/verifier/nitro"
@@ -376,11 +379,10 @@ func tryGetBlockByTag(t *testing.T, url string, tag string) (uint64, bool) {
 // between proxy and direct node.
 func jsonRPCCallRaw(t *testing.T, url, method string, params json.RawMessage) JSONRPCResponse {
 	t.Helper()
-	req := proxy.JSONRPCRequest{
-		Version: "2.0",
-		ID:      json.RawMessage("1"),
-		Method:  method,
-		Params:  params,
+	req := jsonrpcv2.Request{
+		ID:     json.RawMessage("1"),
+		Method: method,
+		Params: params,
 	}
 
 	body, err := json.Marshal(req)
@@ -437,13 +439,12 @@ type batchEntry struct {
 
 func jsonRPCBatchCallRaw(t *testing.T, url string, entries []batchEntry) []JSONRPCResponse {
 	t.Helper()
-	var batch []proxy.JSONRPCRequest
+	var batch []jsonrpcv2.Request
 	for i, e := range entries {
-		batch = append(batch, proxy.JSONRPCRequest{
-			Version: "2.0",
-			ID:      json.RawMessage(fmt.Sprintf("%d", i+1)),
-			Method:  e.method,
-			Params:  e.params,
+		batch = append(batch, jsonrpcv2.Request{
+			ID:     json.RawMessage(fmt.Sprintf("%d", i+1)),
+			Method: e.method,
+			Params: e.params,
 		})
 	}
 
@@ -475,7 +476,8 @@ func startTestProxy(ctx context.Context, t *testing.T, backendURL string, store 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	proxyURL = "http://" + listener.Addr().String()
-	server := &http.Server{Handler: http.HandlerFunc(p.Serve)}
+	handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), proxy.DefaultMaxRequestBodySize, proxyhttp.JSONRPCBridge(log.Root(), p))
+	server := &http.Server{Handler: handler}
 	go func() { _ = server.Serve(listener) }()
 	t.Logf("proxy listening on %s", proxyURL)
 	return proxyURL, func() { _ = server.Shutdown(ctx) }

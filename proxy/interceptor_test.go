@@ -1,17 +1,56 @@
 package proxy
 
 import (
+	"encoding/json"
+	"errors"
 	"path/filepath"
-	espressoStore "proxy/store"
 	"testing"
+
+	"proxy/jsonrpcv2"
+	espressostore "proxy/store"
 
 	"github.com/stretchr/testify/require"
 )
 
-func newTestStore(t *testing.T, l2BlockNumber uint64) *espressoStore.EspressoStore {
+func (i *Interceptor) InterceptRawRequest(data []byte) ([]byte, error) {
+	switch data[0] {
+	default:
+		return nil, errors.New("invalid request")
+
+	case '{':
+		// Single Request
+		var request jsonrpcv2.Request
+		if err := json.Unmarshal(data, &request); err != nil {
+			return nil, err
+		}
+
+		next, err := i.InterceptRequest(request)
+		if err != nil {
+			return nil, err
+		}
+
+		return json.Marshal(next)
+
+	case '[':
+		// Batch Request
+		var requests []jsonrpcv2.Request
+		if err := json.Unmarshal(data, &requests); err != nil {
+			return nil, err
+		}
+
+		next, err := i.InterceptBatchRequests(requests)
+		if err != nil {
+			return nil, err
+		}
+
+		return json.Marshal(next)
+	}
+}
+
+func newTestStore(t *testing.T, l2BlockNumber uint64) *espressostore.EspressoStore {
 	t.Helper()
 	fp := filepath.Join(t.TempDir(), "state.json")
-	store, err := espressoStore.NewEspressoStore(fp, 1)
+	store, err := espressostore.NewEspressoStore(fp, 1)
 	require.NoError(t, err)
 	updated, err := store.UpdateIfGreater(l2BlockNumber, 1)
 	require.True(t, updated)
@@ -26,7 +65,7 @@ func TestInterceptor(t *testing.T) {
 		interceptor := NewInterceptor(store, "espresso", DefaultMaxBatchSize)
 
 		input := `{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0xabc","latest"]}`
-		result, err := interceptor.Intercept([]byte(input))
+		result, err := interceptor.InterceptRawRequest([]byte(input))
 		require.NoError(t, err)
 		require.JSONEq(t, input, string(result))
 	})
@@ -34,28 +73,28 @@ func TestInterceptor(t *testing.T) {
 	t.Run("replaces espresso tag in string param", func(t *testing.T) {
 		store := newTestStore(t, blockNumber)
 		interceptor := NewInterceptor(store, "espresso", DefaultMaxBatchSize)
-		input := `{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["espresso"]}`
-		result, err := interceptor.Intercept([]byte(input))
+		input := `{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["espresso"],"foo":"bar"}`
+		result, err := interceptor.InterceptRawRequest([]byte(input))
 		require.NoError(t, err)
-		expected := `{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0x64"]}`
-		require.Equal(t, expected, string(result))
+		expected := `{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0x64"],"foo":"bar"}`
+		require.JSONEq(t, expected, string(result))
 	})
 
 	t.Run("replaces finalized tag when configured as espresso tag", func(t *testing.T) {
 		store := newTestStore(t, blockNumber)
 		interceptor := NewInterceptor(store, "finalized", DefaultMaxBatchSize)
 		input := `{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0xabc","finalized"]}`
-		result, err := interceptor.Intercept([]byte(input))
+		result, err := interceptor.InterceptRawRequest([]byte(input))
 		require.NoError(t, err)
 		expected := `{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0xabc","0x64"]}`
-		require.Equal(t, expected, string(result))
+		require.JSONEq(t, expected, string(result))
 	})
 
 	t.Run("replaces tag in nested json object param", func(t *testing.T) {
 		store := newTestStore(t, blockNumber)
 		interceptor := NewInterceptor(store, "espresso", DefaultMaxBatchSize)
 		input := `{"jsonrpc":"2.0","id":1,"method":"eth_call","params":{"to":"0xabc","data":"0x123","blockTag":"espresso"}}`
-		result, err := interceptor.Intercept([]byte(input))
+		result, err := interceptor.InterceptRawRequest([]byte(input))
 		require.NoError(t, err)
 		expected := `{"jsonrpc":"2.0","id":1,"method":"eth_call","params":{"to":"0xabc","data":"0x123","blockTag":"0x64"}}`
 		require.JSONEq(t, expected, string(result))
@@ -66,7 +105,7 @@ func TestInterceptor(t *testing.T) {
 		interceptor := NewInterceptor(store, "finalized", DefaultMaxBatchSize)
 
 		input := `{"jsonrpc":"2.0","id":1,"method":"m","params":[{"nested":["finalized"]}]}`
-		result, err := interceptor.Intercept([]byte(input))
+		result, err := interceptor.InterceptRawRequest([]byte(input))
 		require.NoError(t, err)
 		expected := `{"jsonrpc":"2.0","id":1,"method":"m","params":[{"nested":["0x64"]}]}`
 		require.JSONEq(t, expected, string(result))
@@ -77,7 +116,7 @@ func TestInterceptor(t *testing.T) {
 		interceptor := NewInterceptor(store, "espresso", DefaultMaxBatchSize)
 
 		input := `{"jsonrpc":"2.0","id":1,"method":"eth_getBlockByNumber","params":["latest",true]}`
-		result, err := interceptor.Intercept([]byte(input))
+		result, err := interceptor.InterceptRawRequest([]byte(input))
 		require.NoError(t, err)
 		require.JSONEq(t, input, string(result))
 	})
@@ -87,7 +126,7 @@ func TestInterceptor(t *testing.T) {
 		interceptor := NewInterceptor(store, "espresso", DefaultMaxBatchSize)
 
 		input := `[{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0xabc","espresso"]},{"jsonrpc":"2.0","id":2,"method":"eth_getBlockByNumber","params":["espresso",true]}]`
-		result, err := interceptor.Intercept([]byte(input))
+		result, err := interceptor.InterceptRawRequest([]byte(input))
 		require.NoError(t, err)
 		expected := `[{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0xabc","0x64"]},{"jsonrpc":"2.0","id":2,"method":"eth_getBlockByNumber","params":["0x64",true]}]`
 		require.JSONEq(t, expected, string(result))
@@ -98,9 +137,8 @@ func TestInterceptor(t *testing.T) {
 		interceptor := NewInterceptor(store, "espresso", DefaultMaxBatchSize)
 
 		input := `[{"jsonrpc":"2.0","id":1,"method":"eth_chainId"},{"jsonrpc":"2.0","id":2,"method":"eth_getBalance","params":["0xabc","latest"]}]`
-		result, err := interceptor.Intercept([]byte(input))
+		result, err := interceptor.InterceptRawRequest([]byte(input))
 		require.NoError(t, err)
 		require.JSONEq(t, input, string(result))
 	})
-
 }
