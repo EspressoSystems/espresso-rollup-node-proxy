@@ -42,7 +42,7 @@ func (m *httpBodySizeLimiterMiddleware) ServeHTTP(w http.ResponseWriter, r *http
 
 	if contentLengthString := r.Header.Get("Content-Length"); contentLengthString != "" {
 		contentLength, err := strconv.ParseInt(contentLengthString, 10, 64)
-		if err == nil {
+		if err != nil {
 			WriteJSONRPCError(
 				w,
 				nil,

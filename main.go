@@ -158,7 +158,7 @@ func createHttpServer(logger log.Logger, cfg *Config, fullNodeProxy *proxy.Proxy
 // other additional middleware criteria.
 func createWsServer(logger log.Logger, cfg *Config, fullNodeProxy *proxy.Proxy) *http.Server {
 	return &http.Server{
-		Addr:              cfg.ListenAddr,
+		Addr:              cfg.WsListenAddr,
 		Handler:           proxyhttp.WebSocketJSONRPCHTTPBridge(logger, fullNodeProxy),
 		ReadTimeout:       15 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,
@@ -174,6 +174,7 @@ func startHTTPServers(
 	cfg *Config,
 	httpServer, webSocketServer *http.Server,
 ) {
+	wg.Add(1)
 	go func(wg *sync.WaitGroup, httpServer *http.Server) {
 		defer wg.Done()
 		logger.Info("Proxy HTTP server listening", "addr", cfg.ListenAddr)
