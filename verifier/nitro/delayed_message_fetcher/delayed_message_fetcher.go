@@ -57,9 +57,10 @@ type sendL2MessageFromOrigin struct {
 }
 
 type delayedMessage struct {
-	data         []byte
-	parentBlock  uint64
-	messageIndex uint64
+	data           []byte
+	parentBlock    uint64
+	messageIndex   uint64
+	finalizedBlock uint64
 }
 
 type DelayedMessageFetcher struct {
@@ -149,6 +150,26 @@ func (f *DelayedMessageFetcher) GetDelayedMessage(ctx context.Context, messageIn
 			ErrDelayedMessageNotFound,
 		)
 	}
+
+	// Check to see if the delayed message is still on the chain
+	// It is possible that the message was reorged out as currently code doesn't back track
+	found, err := f.verifyDelayedMessage(ctx, delayedMsg)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		// If message is not found
+		// Rewind to the finalized parent block of where the message was initially found
+		// and clear all messages in the cache
+		f.rewind(delayedMsg)
+		return nil, fmt.Errorf(
+			"messageIndex=%d parentBlock=%d err: %w",
+			messageIndex,
+			delayedMsg.parentBlock,
+			ErrDelayedMessageNotFound,
+		)
+	}
+
 	if f.waitForFinality {
 		err := f.verifyFinality(ctx, delayedMsg, messageIndex)
 		if err != nil {
@@ -157,11 +178,6 @@ func (f *DelayedMessageFetcher) GetDelayedMessage(ctx context.Context, messageIn
 		return delayedMsg.data, nil
 	}
 
-	f.logger.Info(
-		"delayed message retrieved",
-		"message_index", messageIndex,
-		"parent_block", delayedMsg.parentBlock,
-	)
 	return delayedMsg.data, nil
 }
 
@@ -199,18 +215,52 @@ func (f *DelayedMessageFetcher) verifyFinality(ctx context.Context, delayedMsg *
 		)
 	}
 
-	f.logger.Info(
-		"delayed message retrieved",
-		"message_index", messageIndex,
-		"parent_block", delayedMsg.parentBlock,
-		"finalized_block", finalizedHeader.Number.Uint64(),
-	)
 	return nil
+}
+
+func (f *DelayedMessageFetcher) verifyDelayedMessage(ctx context.Context, msg *delayedMessage) (bool, error) {
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeoutPerCall)
+	defer cancel()
+
+	iter, err := f.bridgeFilterer.FilterMessageDelivered(
+		&bind.FilterOpts{Context: timeoutCtx, Start: msg.parentBlock, End: &msg.parentBlock},
+		[]*big.Int{new(big.Int).SetUint64(msg.messageIndex)},
+		nil,
+	)
+	if err != nil {
+		return false, fmt.Errorf("failed to re-check MessageDelivered for messageIndex=%d: %w", msg.messageIndex, err)
+	}
+	defer func() {
+		if err := iter.Close(); err != nil {
+			f.logger.Warn("failed to close message delivered iterator", "error", err)
+		}
+	}()
+
+	for iter.Next() {
+		if crypto.Keccak256Hash(msg.data) == common.Hash(iter.Event.MessageDataHash) {
+			return true, iter.Error()
+		}
+	}
+	return false, iter.Error()
+}
+
+func (f *DelayedMessageFetcher) rewind(msg *delayedMessage) {
+	f.logger.Warn(
+		"failed to find a previously found delayed message (reorg?), rewinding delayed message fetcher",
+		"message_index", msg.messageIndex,
+		"original_parent_block", msg.parentBlock,
+		"rewind_to", msg.finalizedBlock,
+	)
+	f.mu.Lock()
+	f.delayedMessages = make(map[uint64]*delayedMessage)
+	f.mu.Unlock()
+	f.parentBlockNumber.Store(msg.finalizedBlock)
 }
 
 func (f *DelayedMessageFetcher) fetchDelayedMessageFromParent(
 	ctx context.Context,
 	endBlock uint64,
+	finalized uint64,
 ) error {
 	delivered, err := f.fetchBridgeEvents(ctx, endBlock)
 	if err != nil {
@@ -226,7 +276,7 @@ func (f *DelayedMessageFetcher) fetchDelayedMessageFromParent(
 		return nil
 	}
 
-	if err = f.fetchInboxData(ctx, delivered, endBlock); err != nil {
+	if err = f.fetchInboxData(ctx, delivered, endBlock, finalized); err != nil {
 		return err
 	}
 	f.parentBlockNumber.Store(endBlock + 1)
@@ -263,6 +313,7 @@ func (f *DelayedMessageFetcher) fetchInboxData(
 	ctx context.Context,
 	delivered []*nitroabi.BridgeMessageDelivered,
 	endBlock uint64,
+	finalized uint64,
 ) error {
 	startBlock := new(big.Int).SetUint64(f.parentBlockNumber.Load())
 	end := new(big.Int).SetUint64(endBlock)
@@ -311,7 +362,7 @@ func (f *DelayedMessageFetcher) fetchInboxData(
 		filterers[addr] = filterer
 	}
 
-	return f.extractInboxData(ctx, filterers, dataHashes, logs)
+	return f.extractInboxData(ctx, filterers, dataHashes, logs, finalized)
 }
 
 func (f *DelayedMessageFetcher) extractInboxData(
@@ -319,6 +370,7 @@ func (f *DelayedMessageFetcher) extractInboxData(
 	filterers map[common.Address]*nitroabi.InboxFilterer,
 	dataHashes map[uint64]common.Hash,
 	eventLogs []types.Log,
+	finalized uint64,
 ) error {
 	for _, eventLog := range eventLogs {
 		// Length of topics needs to be at least messageIndexPos + 1
@@ -358,9 +410,10 @@ func (f *DelayedMessageFetcher) extractInboxData(
 
 		f.mu.Lock()
 		f.delayedMessages[msgIndex] = &delayedMessage{
-			data:         data,
-			parentBlock:  eventLog.BlockNumber,
-			messageIndex: msgIndex,
+			data:           data,
+			parentBlock:    eventLog.BlockNumber,
+			messageIndex:   msgIndex,
+			finalizedBlock: finalized,
 		}
 		f.mu.Unlock()
 	}
@@ -432,12 +485,23 @@ func (f *DelayedMessageFetcher) run(ctx context.Context) {
 				f.logger.Warn("failed to fetch L1 latest header", "error", err)
 				continue
 			}
+			finalizedHeader, err := f.l1Client.HeaderByNumber(timeoutCtx, big.NewInt(rpc.FinalizedBlockNumber.Int64()))
+			if err != nil {
+				f.logger.Warn("failed to fetch L1 finalized header", "error", err)
+				continue
+			}
+
+			finalized := finalizedHeader.Number.Uint64()
 			endBlock := latestHeader.Number.Uint64()
 			parentBlock := f.parentBlockNumber.Load()
+
+			if parentBlock > endBlock {
+				continue
+			}
 			if endBlock-parentBlock >= maxBlocksPerScan {
 				endBlock = parentBlock + maxBlocksPerScan
 			}
-			if err := f.fetchDelayedMessageFromParent(timeoutCtx, endBlock); err != nil {
+			if err := f.fetchDelayedMessageFromParent(timeoutCtx, endBlock, finalized); err != nil {
 				f.logger.Warn("failed to fetch delayed messages", "error", err)
 			}
 		}

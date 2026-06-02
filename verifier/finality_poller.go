@@ -2,7 +2,6 @@ package verifier
 
 import (
 	"context"
-	"fmt"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -85,10 +84,6 @@ func (p *FinalityPoller) run(ctx context.Context) {
 			header, err := p.client.HeaderByNumber(ctx, big.NewInt(rpc.FinalizedBlockNumber.Int64()))
 			if err != nil {
 				p.logger.Error("failed to fetch finalized block", "error", err)
-				continue
-			}
-			if header == nil {
-				p.logger.Error("failed to fetch finalized block", "error", fmt.Errorf("header is nil"))
 				continue
 			}
 			p.logger.Debug("finality poller updating", "block_num", header.Number.Uint64())
