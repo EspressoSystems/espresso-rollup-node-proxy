@@ -1,6 +1,7 @@
 package http
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -33,6 +34,13 @@ type httpJSONRPCBridge struct {
 	logger  log.Logger
 }
 
+// Compile-time type check assertions to ensure interface adherence
+var (
+	_ JSONRPCHandler      = (*httpJSONRPCBridge)(nil)
+	_ JSONRPCBatchHandler = (*httpJSONRPCBridge)(nil)
+	_ http.Handler        = (*httpJSONRPCBridge)(nil)
+)
+
 // ServeJSONRPC implements JSONRPCHandler
 //
 // This is accomplished by delegating to the underlying handler.
@@ -55,7 +63,7 @@ func (m *httpJSONRPCBridge) ServeJSONRPCBatch(ctx context.Context, requests []js
 		return cast.ServeJSONRPCBatch(ctx, requests)
 	}
 
-	return m.fallbackServeJSONRPCBatch(ctx, requests)
+	return fallbackServeJSONRPCBatch(ctx, m, requests)
 }
 
 // fallbackServeJSONRPCBatch is a fallback implementation of batch processing
@@ -64,13 +72,13 @@ func (m *httpJSONRPCBridge) ServeJSONRPCBatch(ctx context.Context, requests []js
 //
 // TODO: This is linear cost, we may be able to perform these requests in
 // parallel.
-func (m *httpJSONRPCBridge) fallbackServeJSONRPCBatch(ctx context.Context, requests []jsonrpcv2.Request) ([]jsonrpcv2.Response, error) {
+func fallbackServeJSONRPCBatch(ctx context.Context, handler JSONRPCHandler, requests []jsonrpcv2.Request) ([]jsonrpcv2.Response, error) {
 	// Awe shucks, it doesn't natively support multiple batch requests at once.
 	// No Matter, we'll process them one at a time.
 
 	var responses []jsonrpcv2.Response
 	for _, r := range requests {
-		response, err := m.ServeJSONRPC(ctx, r)
+		response, err := handler.ServeJSONRPC(ctx, r)
 		if err != nil {
 			// We had a non-specifc error for this request.
 			// We'll queue up the response as an error, and keep processing the
@@ -90,52 +98,6 @@ func (m *httpJSONRPCBridge) fallbackServeJSONRPCBatch(ctx context.Context, reque
 	}
 
 	return responses, nil
-}
-
-// serveHTTPJSONRPCSingleRequest serves a single JSON-RPC request over HTTP.
-func (m *httpJSONRPCBridge) serveHTTPJSONRPCSingleRequest(ctx context.Context, w http.ResponseWriter, body json.RawMessage) {
-	var request jsonrpcv2.Request
-	if err := json.Unmarshal(body, &request); err != nil {
-		WriteJSONRPCError(w, nil, jsonrpcv2.CodeParseError, fmt.Sprintf("unable to parse rpc request: %s", err))
-		return
-	}
-
-	response, err := m.handler.ServeJSONRPC(ctx, request)
-	if err != nil {
-		WriteJSONRPCError(w, request.ID, jsonrpcv2.CodeInternalError, fmt.Sprintf("internal error: %s", err))
-		return
-	}
-
-	encoder := json.NewEncoder(w)
-	w.Header().Set("Content-Type", "application/json")
-	if err := encoder.Encode(response); err != nil {
-		// Fallback on transport error
-		http.Error(w, "failed to send response", http.StatusInternalServerError)
-		return
-	}
-}
-
-// serveHTTPJSONRPCBatchRequest serves a batch of JSON-RPC requests over HTTP.
-func (m *httpJSONRPCBridge) serveHTTPJSONRPCBatchRequest(ctx context.Context, w http.ResponseWriter, body json.RawMessage) {
-	var requests []jsonrpcv2.Request
-	if err := json.Unmarshal(body, &requests); err != nil {
-		WriteJSONRPCError(w, nil, jsonrpcv2.CodeParseError, fmt.Sprintf("unable to parse rpc request: %s", err))
-		return
-	}
-
-	responses, err := m.ServeJSONRPCBatch(ctx, requests)
-	if err != nil {
-		WriteJSONRPCError(w, nil, jsonrpcv2.CodeInternalError, fmt.Sprintf("failed to process batch requests: %s", err))
-		return
-	}
-
-	encoder := json.NewEncoder(w)
-	w.Header().Set("Content-Type", "application/json")
-	if err := encoder.Encode(responses); err != nil {
-		// Fallback on transport
-		http.Error(w, "failed to send response", http.StatusInternalServerError)
-		return
-	}
 }
 
 // KeyContextHTTPHeader is a context key for the HTTP Headers of the incoming
@@ -169,18 +131,75 @@ func (m *httpJSONRPCBridge) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Inspect the first character of the body to determine if this is a batch
 	// request, or a single request.
 
+	var handler httpToJSONRPCBridge
 	switch body[0] {
 	default:
 		// Invalid request
 		WriteJSONRPCError(w, nil, jsonrpcv2.CodeParseError, "invalid json rpc request")
+		return
 
 	case '{':
 		// Single Request
-		m.serveHTTPJSONRPCSingleRequest(ctx, w, body)
+		handler = &httpToJSONRPCBridgeHandler[jsonrpcv2.Request, jsonrpcv2.Response]{handler: m.ServeJSONRPC}
 
 	case '[':
 		// Batch Request
-		m.serveHTTPJSONRPCBatchRequest(ctx, w, body)
+		handler = &httpToJSONRPCBridgeHandler[[]jsonrpcv2.Request, []jsonrpcv2.Response]{handler: m.ServeJSONRPCBatch}
+	}
+
+	handler.serveJSONRPCRequest(ctx, w, body)
+}
+
+// httpToJSONRPCBridge is an interface that defines a handler for JSON-RPC
+// requests
+//
+// This is a helper interface to help bridge the gap and unify the logic
+// between parsing and processing single JSON-RPC requests and batch
+// request of multiple JSON-RPC requests.
+type httpToJSONRPCBridge interface {
+	// serveJSONRPCRequest serves a JSON-RPC request, given the raw body of
+	// the requested payload.
+	serveJSONRPCRequest(ctx context.Context, w http.ResponseWriter, payload []byte)
+}
+
+// httpToJSONRPCBridgeHandler is a generic handler that can be used to handle
+// the processing of disparate types of specific Request and Response
+// types.
+//
+// This exists soley to implement the httpToJSONRPCBridge interface in an
+// effort to simplify the process logic between the two, and unify the
+// processing paths of the requests.
+type httpToJSONRPCBridgeHandler[I any, O any] struct {
+	handler func(ctx context.Context, request I) (response O, err error)
+}
+
+// Compile-time type assertions to guarantee interface adherence
+var (
+	_ httpToJSONRPCBridge = (*httpToJSONRPCBridgeHandler[jsonrpcv2.Request, jsonrpcv2.Response])(nil)
+	_ httpToJSONRPCBridge = (*httpToJSONRPCBridgeHandler[[]jsonrpcv2.Request, []jsonrpcv2.Response])(nil)
+)
+
+// serveJSONRPCRequest implements httpToJSONRPCBridge
+func (h *httpToJSONRPCBridgeHandler[I, O]) serveJSONRPCRequest(ctx context.Context, w http.ResponseWriter, payload []byte) {
+	var request I
+	dec := json.NewDecoder(bytes.NewBuffer(payload))
+	if err := dec.Decode(&request); err != nil {
+		WriteJSONRPCError(w, nil, jsonrpcv2.CodeParseError, fmt.Sprintf("unable to parse rpc request: %s", err))
+		return
+	}
+
+	response, err := h.handler(ctx, request)
+	if err != nil {
+		WriteJSONRPCError(w, nil, jsonrpcv2.CodeInternalError, fmt.Sprintf("internal error: %s", err))
+		return
+	}
+
+	encoder := json.NewEncoder(w)
+	w.Header().Set("Content-Type", "application/json")
+	if err := encoder.Encode(response); err != nil {
+		// Fallback on transport error
+		http.Error(w, "failed to send response", http.StatusInternalServerError)
+		return
 	}
 }
 
