@@ -161,7 +161,7 @@ func NewNitroEspressoBatchVerifier(
 			logger,
 			config.FinalityPollInterval,
 		),
-		delayedMsgFetcher: delayedmessagefetcher.NewDelayedMessageFetcher(
+		delayedMsgFetcher: delayedmessagefetcher.MustNewDelayedMessageFetcher(
 			ctx,
 			l1Client,
 			config.BridgeAddress,
