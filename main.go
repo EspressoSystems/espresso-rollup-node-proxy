@@ -163,6 +163,10 @@ func createHttpServer(logger log.Logger, cfg *Config, fullNodeProxy *proxy.Proxy
 // our http.Handler middlewares, we may be able to setup some logging, and
 // other additional middleware criteria.
 func createWsServer(logger log.Logger, cfg *Config, fullNodeProxy *proxy.Proxy) *http.Server {
+	if cfg.WsListenAddr == "" {
+		return nil
+	}
+
 	return &http.Server{
 		Addr:              cfg.WsListenAddr,
 		Handler:           proxyhttp.WebSocketJSONRPCHTTPBridge(logger, fullNodeProxy),
@@ -174,35 +178,33 @@ func createWsServer(logger log.Logger, cfg *Config, fullNodeProxy *proxy.Proxy) 
 	}
 }
 
+// startHTTPServers starts the provided HTTP servers in separate goroutines,
+// and logs any critical errors that occur during startup.
 func startHTTPServers(
 	logger log.Logger,
 	wg *sync.WaitGroup,
 	cfg *Config,
-	httpServer, webSocketServer *http.Server,
+	servers ...*http.Server,
 ) {
-	wg.Add(1)
-	go func(wg *sync.WaitGroup, httpServer *http.Server) {
-		defer wg.Done()
-		logger.Info("Proxy HTTP server listening", "addr", cfg.ListenAddr)
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			// TODO: Re-evalute this logger.Crit usage. Invoking this function
-			// will also call os.Exit, forcing the program to exit without
-			// cleaning up.
-			logger.Crit("proxy server failed", "error", err)
+	for _, server := range servers {
+		if server == nil {
+			// Skip any non-existent serveress, this allows us to conditionally
+			// start servers based on configuration.
+			continue
 		}
-	}(wg, httpServer)
 
-	wg.Add(1)
-	go func(wg *sync.WaitGroup, webSocketServer *http.Server) {
-		defer wg.Done()
-		logger.Info("Proxy WS server listening", "addr", cfg.WsListenAddr)
-		if err := webSocketServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			// TODO: Re-evalute this logger.Crit usage. Invoking this function
-			// will also call os.Exit, forcing the program to exit without
-			// cleaning up.
-			logger.Crit("proxy WS server failed", "error", err)
-		}
-	}(wg, webSocketServer)
+		wg.Add(1)
+		go func(wg *sync.WaitGroup, server *http.Server) {
+			defer wg.Done()
+			logger.Info("server listening", "addr", cfg.ListenAddr)
+			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				// TODO: Re-evalute this logger.Crit usage. Invoking this function
+				// will also call os.Exit, forcing the program to exit without
+				// cleaning up.
+				logger.Crit("server failed to listen and serve", "error", err)
+			}
+		}(wg, server)
+	}
 }
 
 // cleanHTTPServerShutdown attempts to gracefully shut down both the HTTP

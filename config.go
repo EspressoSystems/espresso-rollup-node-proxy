@@ -78,7 +78,7 @@ type Config struct {
 func defaultConfig() *Config {
 	return &Config{
 		ListenAddr:           ":8080",
-		WsListenAddr:         ":8081",
+		WsListenAddr:         "",
 		EspressoTag:          "espresso",
 		StoreFilePath:        "espresso_store.json",
 		MaxBatchSize:         proxy.DefaultMaxBatchSize,
@@ -230,9 +230,6 @@ func (c *Config) validate() error {
 
 	if c.ListenAddr == "" {
 		errs = append(errs, fmt.Errorf("listen-addr: must not be empty"))
-	}
-	if c.WsListenAddr == "" {
-		errs = append(errs, fmt.Errorf("ws-listen-addr: must not be empty"))
 	}
 	if c.EspressoTag == "" {
 		errs = append(errs, fmt.Errorf("espresso-tag: must not be empty"))
