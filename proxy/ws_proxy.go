@@ -20,12 +20,6 @@ const (
 	defaultWSWriteTimeout     = 10 * time.Second
 )
 
-var (
-	errParseRequest   = errors.New("failed to parse JSON-RPC request")
-	errInvalidVersion = errors.New("invalid JSON-RPC version")
-	errMissingMethod  = errors.New("missing method")
-)
-
 var upgrader = websocket.Upgrader{
 	HandshakeTimeout: defaultWSHandshakeTimeout,
 }
@@ -181,36 +175,23 @@ func (p *websocketProxy) clientPump(errC chan<- error) {
 			continue
 		}
 
-		req, err := p.prepareClientMsg(msg)
+		intercepted, err := p.interceptor.Intercept(msg)
 		if err != nil {
-			var id json.RawMessage
-			if req != nil {
-				id = req.ID
+			code, errMsg := INTERNAL_ERROR_CODE, "failed to intercept request"
+			var batchErr *BatchTooLargeError
+			if errors.As(err, &batchErr) {
+				code, errMsg = INVALID_REQUEST_CODE, "batch too large"
+			} else {
+				log.Warn("failed to intercept ws message", "error", err)
 			}
-			log.Info("rejected ws client message", "err", err)
-			if writeErr := p.writeClient(websocket.TextMessage, wsErrorResponse(id, err)); writeErr != nil {
+			if writeErr := p.writeClient(websocket.TextMessage, wsErrorResponseCode(nil, code, errMsg)); writeErr != nil {
 				errC <- writeErr
 				return
 			}
 			continue
 		}
 
-		intercepted, err := p.interceptor.Intercept(msg)
-		if err != nil {
-			var batchErr *BatchTooLargeError
-			if errors.As(err, &batchErr) {
-				if writeErr := p.writeClient(websocket.TextMessage, wsErrorResponseCode(nil, INVALID_REQUEST_CODE, "batch too large")); writeErr != nil {
-					errC <- writeErr
-					return
-				}
-				continue
-			}
-			log.Warn("failed to intercept ws message", "error", err)
-		} else {
-			msg = intercepted
-		}
-
-		if err := p.writeUpstream(websocket.TextMessage, msg); err != nil {
+		if err := p.writeUpstream(websocket.TextMessage, intercepted); err != nil {
 			errC <- err
 			return
 		}
@@ -237,39 +218,6 @@ func (p *websocketProxy) upstreamPump(errC chan<- error) {
 			return
 		}
 	}
-}
-
-func (p *websocketProxy) prepareClientMsg(msg []byte) (*JSONRPCRequest, error) {
-	req, err := parseRPCReq(msg)
-	if err != nil {
-		return nil, errParseRequest
-	}
-	if req.Version != "2.0" {
-		return req, errInvalidVersion
-	}
-	if req.Method == "" {
-		return req, errMissingMethod
-	}
-	return req, nil
-}
-
-func parseRPCReq(body []byte) (*JSONRPCRequest, error) {
-	req := new(JSONRPCRequest)
-	if err := json.Unmarshal(body, req); err != nil {
-		return nil, err
-	}
-	return req, nil
-}
-
-func wsErrorResponse(id json.RawMessage, err error) []byte {
-	code := INTERNAL_ERROR_CODE
-	switch {
-	case errors.Is(err, errParseRequest):
-		code = PARSE_ERROR_CODE
-	case errors.Is(err, errInvalidVersion), errors.Is(err, errMissingMethod):
-		code = INVALID_REQUEST_CODE
-	}
-	return wsErrorResponseCode(id, code, err.Error())
 }
 
 func wsErrorResponseCode(id json.RawMessage, code int, msg string) []byte {
