@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -32,6 +35,14 @@ type statusResponseWriter struct {
 func (w *statusResponseWriter) WriteHeader(code int) {
 	w.statusCode = code
 	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *statusResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("underlying ResponseWriter does not implement http.Hijacker")
+	}
+	return hj.Hijack()
 }
 
 func requestLoggingMiddleware(next http.Handler, logger log.Logger) http.Handler {
@@ -157,6 +168,27 @@ func main() {
 		}
 	}()
 
+	var wsServer *http.Server
+	var wsProxy *proxy.WSProxy
+	if cfg.WSListenAddr != "" {
+		wsProxy = proxy.NewWSProxy(cfg.toWSProxyConfig(), espressoStore)
+		wsMux := http.NewServeMux()
+		wsMux.HandleFunc("/", wsProxy.Serve)
+		wsServer = &http.Server{
+			Addr:              cfg.WSListenAddr,
+			Handler:           requestLoggingMiddleware(recoveryMiddleware(wsMux, logger), logger),
+			ReadHeaderTimeout: 5 * time.Second,
+		}
+		go func() {
+			logger.Info("WebSocket proxy server listening", "addr", cfg.WSListenAddr)
+			if err := wsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logger.Crit("WebSocket proxy server failed", "error", err)
+			}
+		}()
+	} else {
+		logger.Info("WebSocket proxy disabled")
+	}
+
 	sigCh := make(chan os.Signal, 1)
 	// Listen for termination signals to gracefully shut down the server
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -171,6 +203,13 @@ func main() {
 		logger.Error("server shutdown failed", "error", err)
 	} else {
 		logger.Info("server shutdown gracefully")
+	}
+	if wsServer != nil {
+		if err := wsServer.Shutdown(shutdownCtx); err != nil {
+			logger.Error("WebSocket server shutdown failed", "error", err)
+		} else {
+			logger.Info("WebSocket server shutdown gracefully")
+		}
 	}
 	fullNodeVerifier.Stop()
 	logger.Info("Shutdown complete")

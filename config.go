@@ -58,6 +58,8 @@ type Config struct {
 	L1RPC                string      `json:"l1_rpc"`
 	Mode                 string      `json:"mode"`
 	ListenAddr           string      `json:"listen_addr"`
+	WSListenAddr         string      `json:"ws_listen_addr"`
+	FullNodeWSRPC        string      `json:"full_node_ws_rpc"`
 	EspressoTag          string      `json:"espresso_tag"`
 	StoreFilePath        string      `json:"store_file_path"`
 	QueryServiceURL      string      `json:"query_service_url"`
@@ -66,6 +68,7 @@ type Config struct {
 	InitialHotshotHeight uint64      `json:"initial_hotshot_height"`
 	MaxBatchSize         int         `json:"max_batch_size"`
 	MaxRequestBodySize   int         `json:"max_request_body_size"`
+	MaxWSConnections     int         `json:"max_ws_connections"`
 	OPConfig             OPConfig    `json:"op"`
 	NitroConfig          NitroConfig `json:"nitro"`
 	LogLevel             string      `json:"log_level"`
@@ -80,6 +83,7 @@ func defaultConfig() *Config {
 		StoreFilePath:        "espresso_store.json",
 		MaxBatchSize:         proxy.DefaultMaxBatchSize,
 		MaxRequestBodySize:   proxy.DefaultMaxRequestBodySize,
+		MaxWSConnections:     proxy.DefaultMaxWSConnections,
 		LogLevel:             "info",
 		LogFormat:            "json",
 		VerificationInterval: Duration(10 * time.Millisecond),
@@ -108,6 +112,8 @@ func parseConfig() *Config {
 	pflag.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "logging level (e.g., debug, info, warn, error)")
 	pflag.StringVar(&cfg.LogFormat, "log-format", cfg.LogFormat, "log output format (text or json)")
 	pflag.StringVar(&cfg.ListenAddr, "listen-addr", cfg.ListenAddr, "proxy listen address")
+	pflag.StringVar(&cfg.WSListenAddr, "ws-listen-addr", cfg.WSListenAddr, "WebSocket proxy listen address (empty disables the WS proxy)")
+	pflag.StringVar(&cfg.FullNodeWSRPC, "full-node-ws-rpc", cfg.FullNodeWSRPC, "full node WebSocket RPC URL (required when ws-listen-addr is set)")
 	pflag.StringVar(&cfg.FullNodeExecutionRPC, "full-node-execution-rpc", cfg.FullNodeExecutionRPC, "full node execution RPC URL")
 	pflag.StringVar(&cfg.L1RPC, "l1-rpc", cfg.L1RPC, "L1 RPC URL")
 	pflag.TextVar(&cfg.OPConfig.LightClientAddress, "op.light-client-address", cfg.OPConfig.LightClientAddress, "Espresso light client contract address")
@@ -119,6 +125,7 @@ func parseConfig() *Config {
 	pflag.BoolVar(&cfg.TrackBatchLatency, "track-batch-latency", cfg.TrackBatchLatency, "whether to track batch latency")
 	pflag.IntVar(&cfg.MaxBatchSize, "max-batch-size", cfg.MaxBatchSize, "maximum number of requests in a JSON-RPC batch (0 = no limit)")
 	pflag.IntVar(&cfg.MaxRequestBodySize, "max-request-body-size", cfg.MaxRequestBodySize, "maximum request body size in bytes (0 = no limit)")
+	pflag.IntVar(&cfg.MaxWSConnections, "max-ws-connections", cfg.MaxWSConnections, "maximum concurrent WebSocket connections (0 = default)")
 
 	pflag.StringVar(&cfg.QueryServiceURL, "query-service-url", cfg.QueryServiceURL, "Espresso query service URL")
 	pflag.DurationVar((*time.Duration)(&cfg.VerificationInterval), "verification-interval", time.Duration(cfg.VerificationInterval), "verification interval")
@@ -227,6 +234,9 @@ func (c *Config) validate() error {
 	if c.ListenAddr == "" {
 		errs = append(errs, fmt.Errorf("listen-addr: must not be empty"))
 	}
+	if c.WSListenAddr != "" && c.FullNodeWSRPC == "" {
+		errs = append(errs, fmt.Errorf("full-node-ws-rpc: must be set when ws-listen-addr is set"))
+	}
 	if c.EspressoTag == "" {
 		errs = append(errs, fmt.Errorf("espresso-tag: must not be empty"))
 	}
@@ -246,6 +256,16 @@ func (c *Config) toProxyConfig() *proxy.ProxyConfig {
 		EspressoTag:          c.EspressoTag,
 		MaxBatchSize:         c.MaxBatchSize,
 		MaxRequestBodySize:   c.MaxRequestBodySize,
+	}
+}
+
+func (c *Config) toWSProxyConfig() *proxy.WSProxyConfig {
+	return &proxy.WSProxyConfig{
+		FullNodeWSRPC:      c.FullNodeWSRPC,
+		EspressoTag:        c.EspressoTag,
+		MaxBatchSize:       c.MaxBatchSize,
+		MaxRequestBodySize: c.MaxRequestBodySize,
+		MaxConnections:     c.MaxWSConnections,
 	}
 }
 

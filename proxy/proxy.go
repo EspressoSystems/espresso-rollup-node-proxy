@@ -19,6 +19,7 @@ const (
 	INTERNAL_ERROR_CODE       = -32603
 	DefaultMaxBatchSize       = 1000
 	DefaultMaxRequestBodySize = 5 * 1024 * 1024 // 5MB, matches go-ethereum defaultBodyLimit
+	DefaultMaxWSConnections   = 100
 )
 
 type ProxyConfig struct {
