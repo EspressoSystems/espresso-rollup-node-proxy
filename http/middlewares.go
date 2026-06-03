@@ -10,7 +10,9 @@ func HTTPRPCMiddlewares(logger log.Logger, maxRequestBodySize int64, handler htt
 	var h http.Handler = handler
 
 	h = ContentTypeIsJSONRPCMiddleware(h, logger)
-	h = RequestBodySizeLimiterMiddleware(h, logger, maxRequestBodySize)
+	if maxRequestBodySize > 0 {
+		h = RequestBodySizeLimiterMiddleware(h, logger, maxRequestBodySize)
+	}
 	h = MethodIsMiddleware(h, http.MethodPost)
 	h = RecoveryMiddleware(h, logger)
 
