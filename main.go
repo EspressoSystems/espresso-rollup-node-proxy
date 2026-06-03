@@ -34,14 +34,17 @@ func mustNewOPVerifier(ctx context.Context, logger log.Logger, cfg *Config, espr
 	l1Client, err := ethclient.DialContext(ctx, cfg.L1RPC)
 	if err != nil {
 		logger.Crit("failed to create L1 client", "error", err)
+		os.Exit(1)
 	}
 	lc, err := espressoLightClient.NewLightclientCaller(cfg.OPConfig.LightClientAddress, l1Client)
 	if err != nil || lc == nil {
 		logger.Crit("failed to create light client")
+		os.Exit(1)
 	}
 	v := opVerifier.NewOPEspressoBatchVerifier(ctx, logger, espressoStore, l1Client, lc, cfg.toOPVerifierConfig())
 	if v == nil {
 		logger.Crit("failed to create OP verifier")
+		os.Exit(1)
 	}
 	logger.Info("OP verifier enabled")
 	return v
@@ -53,6 +56,7 @@ func mustNewNitroVerifier(ctx context.Context, logger log.Logger, cfg *Config, e
 	v := nitroVerifier.NewNitroEspressoBatchVerifier(ctx, logger, espressoStore, cfg.toNitroVerifierConfig())
 	if v == nil {
 		logger.Crit("failed to create Nitro verifier")
+		os.Exit(1)
 	}
 	logger.Info("Nitro verifier enabled")
 	return v
@@ -64,6 +68,7 @@ func configureLogger(cfg *Config) log.Logger {
 	var logLevel slog.Level
 	if err := logLevel.UnmarshalText([]byte(cfg.LogLevel)); err != nil {
 		log.Crit("invalid log level", "level", cfg.LogLevel, "error", err)
+		os.Exit(1)
 	}
 
 	var handler slog.Handler
@@ -83,6 +88,7 @@ func mustCreateEspressoStore(logger log.Logger, cfg *Config) *store.EspressoStor
 	espressoStore, err := store.NewEspressoStore(cfg.StoreFilePath, cfg.InitialHotshotHeight)
 	if err != nil {
 		logger.Crit("failed to create espresso store", "error", err)
+		os.Exit(1)
 	}
 	return espressoStore
 }
