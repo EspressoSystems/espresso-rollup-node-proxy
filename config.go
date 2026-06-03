@@ -234,8 +234,10 @@ func (c *Config) validate() error {
 	if c.ListenAddr == "" {
 		errs = append(errs, fmt.Errorf("listen-addr: must not be empty"))
 	}
-	if c.WSListenAddr != "" && c.FullNodeWSRPC == "" {
-		errs = append(errs, fmt.Errorf("full-node-ws-rpc: must be set when ws-listen-addr is set"))
+	if c.WSListenAddr != "" {
+		if err := validateURL("full-node-ws-rpc", c.FullNodeWSRPC); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	if c.EspressoTag == "" {
 		errs = append(errs, fmt.Errorf("espresso-tag: must not be empty"))
