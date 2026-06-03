@@ -87,7 +87,9 @@ func (p *WSProxy) Serve(w http.ResponseWriter, r *http.Request) {
 	upstreamConn, _, err := websocket.DefaultDialer.DialContext(r.Context(), p.upstreamWSURL, nil)
 	if err != nil {
 		log.Error("failed to dial upstream WebSocket", "url", p.upstreamWSURL, "error", err)
-		clientConn.Close()
+		if err := clientConn.Close(); err != nil {
+			log.Error("failed to close WebSocket connection", "error", err)
+		}
 		return
 	}
 	upstreamConn.SetReadLimit(p.readLimit)
@@ -125,14 +127,17 @@ func (p *websocketProxy) run() error {
 	go p.upstreamPump(errC)
 
 	err := <-errC
-	p.clientConn.Close()
-	p.upstreamConn.Close()
+	p.close()
 	return err
 }
 
 func (p *websocketProxy) close() {
-	p.clientConn.Close()
-	p.upstreamConn.Close()
+	if err := p.clientConn.Close(); err != nil {
+		log.Error("failed to close WebSocket connection", "error", err)
+	}
+	if err := p.upstreamConn.Close(); err != nil {
+		log.Error("failed to close WebSocket connection", "error", err)
+	}
 }
 
 func (p *websocketProxy) writeClient(msgType int, msg []byte) error {
