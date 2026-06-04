@@ -69,8 +69,8 @@ func requestInterceptorGlue[R any](payload []byte, intercept func(R) (R, error))
 		return nil, WrapErr("failed to intercept json rpc request", err)
 	}
 
-	bytes, err := json.Marshal(request)
-	return bytes, WrapErr("failed to encode json rpc request", err)
+	marshaledBytes, err := json.Marshal(request)
+	return marshaledBytes, WrapErr("failed to encode json rpc request", err)
 }
 
 // ErrNoMessage is returned when we expected a message from the connection but
