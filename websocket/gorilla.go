@@ -28,7 +28,7 @@ func AdaptGorilla(conn *websocket.Conn) Conn {
 var _ Conn = (*gorillaAdapter)(nil)
 
 // Close implements [Conn].
-func (a *gorillaAdapter) Close(code int, reason string) error {
+func (a *gorillaAdapter) Close(code Status, reason string) error {
 	now := time.Now()
 	deadline := now.Add(closeMessageTimeout)
 	closeHandler := a.conn.CloseHandler()
@@ -50,7 +50,7 @@ func (a *gorillaAdapter) Close(code int, reason string) error {
 
 	writeError := a.conn.WriteControl(
 		websocket.CloseMessage,
-		websocket.FormatCloseMessage(code, reason),
+		websocket.FormatCloseMessage(int(code), reason),
 		deadline,
 	)
 
@@ -89,14 +89,15 @@ func (a *gorillaAdapter) Close(code int, reason string) error {
 //
 // The passed context is ignored, lest we end up corrupting the underlying
 // connection by sending a partial frame.
-func (a *gorillaAdapter) Read(ctx context.Context) (mesageType int, message []byte, err error) {
-	return a.conn.ReadMessage()
+func (a *gorillaAdapter) Read(ctx context.Context) (mesageType MessageType, message []byte, err error) {
+	mt, message, err := a.conn.ReadMessage()
+	return MessageType(mt), message, err
 }
 
 // Write implements [Conn].
 //
 // The passed context is ignored, lest we end up corrupting the underlying
 // connection by sending a partial frame.
-func (a *gorillaAdapter) Write(ctx context.Context, messageType int, message []byte) error {
-	return a.conn.WriteMessage(messageType, message)
+func (a *gorillaAdapter) Write(ctx context.Context, messageType MessageType, message []byte) error {
+	return a.conn.WriteMessage(int(messageType), message)
 }
