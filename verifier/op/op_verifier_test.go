@@ -9,12 +9,16 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"proxy/adapters"
 	proxyhttp "proxy/http"
 	"proxy/jsonrpcv2"
+	"proxy/proxy"
 	proxypkg "proxy/proxy"
 
 	espressoStore "proxy/store"
@@ -418,8 +422,13 @@ func TestProxyUsesEthereumFinalizedBlockWhenEspressoStopsAdvancing(t *testing.T)
 	}))
 	defer upstream.Close()
 
-	proxy := proxypkg.NewProxy(&proxypkg.ProxyConfig{FullNodeExecutionRPC: upstream.URL, EspressoTag: "finalized", MaxBatchSize: proxypkg.DefaultMaxBatchSize}, h.store)
-	handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), 10_000, proxyhttp.JSONRPCBridge(log.Root(), proxy))
+	upstreamURL := &url.URL{
+		Scheme: "http",
+		Host:   upstream.Listener.Addr().String(),
+	}
+	reverseProxy := httputil.NewSingleHostReverseProxy(upstreamURL)
+	interceptor := proxy.NewInterceptor(h.store, "finalized", proxypkg.DefaultMaxBatchSize)
+	handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), 0, adapters.NewHTTPJSONRPCInterceptor(reverseProxy, interceptor))
 	callProxy := func() string {
 		reqBody := `{"jsonrpc":"2.0","id":1,"method":"eth_getBlockByNumber","params":["finalized",false]}`
 		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
