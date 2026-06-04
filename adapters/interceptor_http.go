@@ -40,7 +40,7 @@ func (i *httpJSONRPCInterceptor) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	data, err = performRequestIntercept(data, i.interceptor)
+	data, err = PerformRequestIntercept(data, i.interceptor)
 	if err != nil {
 		WriteJSONRPCErrorToHTTPResponseWriter(w, nil, jsonrpcv2.CodeInternalError, fmt.Sprintf("failed to intercept request: %s", err))
 		return

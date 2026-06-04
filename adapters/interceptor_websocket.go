@@ -49,7 +49,7 @@ func (i *webSocketJSONRPCDownstreamIntercept) Read(ctx context.Context) (message
 		return messageType, message, err
 	}
 
-	message, err = performRequestIntercept(message, i.interceptor)
+	message, err = PerformRequestIntercept(message, i.interceptor)
 	if err != nil {
 		WriteJSONRPCErrorToWebSocket(i.Conn, nil, jsonrpcv2.CodeInternalError, "failed to intercept request")
 		return messageType, message, perrors.Wrap(err, "failed to intercept JSON-RPC request")

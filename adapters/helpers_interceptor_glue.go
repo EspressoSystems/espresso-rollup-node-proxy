@@ -82,7 +82,7 @@ var ErrNoMessage = errors.New("no message received")
 // or a Batch Request.
 var ErrUnrecognizedRequest = errors.New("unrecognized request")
 
-// performRequestIntercept is a helper function that performs the given
+// PerformRequestIntercept is a helper function that performs the given
 // intercept on the payload.
 //
 // This function is reseponsible for decoding the data and routing the
@@ -91,7 +91,7 @@ var ErrUnrecognizedRequest = errors.New("unrecognized request")
 // This will return [ErrNoMessage] or [ErrUnrecognizedRequest] if the
 // payload is not in the expected format for a JSON RPC Request, or Batch
 // JSON RPC Request.
-func performRequestIntercept(payload []byte, interceptor Interceptor) ([]byte, error) {
+func PerformRequestIntercept(payload []byte, interceptor Interceptor) ([]byte, error) {
 	payload = bytes.TrimLeftFunc(payload, isJSONSpace)
 
 	if len(payload) <= 0 {

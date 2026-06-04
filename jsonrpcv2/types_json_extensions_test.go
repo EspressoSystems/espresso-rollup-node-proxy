@@ -106,11 +106,24 @@ func TestRequestUnmarshalJSON(t *testing.T) {
 
 		assert.Equal(request.ExtraFields["foo"], "bar", "extra field should match")
 	})
+
+	t.Run("decode and rencode match", func(t *testing.T) {
+		assert := assert.New(t)
+		raw := `{"jsonrpc":"2.0","id":null,"method":"my_method","params":{"param1":"value1","param2":2},"foo":"bar"}`
+
+		var request jsonrpcv2.Request
+		assert.NoError(json.Unmarshal([]byte(raw), &request))
+
+		result, err := json.Marshal(request)
+		assert.NoError(err)
+
+		assert.JSONEq(raw, string(result))
+	})
 }
 
-// TestResultMarshalJSON is a parent test that tests various aspects and
+// TestRequestMarshalJSON is a parent test that tests various aspects and
 // behavior of marshaling the JSON-RPC Object
-func TestResultMarshalJSON(t *testing.T) {
+func TestRequestMarshalJSON(t *testing.T) {
 	// This test ensures that any extra fields included within the JSON-RPC
 	// Request Object are preserved and exist in the resulting encoded value
 	t.Run("valid version with extra fields", func(t *testing.T) {
