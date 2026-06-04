@@ -43,7 +43,7 @@ func NewWebsocketJSONRPCDownstreamInterceptMiddleware(interceptor Interceptor) w
 // This method reads the message from the given connection, performs an
 // intercept on the request, and then returns the intercepted data back
 // to the handler.
-func (i *webSocketJSONRPCDownstreamIntercept) Read(ctx context.Context) (messageType int, message []byte, err error) {
+func (i *webSocketJSONRPCDownstreamIntercept) Read(ctx context.Context) (messageType websocket.MessageType, message []byte, err error) {
 	messageType, message, err = i.Conn.Read(ctx)
 	if err != nil {
 		return messageType, message, err
