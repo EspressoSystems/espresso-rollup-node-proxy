@@ -5,15 +5,11 @@ import (
 	"net/http"
 	"strconv"
 
+	"proxy/adapters"
 	"proxy/jsonrpcv2"
 
 	"github.com/ethereum/go-ethereum/log"
 )
-
-type readCloser struct {
-	io.Reader
-	io.Closer
-}
 
 // httpBodySizeLimiterMiddleware is a middleware that limits the size of the
 // of the request body to a specified maximum size. It also checks the
@@ -35,15 +31,15 @@ type httpBodySizeLimiterMiddleware struct {
 func (m *httpBodySizeLimiterMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Replace the request body with a limited reader that enforces the maximum
 	// request body size.
-	r.Body = &readCloser{
-		Reader: io.LimitReader(r.Body, m.maxRequestBodySize),
-		Closer: r.Body,
-	}
+	r.Body = adapters.ReadCloser(
+		io.LimitReader(r.Body, m.maxRequestBodySize),
+		r.Body,
+	)
 
 	if contentLengthString := r.Header.Get("Content-Length"); contentLengthString != "" {
 		contentLength, err := strconv.ParseInt(contentLengthString, 10, 64)
 		if err != nil {
-			WriteJSONRPCError(
+			adapters.WriteJSONRPCErrorToHTTPResponseWriter(
 				w,
 				nil,
 				jsonrpcv2.CodeInvalidRequest,
@@ -53,7 +49,7 @@ func (m *httpBodySizeLimiterMiddleware) ServeHTTP(w http.ResponseWriter, r *http
 		}
 
 		if contentLength > m.maxRequestBodySize {
-			WriteJSONRPCError(
+			adapters.WriteJSONRPCErrorToHTTPResponseWriter(
 				w,
 				nil,
 				jsonrpcv2.CodeInvalidRequest,

@@ -6,8 +6,10 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 )
 
+// HTTPRPCMiddlewares is a helper function that applies all the middlewares
+// necessary for handling JSON-RPC requests over HTTP.
 func HTTPRPCMiddlewares(logger log.Logger, maxRequestBodySize int64, handler http.Handler) http.Handler {
-	var h http.Handler = handler
+	h := handler
 
 	h = ContentTypeIsJSONRPCMiddleware(h, logger)
 	if maxRequestBodySize > 0 {

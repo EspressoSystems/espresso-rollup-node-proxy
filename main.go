@@ -2,14 +2,18 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
 	"time"
 
+	"proxy/adapters"
 	proxyhttp "proxy/http"
 	"proxy/proxy"
 	"proxy/store"
@@ -129,7 +133,14 @@ func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 // requests. It sets up the necessary middleware for request logging, body
 // size limits, and the JSON-RPC bridge to the full node proxy. It also
 // includes a health check endpoint at "/health".
-func createHttpServer(logger log.Logger, cfg *Config, fullNodeProxy *proxy.Proxy) *http.Server {
+func createHttpServer(logger log.Logger, cfg *Config, interceptor adapters.Interceptor) *http.Server {
+	fullNodeExecutionRPCURL, err := url.Parse(cfg.FullNodeExecutionRPC)
+	if err != nil {
+		panic(fmt.Sprintf("failed to parse full node execution RPC URL: %v", err))
+	}
+
+	// Create the Reverse Proxy
+	reverseProxy := httputil.NewSingleHostReverseProxy(fullNodeExecutionRPCURL)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthCheckHandler)
 	mux.Handle(
@@ -137,10 +148,7 @@ func createHttpServer(logger log.Logger, cfg *Config, fullNodeProxy *proxy.Proxy
 		proxyhttp.HTTPRPCMiddlewares(
 			logger,
 			int64(cfg.MaxRequestBodySize),
-			proxyhttp.JSONRPCBridge(
-				logger,
-				fullNodeProxy,
-			),
+			adapters.NewHTTPJSONRPCInterceptor(reverseProxy, interceptor),
 		),
 	)
 
@@ -162,14 +170,24 @@ func createHttpServer(logger log.Logger, cfg *Config, fullNodeProxy *proxy.Proxy
 // If we can create a middleware setup for Websocket processing similar to
 // our http.Handler middlewares, we may be able to setup some logging, and
 // other additional middleware criteria.
-func createWsServer(logger log.Logger, cfg *Config, fullNodeProxy *proxy.Proxy) *http.Server {
-	if cfg.WsListenAddr == "" {
+func createWsServer(logger log.Logger, cfg *Config, interceptor adapters.Interceptor) *http.Server {
+	if cfg.WsListenAddr == "" || cfg.WsFullNodeExecutionRPC == "" {
+		return nil
+	}
+
+	upstreamURL, err := url.Parse(cfg.WsFullNodeExecutionRPC)
+	if err != nil {
+		logger.Warn("received invalid URL for webSocket, disabling websocket", "url", upstreamURL, "err", err)
 		return nil
 	}
 
 	return &http.Server{
-		Addr:              cfg.WsListenAddr,
-		Handler:           proxyhttp.WebSocketJSONRPCHTTPBridge(logger, fullNodeProxy),
+		Addr: cfg.WsListenAddr,
+		Handler: proxyhttp.WebSocketJSONRPCHTTPBridge(
+			logger,
+			upstreamURL,
+			adapters.NewWebsocketJSONRPCDownstreamInterceptMiddleware(interceptor),
+		),
 		ReadTimeout:       15 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -214,32 +232,28 @@ func startHTTPServers(
 // They are ultimately governed by the passed context for a timeout.
 // If the context expires, it will trigger the server to finish its
 // shutdown regardless of whether or not in-flight requests have completed.
-func cleanHTTPServerShutdown(logger log.Logger, httpServer, webSocketServer *http.Server) {
+func cleanHTTPServerShutdown(logger log.Logger, servers ...*http.Server) {
 	ctx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 	var wg sync.WaitGroup
 
-	// Spawn a goroutine to shut down the HTTP server
-	wg.Add(1)
-	go (func(shutdownCtx context.Context, wg *sync.WaitGroup) {
-		defer wg.Done()
-		if err := httpServer.Shutdown(shutdownCtx); err != nil {
-			logger.Error("http server shutdown failed", "error", err)
-		} else {
-			logger.Info("http server shutdown gracefully")
+	for _, server := range servers {
+		if server == nil {
+			// Ignore any nil servers
+			continue
 		}
-	})(ctx, &wg)
 
-	// Spawn a goroutine to shut down the WebSocket server
-	wg.Add(1)
-	go (func(shutdownCtx context.Context, wg *sync.WaitGroup) {
-		defer wg.Done()
-		if err := webSocketServer.Shutdown(shutdownCtx); err != nil {
-			logger.Error("ws server shutdown failed", "error", err)
-		} else {
-			logger.Info("ws server shutdown gracefully")
-		}
-	})(ctx, &wg)
+		// Spawn a goroutine to shut down the HTTP server
+		wg.Add(1)
+		go (func(shutdownCtx context.Context, wg *sync.WaitGroup, server *http.Server) {
+			defer wg.Done()
+			if err := server.Shutdown(shutdownCtx); err != nil {
+				logger.Error("http server shutdown failed", "error", err)
+			} else {
+				logger.Info("http server shutdown gracefully")
+			}
+		})(ctx, &wg, server)
+	}
 
 	// Wait for the goroutines to exit
 	wg.Wait()
@@ -258,10 +272,14 @@ func main() {
 
 	fullNodeVerifier.Start(ctx)
 	logger.Info("Verifier started")
-	fullNodeProxy := proxy.NewProxy(cfg.toProxyConfig(), espressoStore)
+	interceptor := proxy.NewInterceptor(
+		espressoStore,
+		cfg.EspressoTag,
+		cfg.MaxBatchSize,
+	)
 
-	httpServer := createHttpServer(logger, cfg, fullNodeProxy)
-	webSocketServer := createWsServer(logger, cfg, fullNodeProxy)
+	httpServer := createHttpServer(logger, cfg, interceptor)
+	webSocketServer := createWsServer(logger, cfg, interceptor)
 
 	var serverWaitGroup sync.WaitGroup
 	startHTTPServers(logger, &serverWaitGroup, cfg, httpServer, webSocketServer)

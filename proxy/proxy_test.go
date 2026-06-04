@@ -6,9 +6,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"path/filepath"
 	"testing"
 
+	"proxy/adapters"
 	proxyhttp "proxy/http"
 	"proxy/jsonrpcv2"
 	espressoStore "proxy/store"
@@ -17,7 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestProxy(t *testing.T, upstreamURL string, l2BlockNumber uint64, espressoTag string) *Proxy {
+func newTestReverseProxyHandler(t *testing.T, upstreamURL *url.URL, l2BlockNumber uint64, espressoTag string, maxBatchSize int) http.Handler {
 	t.Helper()
 	fp := filepath.Join(t.TempDir(), "state.json")
 	store, err := espressoStore.NewEspressoStore(fp, 1)
@@ -25,7 +28,9 @@ func newTestProxy(t *testing.T, upstreamURL string, l2BlockNumber uint64, espres
 	updated, err := store.UpdateIfGreater(l2BlockNumber, 1)
 	require.True(t, updated)
 	require.NoError(t, err)
-	return NewProxy(&ProxyConfig{FullNodeExecutionRPC: upstreamURL, EspressoTag: espressoTag, MaxBatchSize: DefaultMaxBatchSize}, store)
+	reverseProxy := httputil.NewSingleHostReverseProxy(upstreamURL)
+	interceptor := NewInterceptor(store, espressoTag, maxBatchSize)
+	return adapters.NewHTTPJSONRPCInterceptor(reverseProxy, interceptor)
 }
 
 type errReader struct{}
@@ -65,8 +70,12 @@ func TestServe(t *testing.T) {
 		}))
 
 		defer upstream.Close()
-		proxy := newTestProxy(t, upstream.URL, 100, "espresso")
-		handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), 10_000, proxyhttp.JSONRPCBridge(log.Root(), proxy))
+		upstreamURL := &url.URL{
+			Scheme: "http",
+			Host:   upstream.Listener.Addr().String(),
+		}
+		reverseProxyHandler := newTestReverseProxyHandler(t, upstreamURL, 100, "espresso", DefaultMaxBatchSize)
+		handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), DefaultMaxRequestBodySize, reverseProxyHandler)
 		reqBody := `{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0xabc","latest"]}`
 		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
 		req.Header.Set("Content-Type", "application/json")
@@ -105,8 +114,12 @@ func TestServe(t *testing.T) {
 		}))
 		defer upstream.Close()
 
-		proxy := newTestProxy(t, upstream.URL, 100, "espresso")
-		handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), 10_000, proxyhttp.JSONRPCBridge(log.Root(), proxy))
+		upstreamURL := &url.URL{
+			Scheme: "http",
+			Host:   upstream.Listener.Addr().String(),
+		}
+		reverseProxyHandler := newTestReverseProxyHandler(t, upstreamURL, 100, "espresso", DefaultMaxBatchSize)
+		handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), DefaultMaxRequestBodySize, reverseProxyHandler)
 
 		reqBody := `{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0xabc","espresso"]}`
 		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
@@ -122,8 +135,8 @@ func TestServe(t *testing.T) {
 	// which should result in a parse error, as the hanlder was unable
 	// to parse valid JSON.
 	t.Run("returns parse error when body read fails", func(t *testing.T) {
-		proxy := newTestProxy(t, "http://unused", 100, "espresso")
-		handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), 10_000, proxyhttp.JSONRPCBridge(log.Root(), proxy))
+		reverseProxyHandler := newTestReverseProxyHandler(t, nil, 100, "espresso", DefaultMaxBatchSize)
+		handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), DefaultMaxRequestBodySize, reverseProxyHandler)
 
 		req := httptest.NewRequest(http.MethodPost, "/", &errReader{})
 		req.Header.Set("Content-Type", "application/json")
@@ -146,10 +159,9 @@ func TestServe(t *testing.T) {
 	//
 	// This is facilitated by utilizing a non-existent URL for the upstream.
 	t.Run("returns internal error when upstream request fails", func(t *testing.T) {
-		proxy := newTestProxy(t, "http://unused", 100, "espresso")
-		handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), 10_000, proxyhttp.JSONRPCBridge(log.Root(), proxy))
-
-		reqBody := `{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0xabc","espresso"]}`
+		reverseProxyHandler := newTestReverseProxyHandler(t, nil, 100, "espresso", DefaultMaxBatchSize)
+		handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), DefaultMaxBatchSize, reverseProxyHandler)
+		reqBody := `{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}`
 		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
@@ -169,8 +181,8 @@ func TestServe(t *testing.T) {
 	// This test ensures that invalid json submitted to the server will result
 	// in a parse error.
 	t.Run("returns parse error when the request is not valid json", func(t *testing.T) {
-		proxy := newTestProxy(t, "http://unused", 100, "espresso")
-		handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), 10_000, proxyhttp.JSONRPCBridge(log.Root(), proxy))
+		reverseProxyHandler := newTestReverseProxyHandler(t, nil, 100, "espresso", DefaultMaxBatchSize)
+		handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), DefaultMaxRequestBodySize, reverseProxyHandler)
 
 		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString("not valid json"))
 		req.Header.Set("Content-Type", "application/json")
@@ -200,8 +212,8 @@ func TestServe(t *testing.T) {
 		updated, err := store.UpdateIfGreater(100, 1)
 		require.True(t, updated)
 		require.NoError(t, err)
-		p := NewProxy(&ProxyConfig{FullNodeExecutionRPC: "http://unused", EspressoTag: "espresso", MaxBatchSize: 2}, store)
-		handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), 10_000, proxyhttp.JSONRPCBridge(log.Root(), p))
+		reverseProxyHandler := newTestReverseProxyHandler(t, nil, 100, "espresso", 2)
+		handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), DefaultMaxRequestBodySize, reverseProxyHandler)
 
 		body := `[{"jsonrpc":"2.0","id":1,"method":"eth_chainId"},{"jsonrpc":"2.0","id":2,"method":"eth_chainId"},{"jsonrpc":"2.0","id":3,"method":"eth_chainId"}]`
 		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
@@ -237,8 +249,12 @@ func TestServe(t *testing.T) {
 		}))
 		defer upstream.Close()
 
-		proxy := newTestProxy(t, upstream.URL, 100, "finalized")
-		handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), 10_000, proxyhttp.JSONRPCBridge(log.Root(), proxy))
+		upstreamURL := &url.URL{
+			Scheme: "http",
+			Host:   upstream.Listener.Addr().String(),
+		}
+		reverseProxyHandler := newTestReverseProxyHandler(t, upstreamURL, 100, "finalized", DefaultMaxBatchSize)
+		handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), DefaultMaxRequestBodySize, reverseProxyHandler)
 
 		reqBody := `{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0xabc","finalized"]}`
 		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))

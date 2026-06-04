@@ -5,6 +5,7 @@ import (
 	"mime"
 	"net/http"
 
+	"proxy/adapters"
 	"proxy/jsonrpcv2"
 
 	"github.com/ethereum/go-ethereum/log"
@@ -33,7 +34,7 @@ type httpEnsureContentTypeIsJSONRPCMiddleware struct {
 func (m *httpEnsureContentTypeIsJSONRPCMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil {
-		WriteJSONRPCError(
+		adapters.WriteJSONRPCErrorToHTTPResponseWriter(
 			w,
 			nil,
 			jsonrpcv2.CodeInvalidRequest,
@@ -44,7 +45,7 @@ func (m *httpEnsureContentTypeIsJSONRPCMiddleware) ServeHTTP(w http.ResponseWrit
 
 	switch mediaType {
 	default:
-		WriteJSONRPCError(
+		adapters.WriteJSONRPCErrorToHTTPResponseWriter(
 			w,
 			nil,
 			jsonrpcv2.CodeInvalidRequest,
@@ -59,7 +60,6 @@ func (m *httpEnsureContentTypeIsJSONRPCMiddleware) ServeHTTP(w http.ResponseWrit
 		// allows.
 		break
 	}
-
 	m.handler.ServeHTTP(w, r)
 }
 

@@ -10,6 +10,11 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 )
 
+const (
+	DefaultMaxBatchSize       = 1000
+	DefaultMaxRequestBodySize = 5 * 1024 * 1024 // 5MB, matches go-ethereum defaultBodyLimit
+)
+
 // Interceptor is responsible for intercepting JSON-RPC requests with
 // the specified espresso tag and replacing the tag with a block number
 // finalized by Espresso. Note: the espreso tag can be "finalized", "espresso" etc
@@ -82,6 +87,8 @@ func (i *Interceptor) InterceptRequest(request jsonrpcv2.Request) (jsonrpcv2.Req
 	return i.interceptRequest(request, finalizedEspressoBlockNumber)
 }
 
+// InterceptBatchRequests takes in a batch of JSON-RPC requests, and performs
+// any espresso tag expansion on the requests before returning them.
 func (i *Interceptor) InterceptBatchRequests(requests []jsonrpcv2.Request) ([]jsonrpcv2.Request, error) {
 	if len(requests) > i.maxBatchSize {
 		// We're over our limit of maximum batches to process.

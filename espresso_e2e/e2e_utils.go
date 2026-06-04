@@ -12,6 +12,8 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/exec"
 	"strconv"
@@ -20,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"proxy/adapters"
 	proxyhttp "proxy/http"
 	"proxy/jsonrpcv2"
 	"proxy/proxy"
@@ -465,22 +468,26 @@ func jsonRPCBatchCallRaw(t *testing.T, url string, entries []batchEntry) []JSONR
 	return rpcResps
 }
 
-func startTestProxy(ctx context.Context, t *testing.T, backendURL string, store *espressostore.EspressoStore, tag string) (proxyURL string, shutdown func()) {
+func startTestProxy(ctx context.Context, t *testing.T, backendURL string, store *espressostore.EspressoStore, tag string) (proxyURLString string, shutdown func()) {
 	t.Helper()
-	p := proxy.NewProxy(&proxy.ProxyConfig{
-		FullNodeExecutionRPC: backendURL,
-		EspressoTag:          tag,
-		MaxBatchSize:         proxy.DefaultMaxBatchSize,
-		MaxRequestBodySize:   proxy.DefaultMaxRequestBodySize,
-	}, store)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
-	proxyURL = "http://" + listener.Addr().String()
-	handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), proxy.DefaultMaxRequestBodySize, proxyhttp.JSONRPCBridge(log.Root(), p))
+	proxyURL := &url.URL{
+		Scheme: "http",
+		Host:   listener.Addr().String(),
+	}
+	interceptor := proxy.NewInterceptor(store, tag, proxy.DefaultMaxBatchSize)
+	reverseProxy := httputil.NewSingleHostReverseProxy(proxyURL)
+	require.NoError(t, err)
+	handler := proxyhttp.HTTPRPCMiddlewares(
+		log.Root(),
+		proxy.DefaultMaxRequestBodySize,
+		adapters.NewHTTPJSONRPCInterceptor(reverseProxy, interceptor),
+	)
 	server := &http.Server{Handler: handler}
 	go func() { _ = server.Serve(listener) }()
 	t.Logf("proxy listening on %s", proxyURL)
-	return proxyURL, func() { _ = server.Shutdown(ctx) }
+	return proxyURL.String(), func() { _ = server.Shutdown(ctx) }
 }
 
 func pollUntil(t *testing.T, timeout time.Duration, failMsg string, condition func() bool) {
