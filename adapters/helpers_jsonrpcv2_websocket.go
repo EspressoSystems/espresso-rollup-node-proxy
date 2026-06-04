@@ -26,7 +26,7 @@ func WriteJSONRPCResponseToWebSocket(conn websocket.Conn, response jsonrpcv2.Res
 		// case.  Yet our encoding failed.
 		// Fallback to a Transport error
 
-		if err := conn.Close(websocket.StatusProtocolError, "failed to encode JSON-RPC response"); err != nil {
+		if err := conn.Close(websocket.StatusProtocolError, "failed to send JSON-RPC response"); err != nil {
 			log.Error("failed to close websocket", "error", err)
 		}
 
