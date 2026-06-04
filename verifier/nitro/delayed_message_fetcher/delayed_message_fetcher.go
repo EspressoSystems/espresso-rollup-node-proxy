@@ -129,7 +129,7 @@ func newDelayedMessageFetcher(
 		startBlock = finalizedBlock - startBlockLookback
 	}
 
-	logger.Info(
+	logger.Debug(
 		"delayed message fetcher starting from finalized parent block",
 		"start_parent_chain_block", startBlock,
 		"finalized_parent_chain_block", finalizedBlock,
@@ -181,7 +181,7 @@ func (f *DelayedMessageFetcher) GetDelayedMessage(ctx context.Context, messageIn
 
 	// Check to see if the delayed message is still on the chain
 	// It is possible that the message was reorged out as currently code doesn't back track
-	found, err := f.verifyDelayedMessage(ctx, delayedMsg)
+	found, err := f.verifyDelayedMessageOnParentChain(ctx, delayedMsg)
 	if err != nil {
 		return nil, err
 	}
@@ -209,23 +209,28 @@ func (f *DelayedMessageFetcher) GetDelayedMessage(ctx context.Context, messageIn
 	return delayedMsg.data, nil
 }
 
-func (f *DelayedMessageFetcher) Advance(messageIndex uint64) {
+func (f *DelayedMessageFetcher) Advance(toMessageIndex uint64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if len(f.delayedMessages) == 0 {
 		return
 	}
+	toDelete := make([]uint64, len(f.delayedMessages))
 	for _, msg := range f.delayedMessages {
-		if msg.messageIndex <= messageIndex {
-			delete(f.delayedMessages, msg.messageIndex)
-			if msg.messageIndex == messageIndex {
-				f.logger.Info("delayed message advanced", "message_index", messageIndex)
-			}
+		if msg.messageIndex <= toMessageIndex {
+			toDelete = append(toDelete, msg.messageIndex)
+		}
+	}
+	for _, msgIndex := range toDelete {
+		delete(f.delayedMessages, msgIndex)
+		if msgIndex == toMessageIndex {
+			f.logger.Info("delayed message advanced", "message_index", toMessageIndex)
 		}
 	}
 
 }
 
+// ensureFinality checks that the parent block containing the delayed message is finalized. If not, it returns an error.
 func (f *DelayedMessageFetcher) ensureFinality(ctx context.Context, delayedMsg *delayedMessage, messageIndex uint64) error {
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeoutPerCall)
 	defer cancel()
@@ -246,7 +251,11 @@ func (f *DelayedMessageFetcher) ensureFinality(ctx context.Context, delayedMsg *
 	return nil
 }
 
-func (f *DelayedMessageFetcher) verifyDelayedMessage(ctx context.Context, msg *delayedMessage) (bool, error) {
+// verifyDelayedMessageOnParentChain checks that the delayed message is still on the chain by
+// re-querying the Bridge's MessageDelivered event for the message index and comparing the data hash.
+// If the message is not found, it returns false. If there is an error during verification, it returns an error.
+// This can be the case of a parent chain reorg where we initially saw the message, but it got reorged out later.
+func (f *DelayedMessageFetcher) verifyDelayedMessageOnParentChain(ctx context.Context, msg *delayedMessage) (bool, error) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeoutPerCall)
 	defer cancel()
 
@@ -266,12 +275,13 @@ func (f *DelayedMessageFetcher) verifyDelayedMessage(ctx context.Context, msg *d
 
 	for iter.Next() {
 		if crypto.Keccak256Hash(msg.data) == common.Hash(iter.Event.MessageDataHash) {
-			return true, iter.Error()
+			return true, nil
 		}
 	}
 	return false, iter.Error()
 }
 
+// rewind clears the delayed message cache and rewinds the parent block number to the finalized block of the provided delayed message.
 func (f *DelayedMessageFetcher) rewind(msg *delayedMessage) {
 	f.logger.Warn(
 		"failed to find a previously found delayed message (reorg?), rewinding delayed message fetcher",
@@ -285,7 +295,9 @@ func (f *DelayedMessageFetcher) rewind(msg *delayedMessage) {
 	f.parentBlockNumber = msg.finalizedBlock
 }
 
-func (f *DelayedMessageFetcher) fetchDelayedMessageFromParent(
+// fetchDelayedMessageFromParentChain queries the parent chain for Bridge MessageDelivered events
+// For each MessageDelivered event, it then queries the respective Inbox contract for the message data
+func (f *DelayedMessageFetcher) fetchDelayedMessageFromParentChain(
 	ctx context.Context,
 	endBlock uint64,
 	finalized uint64,
@@ -312,6 +324,7 @@ func (f *DelayedMessageFetcher) fetchDelayedMessageFromParent(
 	return nil
 }
 
+// fetchBridgeEvents queries the parent chain for Bridge MessageDelivered events for a given range
 func (f *DelayedMessageFetcher) fetchBridgeEvents(ctx context.Context, endBlock uint64) ([]*nitroabi.BridgeMessageDelivered, error) {
 	messageDeliveredIter, err := f.bridgeFilterer.FilterMessageDelivered(
 		&bind.FilterOpts{Context: ctx, Start: f.parentBlockNumber, End: &endBlock},
@@ -323,6 +336,7 @@ func (f *DelayedMessageFetcher) fetchBridgeEvents(ctx context.Context, endBlock 
 	}
 	defer func() {
 		if err := messageDeliveredIter.Close(); err != nil {
+			// This should be unreachable as `Close()` doesnt actually return an error, but we log just in case
 			f.logger.Warn("failed to close message delivered iterator", "error", err)
 		}
 	}()
@@ -337,21 +351,21 @@ func (f *DelayedMessageFetcher) fetchBridgeEvents(ctx context.Context, endBlock 
 	return events, nil
 }
 
+// fetchInboxData fetches the message data for the provided MessageDelivered events by querying the respective Inbox contracts.
+// It then verifies the data against the MessageDataHash from the Bridge event, and if valid, stores it in the delayed message cache.
 func (f *DelayedMessageFetcher) fetchInboxData(
 	ctx context.Context,
-	delivered []*nitroabi.BridgeMessageDelivered,
+	deliveredEvents []*nitroabi.BridgeMessageDelivered,
 	endBlock uint64,
 	finalized uint64,
 ) error {
-	startBlock := new(big.Int).SetUint64(f.parentBlockNumber)
-	end := new(big.Int).SetUint64(endBlock)
-
-	addresses := make([]common.Address, 0, len(delivered))
+	addresses := make([]common.Address, 0, len(deliveredEvents))
 	seen := make(map[common.Address]bool)
-	dataHashes := make(map[uint64]common.Hash, len(delivered))
-	messageIds := make([]common.Hash, 0, len(delivered))
+	dataHashes := make(map[uint64]common.Hash, len(deliveredEvents))
+	messageIds := make([]common.Hash, 0, len(deliveredEvents))
 
-	for _, event := range delivered {
+	for _, event := range deliveredEvents {
+		// We dont need more than one of the same address
 		if !seen[event.Inbox] {
 			seen[event.Inbox] = true
 			addresses = append(addresses, event.Inbox)
@@ -361,8 +375,8 @@ func (f *DelayedMessageFetcher) fetchInboxData(
 	}
 
 	logs, err := f.parentChainClient.FilterLogs(ctx, ethereum.FilterQuery{
-		FromBlock: startBlock,
-		ToBlock:   end,
+		FromBlock: new(big.Int).SetUint64(f.parentBlockNumber),
+		ToBlock:   new(big.Int).SetUint64(endBlock),
 		Addresses: addresses,
 		Topics:    [][]common.Hash{{f.inboxMessageDeliveredTopic, f.inboxFromOriginTopic}, messageIds},
 	})
@@ -393,6 +407,8 @@ func (f *DelayedMessageFetcher) fetchInboxData(
 	return f.extractInboxData(ctx, filterers, dataHashes, logs, finalized)
 }
 
+// extractInboxData extracts the message data from the provided logs, verifies it against the provided data hashes,
+// and stores it in the delayed message cache if valid.
 func (f *DelayedMessageFetcher) extractInboxData(
 	ctx context.Context,
 	filterers map[common.Address]*nitroabi.InboxFilterer,
@@ -415,6 +431,7 @@ func (f *DelayedMessageFetcher) extractInboxData(
 
 		var data []byte
 		var err error
+		// Topic 0 is the event signature
 		switch eventLog.Topics[0] {
 		case f.inboxMessageDeliveredTopic:
 			data, err = f.extractFromInboxMessageDelivered(filterer, eventLog, msgIndex)
@@ -448,6 +465,7 @@ func (f *DelayedMessageFetcher) extractInboxData(
 	return nil
 }
 
+// extractFromInboxMessageDelivered extracts the message data from an InboxMessageDelivered event log
 func (f *DelayedMessageFetcher) extractFromInboxMessageDelivered(
 	filterer *nitroabi.InboxFilterer,
 	ethLog types.Log,
@@ -467,6 +485,8 @@ func (f *DelayedMessageFetcher) extractFromInboxMessageDelivered(
 	return event.Data, nil
 }
 
+// extractFromInboxFromOrigin extracts the message data for an InboxMessageDeliveredFromOrigin event by
+// fetching the transaction calldata of the respective sendL2MessageFromOrigin transaction and parsing out the message data.
 func (f *DelayedMessageFetcher) extractFromInboxFromOrigin(ctx context.Context, eventLog types.Log, msgIndex uint64) ([]byte, error) {
 	tx, _, err := f.parentChainClient.TransactionByHash(ctx, eventLog.TxHash)
 	if err != nil {
@@ -529,7 +549,7 @@ func (f *DelayedMessageFetcher) run(ctx context.Context) {
 			if endBlock-parentBlock >= maxBlocksPerScan {
 				endBlock = parentBlock + maxBlocksPerScan
 			}
-			if err := f.fetchDelayedMessageFromParent(timeoutCtx, endBlock, finalized); err != nil {
+			if err := f.fetchDelayedMessageFromParentChain(timeoutCtx, endBlock, finalized); err != nil {
 				f.logger.Warn("failed to fetch delayed messages", "error", err)
 			}
 		}
