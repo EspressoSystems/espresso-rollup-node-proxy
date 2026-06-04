@@ -13,13 +13,13 @@ type httpCORSMiddleware struct {
 	handler http.Handler
 }
 
-// CORSResponseHeaders is a type that wraps http.Header to provide methods
+// corsResponseHeaders is a type that wraps http.Header to provide methods
 // for setting CORS-related headers in the response.
-type CORSResponseHeaders http.Header
+type corsResponseHeaders http.Header
 
-// CORSWildcard is a constant that can be used to allow all origins in CORS
+// corsWildcard is a constant that can be used to allow all origins in CORS
 // headers.
-const CORSWildcard = "*"
+const corsWildcard = "*"
 
 // AllowOrigin sets the Access-Control-Allow-Origin header for the response
 // based on the value passed.
@@ -45,7 +45,7 @@ const CORSWildcard = "*"
 //
 // Reference: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Allow-Origin
 // Allows for any Origin to make the request
-func (h CORSResponseHeaders) AllowOrigin(origin string) {
+func (h corsResponseHeaders) AllowOrigin(origin string) {
 	http.Header(h).Set("Access-Control-Allow-Origin", origin)
 }
 
@@ -60,7 +60,7 @@ func (h CORSResponseHeaders) AllowOrigin(origin string) {
 // utilized, such as `DELETE`, and `PUT`.
 //
 // Reference: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Allow-Methods
-func (h CORSResponseHeaders) AllowMethods(methods ...string) {
+func (h corsResponseHeaders) AllowMethods(methods ...string) {
 	for _, m := range methods {
 		http.Header(h).Add("Access-Control-Allow-Methods", m)
 	}
@@ -78,7 +78,7 @@ func (h CORSResponseHeaders) AllowMethods(methods ...string) {
 // NOTE: This is required to be set in response to a request for headers.
 //
 // Reference: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Allow-Headers
-func (h CORSResponseHeaders) AllowHeaders(headers ...string) {
+func (h corsResponseHeaders) AllowHeaders(headers ...string) {
 	for _, v := range headers {
 		http.Header(h).Add("Access-Control-Allow-Headers", textproto.CanonicalMIMEHeaderKey(v))
 	}
@@ -92,7 +92,7 @@ func (h CORSResponseHeaders) AllowHeaders(headers ...string) {
 // regardless of what is specified here. Beneficial mileage may vary.
 //
 // Reference: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Max-Age
-func (h CORSResponseHeaders) MaxAge(duration time.Duration) {
+func (h corsResponseHeaders) MaxAge(duration time.Duration) {
 	seconds := strconv.FormatInt(int64(duration.Seconds()), 10)
 	http.Header(h).Set("Access-Control-Max-Age", seconds)
 }
@@ -103,22 +103,22 @@ func (h CORSResponseHeaders) MaxAge(duration time.Duration) {
 // client certificates.
 //
 // Reference: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Allow-Credentials
-func (h CORSResponseHeaders) AllowCredentials(allow bool) {
+func (h corsResponseHeaders) AllowCredentials(allow bool) {
 	http.Header(h).Set("Access-Control-Allow-Credentials", strconv.FormatBool(allow))
 }
 
-const CORSPolicyMaxAge = 10 * time.Minute
+const corsPolicyMaxAge = 10 * time.Minute
 
-// CORSRequestHeaders is a type that wraps http.Header to provide methods for
+// corsRequestHeaders is a type that wraps http.Header to provide methods for
 // retrieving CORS-related headers from the request.
-type CORSRequestHeaders http.Header
+type corsRequestHeaders http.Header
 
 // Origin returns the value of the Origin header from the request, which
 // specifies the origin of the request. This is used in CORS to determine
 // whether or not the request is allowed based on its origin.
 //
 // Reference: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Origin
-func (h CORSRequestHeaders) Origin() string {
+func (h corsRequestHeaders) Origin() string {
 	return http.Header(h).Get("Origin")
 }
 
@@ -128,7 +128,7 @@ func (h CORSRequestHeaders) Origin() string {
 // to inform the requester whether this method is allowed or not.
 //
 // Reference: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Request-Method
-func (h CORSRequestHeaders) RequestMethod() string {
+func (h corsRequestHeaders) RequestMethod() string {
 	return http.Header(h).Get("Access-Control-Request-Method")
 }
 
@@ -141,16 +141,19 @@ func (h CORSRequestHeaders) RequestMethod() string {
 // represented as lowercase. As a result, Canonicalization may need to occur.
 //
 // Reference: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Request-Headers
-func (h CORSRequestHeaders) RequestHeaders() []string {
+func (h corsRequestHeaders) RequestHeaders() []string {
 	return http.Header(h).Values("Access-Control-Request-Headers")
 }
 
-func handleCORS(w http.ResponseWriter, r *http.Request) {
-	responseHeaders := CORSResponseHeaders(w.Header())
-	requestHeaders := CORSRequestHeaders(r.Header)
+// handleCORSOptionsMethod is a helper function that handles CORS preflight
+// requests. It sets the appropriate CORS headers in the response based on
+// the request headers.
+func handleCORSOptionsMethod(w http.ResponseWriter, r *http.Request) {
+	responseHeaders := corsResponseHeaders(w.Header())
+	requestHeaders := corsRequestHeaders(r.Header)
 
 	// Allow for All Origins to call us
-	responseHeaders.AllowOrigin(CORSWildcard)
+	responseHeaders.AllowOrigin(corsWildcard)
 
 	// Allows for the specific methods of `POST` for `JSONRPC V2` requests, and
 	// `OPTIONS` for `CORS` requests
@@ -164,7 +167,7 @@ func handleCORS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Set a decent max age, so they don't need to preflight too often.
-	responseHeaders.MaxAge(CORSPolicyMaxAge)
+	responseHeaders.MaxAge(corsPolicyMaxAge)
 
 	if requestedHeaders := requestHeaders.RequestHeaders(); len(requestedHeaders) > 0 {
 		// Response if they request headers
@@ -177,15 +180,19 @@ func handleCORS(w http.ResponseWriter, r *http.Request) {
 	responseHeaders.AllowCredentials(true)
 }
 
+// ServeHTTP implements [http.Handler]
 func (m *httpCORSMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
-		handleCORS(w, r)
+		handleCORSOptionsMethod(w, r)
 		return
 	}
 
 	m.handler.ServeHTTP(w, r)
 }
 
-func corsMiddleware(next http.Handler) http.Handler {
+// NewCORSMiddleware creates an [http.Handler] that will perform all CORS
+// interceptions and handling for the given [http.Handler], before forwarding
+// the request to the given [http.Handler].
+func NewCORSMiddleware(next http.Handler) http.Handler {
 	return &httpCORSMiddleware{handler: next}
 }
