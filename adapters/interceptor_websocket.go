@@ -6,8 +6,6 @@ import (
 
 	"proxy/jsonrpcv2"
 	"proxy/websocket"
-
-	perrors "github.com/pkg/errors"
 )
 
 type webSocketJSONRPCDownstreamIntercept struct {
@@ -61,7 +59,7 @@ func (i *webSocketJSONRPCDownstreamIntercept) Read(ctx context.Context) (message
 		}
 
 		WriteJSONRPCErrorToWebSocket(i.Conn, nil, jsonrpcv2.CodeInternalError, "failed to intercept request")
-		return messageType, message, perrors.Wrap(err, "failed to intercept JSON-RPC request")
+		return messageType, message, WrapErr("failed to intercept JSON-RPC request", err)
 	}
 
 	return messageType, message, nil
