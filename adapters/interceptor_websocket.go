@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"context"
+	"errors"
 
 	"proxy/jsonrpcv2"
 	"proxy/websocket"
@@ -51,6 +52,14 @@ func (i *webSocketJSONRPCDownstreamIntercept) Read(ctx context.Context) (message
 
 	message, err = PerformRequestIntercept(message, i.interceptor)
 	if err != nil {
+		var jsonRPCError jsonrpcv2.Error
+		if errors.As(err, &jsonRPCError) {
+			WriteJSONRPCResponseToWebSocket(i.Conn, jsonrpcv2.Response{
+				Error: &jsonRPCError,
+			})
+			return
+		}
+
 		WriteJSONRPCErrorToWebSocket(i.Conn, nil, jsonrpcv2.CodeInternalError, "failed to intercept request")
 		return messageType, message, perrors.Wrap(err, "failed to intercept JSON-RPC request")
 	}

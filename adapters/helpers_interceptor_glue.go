@@ -3,7 +3,6 @@ package adapters
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	"proxy/jsonrpcv2"
@@ -61,7 +60,10 @@ func WrapErr(message string, err error) error {
 func requestInterceptorGlue[R any](payload []byte, intercept func(R) (R, error)) ([]byte, error) {
 	var request R
 	if err := json.Unmarshal(payload, &request); err != nil {
-		return nil, WrapErr("failed to decode json rpc request", err)
+		return nil, WrapErr("failed to decode json rpc request", jsonrpcv2.Error{
+			Code:    jsonrpcv2.CodeParseError,
+			Message: fmt.Sprintf("failed to decode json rpc request: %s", err),
+		})
 	}
 
 	request, err := intercept(request)
@@ -72,15 +74,6 @@ func requestInterceptorGlue[R any](payload []byte, intercept func(R) (R, error))
 	marshaledBytes, err := json.Marshal(request)
 	return marshaledBytes, WrapErr("failed to encode json rpc request", err)
 }
-
-// ErrNoMessage is returned when we expected a message from the connection but
-// none was received.
-var ErrNoMessage = errors.New("no message received")
-
-// ErrUnrecognizedRequest is returned when we receive a message that does not
-// match the expected format of a JSON-RPC request, such as a single Request
-// or a Batch Request.
-var ErrUnrecognizedRequest = errors.New("unrecognized request")
 
 // PerformRequestIntercept is a helper function that performs the given
 // intercept on the payload.
@@ -96,12 +89,18 @@ func PerformRequestIntercept(payload []byte, interceptor Interceptor) ([]byte, e
 
 	if len(payload) <= 0 {
 		// We have a problem, we expected a message but got nothing.
-		return nil, ErrNoMessage
+		return nil, jsonrpcv2.Error{
+			Code:    jsonrpcv2.CodeParseError,
+			Message: "received empty payload, with no content",
+		}
 	}
 
 	switch payload[0] {
 	default:
-		return nil, ErrUnrecognizedRequest
+		return nil, jsonrpcv2.Error{
+			Code:    jsonrpcv2.CodeParseError,
+			Message: "unexpected format for json-rpc request",
+		}
 
 	case '{':
 		// Single request

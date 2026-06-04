@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -42,6 +43,16 @@ func (i *httpJSONRPCInterceptor) ServeHTTP(w http.ResponseWriter, r *http.Reques
 
 	data, err = PerformRequestIntercept(data, i.interceptor)
 	if err != nil {
+		var jsonRPCError jsonrpcv2.Error
+		if errors.As(err, &jsonRPCError) {
+			// This is a JSON RPC Error, so we'll forward it to the client as a
+			// JSON RPC Error response.
+			WriteJSONRPCResponseToHTTPResponseWriter(w, jsonrpcv2.Response{
+				Error: &jsonRPCError,
+			})
+			return
+		}
+
 		WriteJSONRPCErrorToHTTPResponseWriter(w, nil, jsonrpcv2.CodeInternalError, fmt.Sprintf("failed to intercept request: %s", err))
 		return
 	}
