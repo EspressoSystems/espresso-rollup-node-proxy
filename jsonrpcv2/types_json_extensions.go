@@ -118,7 +118,7 @@ func (r Request) MarshalJSON() ([]byte, error) {
 		toEncode[k] = v
 	}
 
-	if r.ID != (NotificationID{}) {
+	if _, isNotification := r.ID.(NotificationID); isNotification {
 		toEncode["id"] = r.ID
 	}
 	toEncode["method"] = r.Method
