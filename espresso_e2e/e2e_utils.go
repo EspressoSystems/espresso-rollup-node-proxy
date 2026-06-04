@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	stdlog "log"
 	"log/slog"
 	"math"
 	"math/big"
@@ -468,7 +469,7 @@ func jsonRPCBatchCallRaw(t *testing.T, url string, entries []batchEntry) []JSONR
 	return rpcResps
 }
 
-func startTestProxy(ctx context.Context, t *testing.T, backendURL string, store *espressostore.EspressoStore, tag string) (proxyURLString string, shutdown func()) {
+func startTestProxy(ctx context.Context, t *testing.T, backendURLString string, store *espressostore.EspressoStore, tag string) (proxyURLString string, shutdown func()) {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
@@ -476,8 +477,13 @@ func startTestProxy(ctx context.Context, t *testing.T, backendURL string, store 
 		Scheme: "http",
 		Host:   listener.Addr().String(),
 	}
+	devNull, err := os.Open(os.DevNull)
+	require.NoError(t, err)
+	backendURL, err := url.Parse(backendURLString)
+	require.NoError(t, err)
 	interceptor := proxy.NewInterceptor(store, tag, proxy.DefaultMaxBatchSize)
-	reverseProxy := httputil.NewSingleHostReverseProxy(proxyURL)
+	reverseProxy := httputil.NewSingleHostReverseProxy(backendURL)
+	reverseProxy.ErrorLog = stdlog.New(devNull, "reverse proxy", 0)
 	require.NoError(t, err)
 	handler := proxyhttp.HTTPRPCMiddlewares(
 		log.Root(),
