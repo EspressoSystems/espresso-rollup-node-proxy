@@ -214,7 +214,7 @@ func startHTTPServers(
 		wg.Add(1)
 		go func(wg *sync.WaitGroup, server *http.Server) {
 			defer wg.Done()
-			logger.Info("server listening", "addr", cfg.ListenAddr)
+			logger.Info("server listening", "addr", server.Addr)
 			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				// TODO: Re-evalute this logger.Crit usage. Invoking this function
 				// will also call os.Exit, forcing the program to exit without
