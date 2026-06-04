@@ -60,14 +60,6 @@ func (a *gorillaAdapter) Close(code Status, reason string) error {
 	return a.conn.Close()
 }
 
-func (a *gorillaAdapter) closeOnCloseError(err error) {
-	if _, ok := a.IsCloseError(err); ok {
-		// We received a message indicating that we're closed.
-		// Let's make sure that our socket is closed.
-		_ = a.conn.Close()
-	}
-}
-
 // Read implements [Conn].
 //
 // The passed context is ignored, lest we end up corrupting the underlying
