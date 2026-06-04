@@ -31,22 +31,6 @@ var _ Conn = (*gorillaAdapter)(nil)
 func (a *gorillaAdapter) Close(code Status, reason string) error {
 	now := time.Now()
 	deadline := now.Add(closeMessageTimeout)
-	closeHandler := a.conn.CloseHandler()
-	closeCh := make(chan struct{})
-
-	ctx, cancel := context.WithDeadline(context.Background(), deadline)
-	defer cancel()
-
-	// Overwrite the Close Handler
-	a.conn.SetCloseHandler(func(code int, text string) error {
-		// Signal that we're done waiting
-		close(closeCh)
-
-		if closeHandler == nil {
-			return nil
-		}
-		return closeHandler(code, text)
-	})
 
 	writeError := a.conn.WriteControl(
 		websocket.CloseMessage,
@@ -54,11 +38,15 @@ func (a *gorillaAdapter) Close(code Status, reason string) error {
 		deadline,
 	)
 
-	var closeError *websocket.CloseError
-	if errors.As(writeError, &closeError) && closeError != nil {
+	if _, ok := a.IsCloseError(writeError); ok {
 		// We're already closed.
 		// Nothing further to do.
 		return nil
+	}
+
+	if errors.Is(writeError, websocket.ErrCloseSent) {
+		// Close already sent.  This is probably fine.
+		return a.conn.Close()
 	}
 
 	if writeError != nil {
@@ -68,28 +56,28 @@ func (a *gorillaAdapter) Close(code Status, reason string) error {
 		return errors.Join(writeError, a.conn.Close())
 	}
 
-	var timeoutError error
+	// Finally perform an actual close.
+	return a.conn.Close()
+}
 
-	// Wait for Close
-	select {
-	case <-closeCh:
-		// The connection closed successfully, so we can return without error.
-		break
-
-	case <-ctx.Done():
-		// Close timed out
-		timeoutError = ctx.Err()
-		break
+func (a *gorillaAdapter) closeOnCloseError(err error) {
+	if _, ok := a.IsCloseError(err); ok {
+		// We received a message indicating that we're closed.
+		// Let's make sure that our socket is closed.
+		_ = a.conn.Close()
 	}
-
-	return errors.Join(timeoutError, a.conn.Close())
 }
 
 // Read implements [Conn].
 //
 // The passed context is ignored, lest we end up corrupting the underlying
 // connection by sending a partial frame.
-func (a *gorillaAdapter) Read(ctx context.Context) (mesageType MessageType, message []byte, err error) {
+func (a *gorillaAdapter) Read(ctx context.Context) (messageType MessageType, message []byte, err error) {
+	select {
+	default:
+	case <-ctx.Done():
+		return messageType, message, ctx.Err()
+	}
 	mt, message, err := a.conn.ReadMessage()
 	return MessageType(mt), message, err
 }
@@ -99,5 +87,24 @@ func (a *gorillaAdapter) Read(ctx context.Context) (mesageType MessageType, mess
 // The passed context is ignored, lest we end up corrupting the underlying
 // connection by sending a partial frame.
 func (a *gorillaAdapter) Write(ctx context.Context, messageType MessageType, message []byte) error {
-	return a.conn.WriteMessage(int(messageType), message)
+	select {
+	default:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	err := a.conn.WriteMessage(int(messageType), message)
+	return err
+}
+
+// IsCloseError implements [ErrorChecker]
+func (a *gorillaAdapter) IsCloseError(err error) (CloseError, bool) {
+	var closeErr *websocket.CloseError
+	if errors.As(err, &closeErr) && closeErr != nil {
+		return CloseError{
+			Status: Status(closeErr.Code),
+			Reason: closeErr.Text,
+		}, true
+	}
+
+	return CloseError{}, false
 }

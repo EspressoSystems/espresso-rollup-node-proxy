@@ -1,6 +1,9 @@
 package websocket
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 // OpCode represents WebSocket OpCodes as defined in RFC 6455 Section 5.2, and
 // within the Registry Section 11.8:
@@ -166,6 +169,29 @@ type Reader interface {
 	Read(ctx context.Context) (mesageType MessageType, message []byte, err error)
 }
 
+// CloseError represents an error that indicates that the WebSocket connection
+// has been closed.
+//
+// This can be returned from [Reader.Read] and [Writer.Write] calls.
+type CloseError struct {
+	Status Status
+	Reason string
+}
+
+// Error implements error
+func (e CloseError) Error() string {
+	return fmt.Sprintf("websocket connection closed with status %d: %s", e.Status, e.Reason)
+}
+
+// ErrorChecker is an interface that allows for various implementations of
+// the WebSocket abstraction to inspect the error for specific types
+type ErrorChecker interface {
+	// IsCloseError checks if the given error is a [CloseError], and if so, it
+	// will return the close error, and a boolean indicating that it was
+	// a [CloseError].
+	IsCloseError(err error) (CloseError, bool)
+}
+
 // Conn represents the interactive interface that we wish to interact with
 // for WebSocket connections.  It is designed to be a simple interface that
 // can be easily implemented by various implementsations of WebSocket
@@ -175,6 +201,7 @@ type Conn interface {
 	Closer
 	Writer
 	Reader
+	ErrorChecker
 }
 
 // Middleware is a function that takes a Connection and returns a Connection.

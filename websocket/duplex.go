@@ -19,8 +19,9 @@ type pipe struct {
 // both connections and return any errors encountered during the process.
 func (p *pipe) Close() error {
 	// Let's close the connections
-	return errors.Join(p.downstream.Close(1001, "closing downstream"),
-		p.upstream.Close(1000, "closing upstream"),
+	return errors.Join(
+		p.downstream.Close(StatusGoingAway, "closing downstream"),
+		p.upstream.Close(StatusNormalClosure, "closing upstream"),
 	)
 }
 
@@ -36,6 +37,11 @@ func (p *pipe) bridgeDownstream(ctx context.Context) error {
 		}
 
 		mesageType, message, err := p.downstream.Read(ctx)
+		if closeError, ok := p.downstream.IsCloseError(err); ok {
+			// We have a close error. Forward the error, and exit the loop
+			return p.upstream.Close(closeError.Status, closeError.Reason)
+		}
+
 		if err != nil {
 			return err
 		}
@@ -58,6 +64,11 @@ func (p *pipe) bridgeUpstream(ctx context.Context) error {
 		}
 
 		messageType, message, err := p.upstream.Read(ctx)
+		if closeErr, ok := p.upstream.IsCloseError(err); ok {
+			// We have a close error, Forward the error and exit the loop
+			return p.downstream.Close(closeErr.Status, closeErr.Reason)
+		}
+
 		if err != nil {
 			return err
 		}
@@ -77,6 +88,7 @@ func (p *pipe) Bridge(ctx context.Context) error {
 	var wg sync.WaitGroup
 
 	ch := make(chan error, 2)
+
 	wg.Add(1)
 	go (func(p *pipe, wg *sync.WaitGroup, ch chan<- error) {
 		defer cancel()
@@ -112,12 +124,17 @@ func Bridge(ctx context.Context, upstream, downstream Conn) (err error) {
 		downstream: downstream,
 	}
 
-	defer (func(p *pipe) {
+	go func() {
+		<-ctx.Done()
+		_ = p.Close()
+	}()
+
+	defer func(p *pipe) {
 		if err := p.Close(); err != nil {
 			// Ensures that the connections are closed and severed.
 			log.Error("failed to close pipe connections", "error", err)
 		}
-	})(p)
+	}(p)
 
 	return p.Bridge(ctx)
 }
