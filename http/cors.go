@@ -180,6 +180,17 @@ func handleCORSOptionsMethod(w http.ResponseWriter, r *http.Request) {
 	responseHeaders.AllowCredentials(true)
 }
 
+// handleCORSOtherMethods is a helper function that handles CORS for
+// non-OPTIONS methods.
+func handleCORSOtherMethods(w http.ResponseWriter, r *http.Request) {
+	responseHeaders := corsResponseHeaders(w.Header())
+
+	// Allow for All Origins to call us
+	responseHeaders.AllowOrigin(corsWildcard)
+
+	responseHeaders.AllowCredentials(true)
+}
+
 // ServeHTTP implements [http.Handler]
 func (m *httpCORSMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodOptions {
@@ -187,6 +198,10 @@ func (m *httpCORSMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Handle other Methods with CORS
+	handleCORSOtherMethods(w, r)
+
+	// Forward the request to the underlying handler.
 	m.handler.ServeHTTP(w, r)
 }
 
