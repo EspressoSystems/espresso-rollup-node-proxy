@@ -370,7 +370,23 @@ func (v *OPEspressoBatchVerifier) peekNextBatch(ctx context.Context) (*derivatio
 		return nil, err
 	}
 
-	err = v.streamer.Refresh(ctx, syncStatus.FinalizedL1, syncStatus.SafeL2.Number, syncStatus.SafeL2.L1Origin)
+	if syncStatus == nil {
+		v.logger.Error("sync status is nil")
+		return nil, fmt.Errorf("sync status is nil")
+	}
+
+	// Refresh the OP streamer with latest safe or state block from the OP node.
+	// We should never be refreshing backwards
+	state := v.espressoStore.GetState()
+	fallbackPos := state.L2BlockNumber
+	if state.L2BlockNumber < syncStatus.SafeL2.Number {
+		v.logger.Warn("Espresso state is behind the OP node safe block, using state safe l2 block number for refresh",
+			"op_safe_l2_block", syncStatus.SafeL2.Number,
+			"current_espresso_block", state.L2BlockNumber)
+		fallbackPos = syncStatus.SafeL2.Number
+	}
+
+	err = v.streamer.Refresh(ctx, syncStatus.FinalizedL1, fallbackPos, syncStatus.SafeL2.L1Origin)
 	if err != nil {
 		v.logger.Error("failed to refresh OP streamer", "error", err)
 		return nil, err

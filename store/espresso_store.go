@@ -65,8 +65,8 @@ func (es *EspressoStore) GetState() EspressoState {
 
 func (es *EspressoStore) UpdateIfGreater(l2BlockNumber uint64, fallbackHotshotHeight uint64) (bool, error) {
 	state := es.GetState()
-	if state.L2BlockNumber >= l2BlockNumber {
-		return false, nil
+	if l2BlockNumber < state.L2BlockNumber {
+		panic(fmt.Sprintf("L2 block number should only ever increase: %d > %d", state.L2BlockNumber, l2BlockNumber))
 	}
 
 	newState := EspressoState{
