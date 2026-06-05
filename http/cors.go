@@ -178,6 +178,9 @@ func handleCORSOptionsMethod(w http.ResponseWriter, r *http.Request) {
 	// This is required if we want to allow cookies or want to forward
 	// Authorization headers.
 	responseHeaders.AllowCredentials(true)
+
+	// Send a response indicating no content.
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleCORSOtherMethods is a helper function that handles CORS for
