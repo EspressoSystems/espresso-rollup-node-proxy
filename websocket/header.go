@@ -18,6 +18,7 @@ const (
 // https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_servers#the_websocket_handshake
 const (
 	HeaderUpgrade                = "Upgrade"
+	HeaderConnection             = "Connection"
 	HeaderSecWebSocketAccept     = "Sec-Websocket-Accept"
 	HeaderSecWebSocketKey        = "Sec-Websocket-Key"
 	HeaderSecWebSocketVersion    = "Sec-Websocket-Version"
@@ -50,7 +51,7 @@ func ShouldPruneForProxy(h string) bool {
 		return false
 
 	case HeaderUpgrade, HeaderHost, HeaderOrigin, HeaderSecWebSocketKey,
-		HeaderSecWebSocketVersion, HeaderSecWebSocketExtensions:
+		HeaderSecWebSocketVersion, HeaderSecWebSocketExtensions, HeaderConnection:
 		return true
 	}
 }
