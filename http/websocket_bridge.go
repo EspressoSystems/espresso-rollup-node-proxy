@@ -49,7 +49,14 @@ func (h *websocketJSONRPCHTTPBridge) ServeHTTP(w http.ResponseWriter, r *http.Re
 		}
 	}(conn)
 
-	upstream, _, err := h.dialer.Dial(h.upstreamURL.String(), r.Header)
+	// Prune all WebSocket Headers specific to our generated request.
+	proxyHeaders := proxywebsocket.CloneRequestHeadersForProxy(r.Header)
+
+	// Establish an upstream connection to the WebSocket server.
+	upstream, _, err := h.dialer.Dial(
+		h.upstreamURL.String(),
+		proxyHeaders,
+	)
 	// We failed to dial to the upstream
 	// Close the connection
 	if err != nil {
