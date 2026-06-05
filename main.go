@@ -185,6 +185,7 @@ func createHttpServer(logger log.Logger, cfg *Config, interceptor adapters.Inter
 // other additional middleware criteria.
 func createWsServer(logger log.Logger, cfg *Config, interceptor adapters.Interceptor) *http.Server {
 	if cfg.WsListenAddr == "" || cfg.WsFullNodeExecutionRPC == "" {
+		logger.Info("WebSocket server disabled: both --ws.listen-addr and --ws.full-node-execution-rpc must be set")
 		return nil
 	}
 
@@ -214,12 +215,11 @@ func createWsServer(logger log.Logger, cfg *Config, interceptor adapters.Interce
 func startHTTPServers(
 	logger log.Logger,
 	wg *sync.WaitGroup,
-	cfg *Config,
 	servers ...*http.Server,
 ) {
 	for _, server := range servers {
 		if server == nil {
-			// Skip any non-existent serveress, this allows us to conditionally
+			// Skip any non-existent serveres, this allows us to conditionally
 			// start servers based on configuration.
 			continue
 		}
@@ -295,7 +295,7 @@ func main() {
 	webSocketServer := createWsServer(logger, cfg, interceptor)
 
 	var serverWaitGroup sync.WaitGroup
-	startHTTPServers(logger, &serverWaitGroup, cfg, httpServer, webSocketServer)
+	startHTTPServers(logger, &serverWaitGroup, httpServer, webSocketServer)
 
 	sigCh := make(chan os.Signal, 1)
 	// Listen for termination signals to gracefully shut down the server
