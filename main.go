@@ -129,6 +129,19 @@ func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "OK", http.StatusOK)
 }
 
+// NewSingleHostReverseProxy creates a ReverseProxy that forwards requests to
+// the specified target URL.
+//
+// It also modifies the Host in the outgoing request to match the new target.
+func NewSingleHostReverseProxy(target *url.URL) *httputil.ReverseProxy {
+	return &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.SetURL(target)
+			pr.Out.Host = target.Host
+		},
+	}
+}
+
 // createHttpServer creates and configures an HTTP server for handling JSON-RPC
 // requests. It sets up the necessary middleware for request logging, body
 // size limits, and the JSON-RPC bridge to the full node proxy. It also
@@ -140,7 +153,7 @@ func createHttpServer(logger log.Logger, cfg *Config, interceptor adapters.Inter
 	}
 
 	// Create the Reverse Proxy
-	reverseProxy := httputil.NewSingleHostReverseProxy(fullNodeExecutionRPCURL)
+	reverseProxy := NewSingleHostReverseProxy(fullNodeExecutionRPCURL)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthCheckHandler)
 	mux.Handle(
