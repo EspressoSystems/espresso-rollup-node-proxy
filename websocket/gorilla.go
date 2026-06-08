@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/http"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -72,6 +73,18 @@ func (a *gorillaAdapter) Read(ctx context.Context) (messageType MessageType, mes
 	case <-ctx.Done():
 		return messageType, message, ctx.Err()
 	}
+
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := a.conn.SetReadDeadline(deadline); err != nil {
+			return messageType, message, err
+		}
+		defer func() {
+			if setErr := a.conn.SetReadDeadline(time.Time{}); setErr != nil && err == nil {
+				err = setErr
+			}
+		}()
+	}
+
 	mt, message, err := a.conn.ReadMessage()
 	return MessageType(mt), message, err
 }
@@ -80,13 +93,25 @@ func (a *gorillaAdapter) Read(ctx context.Context) (messageType MessageType, mes
 //
 // The passed context is ignored, lest we end up corrupting the underlying
 // connection by sending a partial frame.
-func (a *gorillaAdapter) Write(ctx context.Context, messageType MessageType, message []byte) error {
+func (a *gorillaAdapter) Write(ctx context.Context, messageType MessageType, message []byte) (err error) {
 	select {
 	default:
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	err := a.conn.WriteMessage(int(messageType), message)
+
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := a.conn.SetWriteDeadline(deadline); err != nil {
+			return err
+		}
+		defer func() {
+			if setErr := a.conn.SetWriteDeadline(time.Time{}); setErr != nil && err == nil {
+				err = setErr
+			}
+		}()
+	}
+
+	err = a.conn.WriteMessage(int(messageType), message)
 	return err
 }
 
@@ -101,4 +126,58 @@ func (a *gorillaAdapter) IsCloseError(err error) (CloseError, bool) {
 	}
 
 	return CloseError{}, false
+}
+
+// SubProtocol implements [SubProtoRetriever]
+func (a *gorillaAdapter) SubProtocol() string {
+	return a.conn.Subprotocol()
+}
+
+// gorillaUpgrader is an Upgrader implementation that uses the Gorilla
+// WebSocket implementation to perform the upgrade, and then adapts the
+// resulting connection to the Conn interface using [AdaptGorilla].
+type gorillaUpgrader struct{}
+
+// Compile-time type check assertion to ensure interface adherence.
+var _ Upgrader = (*gorillaUpgrader)(nil)
+
+// Upgrade implements [Upgrader]
+func (u *gorillaUpgrader) Upgrade(w http.ResponseWriter, r *http.Request, options ...UpgradeOption) (Conn, error) {
+	config := UpgradeConfigWithOptions(options...)
+	var upgrader websocket.Upgrader
+
+	// Apply the options to the Gorilla Upgrader
+	upgrader.Subprotocols = config.SubProtocols
+
+	conn, err := upgrader.Upgrade(w, r, config.Headers)
+	return AdaptGorilla(conn), err
+}
+
+// GorillaDial dials a WebSocket server using the Gorilla WebSocket library,
+// and
+func GorillaUpgrader() Upgrader {
+	return &gorillaUpgrader{}
+}
+
+// gorillaDialer is a Dialer implementation that uses the Gorilla WebSocket
+// library.
+type gorillaDialer struct{}
+
+// Compile-time type check assertion to ensure interface adherence.
+var _ Dialer = (*gorillaDialer)(nil)
+
+// Dial implements [Dialer]
+func (d *gorillaDialer) Dial(ctx context.Context, urlString string, options ...DialerOption) (Conn, *http.Response, error) {
+	config := DialerConfigWithOptions(options...)
+	dialer := *websocket.DefaultDialer
+
+	// Apply the options to the Dialer, and whatever other functions we need.
+	dialer.Subprotocols = config.SubProtocols
+
+	conn, response, err := dialer.Dial(urlString, config.Headers)
+	return AdaptGorilla(conn), response, err
+}
+
+func GorillaDialer() Dialer {
+	return &gorillaDialer{}
 }
