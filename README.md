@@ -39,8 +39,10 @@ The proxy is configured via CLI flags or a JSON config file (or both — flags o
 ```json
 {
   "full_node_execution_rpc": "<op-geth-rpc>",
+  "ws_full_node_execution_rpc": "<op-geth-ws-rpc>",
   "mode": "op",
   "listen_addr": ":8080",
+  "ws_listen_addr": ":8081",
   "espresso_tag": "espresso",
   "store_file_path": "/data/espresso_store.json",
   "query_service_url": "<espresso-query-service-url>",
@@ -61,8 +63,10 @@ The proxy is configured via CLI flags or a JSON config file (or both — flags o
 ```json
 {
   "full_node_execution_rpc": "<nitro-rpc>",
+  "ws_full_node_execution_rpc": "<nitro-ws-rpc>",
   "mode": "nitro",
   "listen_addr": ":8080",
+  "ws_listen_addr": ":8081",
   "espresso_tag": "espresso",
   "store_file_path": "/data/espresso_store.json",
   "query_service_url": "<espresso-query-service-url>",
@@ -71,7 +75,7 @@ The proxy is configured via CLI flags or a JSON config file (or both — flags o
     "feed_url": "<nitro-sequencer-feed-ws-url>",
     "namespace": 0,
     "valid_batcher_addresses": [
-      {"address": "<batcher-address>", "from": 0, "to": 18446744073709551615}
+      { "address": "<batcher-address>", "from": 0, "to": 18446744073709551615 }
     ]
   }
 }
@@ -88,8 +92,10 @@ The proxy is configured via CLI flags or a JSON config file (or both — flags o
 ```sh
 ./espresso-rollup-node-proxy \
   --full-node-execution-rpc <op-geth-rpc> \
+  --ws.full-node-execution-rpc <op-geth-ws-rpc> \
   --mode op \
   --listen-addr :8080 \
+  --ws.listen-addr :8081 \
   --espresso-tag espresso \
   --store-file-path /data/espresso_store.json \
   --query-service-url <espresso-query-service-url> \
@@ -105,8 +111,10 @@ The proxy is configured via CLI flags or a JSON config file (or both — flags o
 ```sh
 ./espresso-rollup-node-proxy \
   --full-node-execution-rpc <nitro-rpc> \
+  --ws.full-node-execution-rpc <nitro-ws-rpc> \
   --mode nitro \
   --listen-addr :8080 \
+  --ws.listen-addr :8081 \
   --espresso-tag espresso \
   --store-file-path /data/espresso_store.json \
   --query-service-url <espresso-query-service-url> \
@@ -136,8 +144,11 @@ docker run --rm \
 docker run --rm \
   -v /path/to/data:/data \
   -p 8080:8080 \
+  -p 8081:8081 \
   ghcr.io/espressosystems/espresso-rollup-node-proxy:latest \
   --full-node-execution-rpc <op-geth-rpc> \
+  --ws.full-node-execution-rpc <op-geth-ws-rpc> \
+  --ws.listen-addr :8081 \
   --mode op \
   --store-file-path /data/espresso_store.json \
   --query-service-url <espresso-query-service-url> \
@@ -159,12 +170,15 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
+      - "8081:8081"
     volumes:
       - proxy-data:/data
     command:
       - --full-node-execution-rpc=http://op-geth:8545
+      - --ws.full-node-execution-rpc=http://op-geth:8546
       - --mode=op
       - --listen-addr=:8080
+      - --ws.listen-addr=:8081
       - --store-file-path=/data/espresso_store.json
       - --query-service-url=<espresso-query-service-url>
       - --l1-rpc=<l1-rpc>
@@ -194,33 +208,52 @@ Clients should point at the proxy (`http://localhost:8080`) rather than directly
 
 ### Configuration Reference
 
-| Flag | JSON key | Default | Description |
-|------|----------|---------|-------------|
-| `--full-node-execution-rpc` | `full_node_execution_rpc` | — | Rollup execution layer RPC URL (required) |
-| `--mode` | `mode` | — | Verifier mode: `op` or `nitro` (required) |
-| `--listen-addr` | `listen_addr` | `:8080` | Address the proxy listens on |
-| `--espresso-tag` | `espresso_tag` | `espresso` | JSON-RPC block tag to intercept; set to `finalized` to back the standard finality tag with Espresso |
-| `--store-file-path` | `store_file_path` | `espresso_store.json` | Path to the state persistence file |
-| `--query-service-url` | `query_service_url` | — | Espresso query service URL (required) |
-| `--verification-interval` | `verification_interval` | `10ms` | How often the verifier polls for new confirmed batches |
-| `--finality-poll-interval` | `finality_poll_interval` | `1s` | How often the finality poller queries the L2 node for the latest finalized block |
-| `--initial-hotshot-height` | `initial_hotshot_height` | `0` | HotShot block height to start streaming from on first run |
-| `--max-batch-size` | `max_batch_size` | `1000` | Maximum requests in a JSON-RPC batch (0 = unlimited) |
-| `--max-request-body-size` | `max_request_body_size` | `5242880` | Maximum request body size in bytes (0 = unlimited) |
-| `--log-level` | `log_level` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
-| `--log-format` | `log_format` | `json` | Log output format (`text` or `json`) |
-| `--track-batch-latency` | `track_batch_latency` | `false` | Log per-batch and average latency from HotShot finalization to verification |
-| `--l1-rpc` | `l1_rpc` | — | L1 RPC URL (required) |
-| `--op.full-node-consensus-rpc` | `op.full_node_consensus_rpc` | — | OP consensus layer (op-node) RPC URL |
-| `--op.light-client-address` | `op.light_client_address` | — | Espresso light client contract address on L1 |
-| `--op.batcher-address` | `op.batcher_address` | — | OP batcher address |
-| `--op.batch-authenticator-address` | `op.batch_authenticator_address` | — | Batch Authenticator contract address on L1 |
-| `--nitro.feed-url` | `nitro.feed_url` | — | Nitro full node feed WebSocket URL (Nitro mode, required) |
-| `--nitro.bridge-address` | `nitro.bridge_address` | — | Nitro Bridge contract address on L1 (Nitro mode, required) |
-| `--nitro.namespace` | `nitro.namespace` | — | Nitro Chain Id (Nitro mode, required) |
-| `--nitro.initial-hotshot-block` | `nitro.initial_hotshot_block` | `0` | Initial HotShot block for the Nitro streamer |
-| `--nitro.valid-batcher-addresses` | `nitro.valid_batcher_addresses` | — | Valid batcher addresses (Nitro mode, at least one required) |
-| `--nitro.wait-for-l1-finalization` | `nitro.wait_for_l1_finalization` | `false` | Wait for L1 block finalization before fetching delayed messages |
+| Flag                               | JSON key                         | Default               | Description                                                                                         |
+| ---------------------------------- | -------------------------------- | --------------------- | --------------------------------------------------------------------------------------------------- |
+| `--full-node-execution-rpc`        | `full_node_execution_rpc`        | —                     | Rollup execution layer RPC URL (required)                                                           |
+| `--ws.full-node-execution-rpc`     | `ws_full_node_execution_rpc`     | —                     | Rollup execution layer WebSocket RPC URL (optional)                                                 |
+| `--mode`                           | `mode`                           | —                     | Verifier mode: `op` or `nitro` (required)                                                           |
+| `--listen-addr`                    | `listen_addr`                    | `:8080`               | Address the proxy listens on                                                                        |
+| `--ws.listen-addr`                 | `ws_listen_addr`                 | —                     | WebSocket Address the proxy listens on (optional)                                                   |
+| `--espresso-tag`                   | `espresso_tag`                   | `espresso`            | JSON-RPC block tag to intercept; set to `finalized` to back the standard finality tag with Espresso |
+| `--store-file-path`                | `store_file_path`                | `espresso_store.json` | Path to the state persistence file                                                                  |
+| `--query-service-url`              | `query_service_url`              | —                     | Espresso query service URL (required)                                                               |
+| `--verification-interval`          | `verification_interval`          | `10ms`                | How often the verifier polls for new confirmed batches                                              |
+| `--finality-poll-interval`         | `finality_poll_interval`         | `1s`                  | How often the finality poller queries the L2 node for the latest finalized block                    |
+| `--initial-hotshot-height`         | `initial_hotshot_height`         | `0`                   | HotShot block height to start streaming from on first run                                           |
+| `--max-batch-size`                 | `max_batch_size`                 | `1000`                | Maximum requests in a JSON-RPC batch (0 = unlimited)                                                |
+| `--max-request-body-size`          | `max_request_body_size`          | `5242880`             | Maximum request body size in bytes (0 = unlimited)                                                  |
+| `--log-level`                      | `log_level`                      | `info`                | Log level (`debug`, `info`, `warn`, `error`)                                                        |
+| `--log-format`                     | `log_format`                     | `json`                | Log output format (`text` or `json`)                                                                |
+| `--track-batch-latency`            | `track_batch_latency`            | `false`               | Log per-batch and average latency from HotShot finalization to verification                         |
+| `--l1-rpc`                         | `l1_rpc`                         | —                     | L1 RPC URL (required)                                                                               |
+| `--op.full-node-consensus-rpc`     | `op.full_node_consensus_rpc`     | —                     | OP consensus layer (op-node) RPC URL                                                                |
+| `--op.light-client-address`        | `op.light_client_address`        | —                     | Espresso light client contract address on L1                                                        |
+| `--op.batcher-address`             | `op.batcher_address`             | —                     | OP batcher address                                                                                  |
+| `--op.batch-authenticator-address` | `op.batch_authenticator_address` | —                     | Batch Authenticator contract address on L1                                                          |
+| `--nitro.feed-url`                 | `nitro.feed_url`                 | —                     | Nitro full node feed WebSocket URL (Nitro mode, required)                                           |
+| `--nitro.bridge-address`           | `nitro.bridge_address`           | —                     | Nitro Bridge contract address on L1 (Nitro mode, required)                                          |
+| `--nitro.namespace`                | `nitro.namespace`                | —                     | Nitro Chain Id (Nitro mode, required)                                                               |
+| `--nitro.initial-hotshot-block`    | `nitro.initial_hotshot_block`    | `0`                   | Initial HotShot block for the Nitro streamer                                                        |
+| `--nitro.valid-batcher-addresses`  | `nitro.valid_batcher_addresses`  | —                     | Valid batcher addresses (Nitro mode, at least one required)                                         |
+| `--nitro.wait-for-l1-finalization` | `nitro.wait_for_l1_finalization` | `false`               | Wait for L1 block finalization before fetching delayed messages                                     |
+
+## WebSockets
+
+In order to utilize the WebSocket proxy, two optional configurations **MUST**
+be present. We need to know the WebSocket Listening Address, and the
+Execution Websocket RPC URL:
+
+| Flag                           | JSON key                     |
+| ------------------------------ | ---------------------------- |
+| `--ws.listen-addr`             | `ws_listen_addr`             |
+| `--ws.full-node-execution-rpc` | `ws_full_node_execution_rpc` |
+
+If one or both of these are not specified, the WebSocket port will not be
+enabled. You will see a log message indicating that the server is listening
+on the specified WebSocket address, or you will see a log indicating
+that the WebSocket proxy is not in effect, or that an error has occurred
+parsing the provided Execution WebSocket RPC URL.
 
 ## E2E Tests
 
