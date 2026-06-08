@@ -21,6 +21,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ethereum/go-ethereum/rpc"
 
 	sharedVerifier "proxy/verifier"
 
@@ -102,6 +103,29 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 
 	l1Adapter := NewAdaptL1BlockRefClient(l1Client)
 
+	l2Client, err := ethclient.DialContext(ctx, opVerifierConfig.FullNodeExecutionRPC)
+	if err != nil {
+		logger.Crit("failed to dial L2 full node", "error", err)
+		return nil
+	}
+
+	l2BlockNumber := espressoState.L2BlockNumber
+	finalized, err := l2Client.HeaderByNumber(ctx, big.NewInt(rpc.FinalizedBlockNumber.Int64()))
+	if err != nil {
+		logger.Warn("failed to get finalized block number", "error", err)
+	} else if finalized.Number.Uint64() > l2BlockNumber {
+		logger.Info(
+			"finalized block number from L2 is ahead of espresso state, will update the espresso state with the finalized block number",
+			"finalized_block_number", finalized.Number.Uint64(),
+			"espresso_store_block_number", l2BlockNumber)
+		l2BlockNumber = finalized.Number.Uint64()
+		_, err = store.UpdateIfGreater(l2BlockNumber, espressoState.FallbackHotshotHeight)
+		if err != nil {
+			logger.Crit("failed to update espresso state in store with finalized block number from L2 full node", "error", err)
+			return nil
+		}
+	}
+
 	// Create the OP streamer
 	streamer, err := opStreamer.NewEspressoStreamer(
 		rollupConfig.L2ChainID.Uint64(),
@@ -112,7 +136,7 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 		logger,
 		derivation.CreateEspressoBatchUnmarshaler(),
 		espressoState.FallbackHotshotHeight,
-		espressoState.L2BlockNumber,
+		l2BlockNumber,
 		opVerifierConfig.BatchAuthenticatorAddress,
 		opVerifierConfig.TrackBatchLatency,
 	)
@@ -123,12 +147,6 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 	}
 
 	bufferedStreamer := opStreamer.NewBufferedEspressoStreamer(streamer)
-
-	l2Client, err := ethclient.DialContext(ctx, opVerifierConfig.FullNodeExecutionRPC)
-	if err != nil {
-		logger.Crit("failed to dial L2 full node for finality poller", "error", err)
-		return nil
-	}
 
 	return &OPEspressoBatchVerifier{
 		streamer:         bufferedStreamer,
@@ -226,6 +244,12 @@ func (v *OPEspressoBatchVerifier) drainAndVerifyBatches(ctx context.Context) *de
 // then calls UpdateIfGreater once at the end to minimize disk writes.
 func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 	v.logger.Debug("Starting OP batch verification")
+
+	if err := v.Refresh(ctx); err != nil {
+		v.logger.Error("failed to refresh OP streamer before verification", "error", err)
+		return
+	}
+
 	verifiedBatch := v.drainAndVerifyBatches(ctx)
 	if ctx.Err() != nil {
 		return
@@ -353,26 +377,23 @@ func ensureBatchesMatch(a, b *derivation.EspressoBatch) error {
 	return nil
 }
 
-// peekNextBatch follows the pattern  getSyncStatus -> refresh -> Update -> Peek
-// It doesnt call Next because Proxy only calls Next if the full node block matches
-// what Espresso has finalized, otherwise it remains stuck on the same batch until the OP node catches up.
-func (v *OPEspressoBatchVerifier) peekNextBatch(ctx context.Context) (*derivation.EspressoBatch, error) {
+func (v *OPEspressoBatchVerifier) Refresh(ctx context.Context) error {
 	// Get the latest L2 block ref from the OP node
 	rollupClient, err := v.endpointProvider.RollupClient(ctx)
 	if err != nil {
 		v.logger.Error("failed to create consensus client", "error", err)
-		return nil, err
+		return err
 	}
 	defer rollupClient.Close()
 	syncStatus, err := rollupClient.SyncStatus(ctx)
 	if err != nil {
 		v.logger.Error("failed to get L2 head block", "error", err)
-		return nil, err
+		return err
 	}
 
 	if syncStatus == nil {
 		v.logger.Error("sync status is nil")
-		return nil, fmt.Errorf("sync status is nil")
+		return fmt.Errorf("sync status is nil")
 	}
 
 	// Refresh the OP streamer with latest safe or state block from the OP node.
@@ -380,7 +401,7 @@ func (v *OPEspressoBatchVerifier) peekNextBatch(ctx context.Context) (*derivatio
 	state := v.espressoStore.GetState()
 	fallbackPos := state.L2BlockNumber
 	if state.L2BlockNumber < syncStatus.SafeL2.Number {
-		v.logger.Warn("Espresso state is behind the OP node safe block, using state safe l2 block number for refresh",
+		v.logger.Warn("Espresso state is behind the OP node safe block, using safe l2 block number for refresh",
 			"op_safe_l2_block", syncStatus.SafeL2.Number,
 			"current_espresso_block", state.L2BlockNumber)
 		fallbackPos = syncStatus.SafeL2.Number
@@ -389,8 +410,16 @@ func (v *OPEspressoBatchVerifier) peekNextBatch(ctx context.Context) (*derivatio
 	err = v.streamer.Refresh(ctx, syncStatus.FinalizedL1, fallbackPos, syncStatus.SafeL2.L1Origin)
 	if err != nil {
 		v.logger.Error("failed to refresh OP streamer", "error", err)
-		return nil, err
+		return err
 	}
+
+	return nil
+}
+
+// peekNextBatch follows the pattern  getSyncStatus -> refresh -> Update -> Peek
+// It doesnt call Next because Proxy only calls Next if the full node block matches
+// what Espresso has finalized, otherwise it remains stuck on the same batch until the OP node catches up.
+func (v *OPEspressoBatchVerifier) peekNextBatch(ctx context.Context) (*derivation.EspressoBatch, error) {
 
 	if !v.streamer.HasNext(ctx) {
 		err := v.streamer.Update(ctx)
