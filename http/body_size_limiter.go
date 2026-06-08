@@ -1,7 +1,6 @@
 package http
 
 import (
-	"io"
 	"net/http"
 	"strconv"
 
@@ -31,10 +30,8 @@ type httpBodySizeLimiterMiddleware struct {
 func (m *httpBodySizeLimiterMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Replace the request body with a limited reader that enforces the maximum
 	// request body size.
-	r.Body = adapters.ReadCloser(
-		io.LimitReader(r.Body, m.maxRequestBodySize),
-		r.Body,
-	)
+
+	r.Body = http.MaxBytesReader(w, r.Body, m.maxRequestBodySize)
 
 	if contentLengthString := r.Header.Get("Content-Length"); contentLengthString != "" {
 		contentLength, err := strconv.ParseInt(contentLengthString, 10, 64)
