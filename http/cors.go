@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -61,9 +62,11 @@ func (h corsResponseHeaders) AllowOrigin(origin string) {
 //
 // Reference: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Allow-Methods
 func (h corsResponseHeaders) AllowMethods(methods ...string) {
-	for _, m := range methods {
-		http.Header(h).Add("Access-Control-Allow-Methods", m)
+	if len(methods) <= 0 {
+		return
 	}
+
+	http.Header(h).Add("Access-Control-Allow-Methods", strings.Join(methods, ","))
 }
 
 // AllowHeaders sets the Access-Control-Allow-Headers header for the response
@@ -79,9 +82,16 @@ func (h corsResponseHeaders) AllowMethods(methods ...string) {
 //
 // Reference: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Allow-Headers
 func (h corsResponseHeaders) AllowHeaders(headers ...string) {
-	for _, v := range headers {
-		http.Header(h).Add("Access-Control-Allow-Headers", textproto.CanonicalMIMEHeaderKey(v))
+	if len(headers) <= 0 {
+		return
 	}
+
+	hs := make([]string, len(headers))
+
+	for j, v := range headers {
+		hs[j] = textproto.CanonicalMIMEHeaderKey(v)
+	}
+	http.Header(h).Add("Access-Control-Allow-Headers", strings.Join(hs, ","))
 }
 
 // MaxAge sets the Access-Control-Max-Age header for the response to inform
