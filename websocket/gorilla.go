@@ -74,13 +74,16 @@ func (a *gorillaAdapter) Read(ctx context.Context) (messageType MessageType, mes
 		return messageType, message, ctx.Err()
 	}
 
-	if deadline, ok := ctx.Deadline(); ok {
-		if err := a.conn.SetReadDeadline(deadline); err != nil {
-			return messageType, message, err
-		}
-		defer func() {
-			if setErr := a.conn.SetReadDeadline(time.Time{}); setErr != nil && err == nil {
-				err = setErr
+	{
+		// Setup a goroutine for handling context cancellation on Read requests.
+		done := make(chan struct{})
+		defer close(done)
+		go func() {
+			select {
+			case <-ctx.Done():
+				// Force a cancellation through the current deadline
+				_ = a.conn.SetReadDeadline(time.Now())
+			case <-done:
 			}
 		}()
 	}
@@ -100,13 +103,16 @@ func (a *gorillaAdapter) Write(ctx context.Context, messageType MessageType, mes
 		return ctx.Err()
 	}
 
-	if deadline, ok := ctx.Deadline(); ok {
-		if err := a.conn.SetWriteDeadline(deadline); err != nil {
-			return err
-		}
-		defer func() {
-			if setErr := a.conn.SetWriteDeadline(time.Time{}); setErr != nil && err == nil {
-				err = setErr
+	{
+		// Setup a goroutine for handling context cancellation on write requests.
+		done := make(chan struct{})
+		defer close(done)
+		go func() {
+			select {
+			case <-ctx.Done():
+				// Force a cancellation through the current deadline
+				_ = a.conn.SetWriteDeadline(time.Now())
+			case <-done:
 			}
 		}()
 	}
