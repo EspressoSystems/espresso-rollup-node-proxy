@@ -150,6 +150,7 @@ func (i *Interceptor) replaceTagInParams(params any, espressoFinalizedBlockNumbe
 	// Case 2: params is a JSON object — recurse into each value
 	// 	`{"jsonrpc":"2.0","id":1,"method":"eth_call","params":{"to":"0xabc","data":"0x123","blockTag":"espresso"}}`
 	if cast, castOK := params.(map[string]any); castOK {
+		nextParams := map[string]any{}
 		var changed bool
 		for key, value := range cast {
 			next, c, err := i.replaceTagInParams(value, espressoFinalizedBlockNumber, depth+1)
@@ -158,20 +159,26 @@ func (i *Interceptor) replaceTagInParams(params any, espressoFinalizedBlockNumbe
 			}
 
 			if !c {
+				nextParams[key] = value
 				continue
 			}
 
-			cast[key] = next
+			nextParams[key] = next
 			changed = true
 		}
 
-		return cast, changed, nil
+		if changed {
+			return nextParams, true, nil
+		}
+
+		return cast, false, nil
 	}
 
 	// Case 3: params is a JSON array — recurse into each element
 	// {"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["espresso",false]}
 	if cast, castOK := params.([]any); castOK {
 		var changed bool
+		nextParams := make([]any, len(cast))
 		for j, value := range cast {
 			next, c, err := i.replaceTagInParams(value, espressoFinalizedBlockNumber, depth+1)
 			if err != nil {
@@ -179,14 +186,19 @@ func (i *Interceptor) replaceTagInParams(params any, espressoFinalizedBlockNumbe
 			}
 
 			if !c {
+				nextParams[j] = value
 				continue
 			}
 
-			cast[j] = next
+			nextParams[j] = next
 			changed = true
 		}
 
-		return cast, changed, nil
+		if changed {
+			return nextParams, true, nil
+		}
+
+		return cast, false, nil
 	}
 
 	// If params is some other JSON primitive (number, boolean, null),
