@@ -45,6 +45,20 @@ func NewFinalityPoller(
 	}
 }
 
+func (p *FinalityPoller) MaxOfEspressoAndFinalized(ctx context.Context, l2BlockNumber uint64) uint64 {
+	finalized, err := p.client.HeaderByNumber(ctx, big.NewInt(rpc.FinalizedBlockNumber.Int64()))
+	if err != nil {
+		p.logger.Warn("failed to get finalized block number", "error", err)
+	} else if finalized.Number.Uint64() > l2BlockNumber {
+		p.logger.Info(
+			"finalized block number from L2 is ahead of espresso state, will update the espresso state with the finalized block number",
+			"finalized_block_number", finalized.Number.Uint64(),
+			"espresso_store_block_number", l2BlockNumber)
+		l2BlockNumber = finalized.Number.Uint64()
+	}
+	return l2BlockNumber
+}
+
 func (p *FinalityPoller) LastFinalized() uint64 {
 	return p.last.Load()
 }

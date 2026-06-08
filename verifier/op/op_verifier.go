@@ -21,7 +21,6 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
-	"github.com/ethereum/go-ethereum/rpc"
 
 	sharedVerifier "proxy/verifier"
 
@@ -60,6 +59,8 @@ type OPEspressoBatchVerifier struct {
 	running           atomic.Bool
 	totalBatchLatency time.Duration
 	batchCount        uint64
+	// tip is the header hash of the last successfully verified batch,
+	tip common.Hash
 }
 
 func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *espressoStore.EspressoStore, l1Client *ethclient.Client, espressoLightClient opStreamer.LightClientCallerInterface, opVerifierConfig *OPEspressoBatchVerifierConfig) *OPEspressoBatchVerifier {
@@ -99,8 +100,6 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 		return nil
 	}
 
-	espressoState := store.GetState()
-
 	l1Adapter := NewAdaptL1BlockRefClient(l1Client)
 
 	l2Client, err := ethclient.DialContext(ctx, opVerifierConfig.FullNodeExecutionRPC)
@@ -109,21 +108,18 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 		return nil
 	}
 
-	l2BlockNumber := espressoState.L2BlockNumber
-	finalized, err := l2Client.HeaderByNumber(ctx, big.NewInt(rpc.FinalizedBlockNumber.Int64()))
+	finalityPoller := sharedVerifier.NewFinalityPoller(
+		l2Client,
+		logger,
+		opVerifierConfig.FinalityPollInterval,
+	)
+
+	espressoState := store.GetState()
+	l2BlockNumber := finalityPoller.MaxOfEspressoAndFinalized(ctx, espressoState.L2BlockNumber)
+	_, err = store.UpdateIfGreater(l2BlockNumber, espressoState.FallbackHotshotHeight)
 	if err != nil {
-		logger.Warn("failed to get finalized block number", "error", err)
-	} else if finalized.Number.Uint64() > l2BlockNumber {
-		logger.Info(
-			"finalized block number from L2 is ahead of espresso state, will update the espresso state with the finalized block number",
-			"finalized_block_number", finalized.Number.Uint64(),
-			"espresso_store_block_number", l2BlockNumber)
-		l2BlockNumber = finalized.Number.Uint64()
-		_, err = store.UpdateIfGreater(l2BlockNumber, espressoState.FallbackHotshotHeight)
-		if err != nil {
-			logger.Crit("failed to update espresso state in store with finalized block number from L2 full node", "error", err)
-			return nil
-		}
+		logger.Crit("failed to update espresso store", "error", err)
+		return nil
 	}
 
 	// Create the OP streamer
@@ -156,11 +152,7 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 		rollupConfig:     rollupConfig,
 		logger:           logger,
 		l1Client:         l1Client,
-		finalityPoller: sharedVerifier.NewFinalityPoller(
-			l2Client,
-			logger,
-			opVerifierConfig.FinalityPollInterval,
-		),
+		finalityPoller:   finalityPoller,
 	}
 }
 
@@ -235,6 +227,7 @@ func (v *OPEspressoBatchVerifier) drainAndVerifyBatches(ctx context.Context) *de
 
 		v.streamer.Next(ctx)
 		verifiedBatch = espressoBatch
+		v.tip = espressoBatch.Header().Hash()
 		v.logger.Info("Successfully verified OP batch", "batch_number", batchNumber)
 	}
 	return verifiedBatch
@@ -400,11 +393,12 @@ func (v *OPEspressoBatchVerifier) Refresh(ctx context.Context) error {
 	// We should never be refreshing backwards
 	state := v.espressoStore.GetState()
 	fallbackPos := state.L2BlockNumber
-	if state.L2BlockNumber < syncStatus.SafeL2.Number {
-		v.logger.Warn("Espresso state is behind the OP node safe block, using safe l2 block number for refresh",
-			"op_safe_l2_block", syncStatus.SafeL2.Number,
+	if state.L2BlockNumber < syncStatus.FinalizedL2.Number {
+		v.logger.Warn(
+			"Espresso state is behind the OP node safe block, using finalized l2 block number for refresh",
+			"op_safe_l2_block", syncStatus.FinalizedL2.Number,
 			"current_espresso_block", state.L2BlockNumber)
-		fallbackPos = syncStatus.SafeL2.Number
+		fallbackPos = syncStatus.FinalizedL2.Number
 	}
 
 	err = v.streamer.Refresh(ctx, syncStatus.FinalizedL1, fallbackPos, syncStatus.SafeL2.L1Origin)
@@ -430,6 +424,26 @@ func (v *OPEspressoBatchVerifier) peekNextBatch(ctx context.Context) (*derivatio
 
 	// Now we Peek the next batch and return it for verification
 	espressoBatchStreamer := v.streamer.Peek(ctx)
+	if espressoBatchStreamer == nil {
+		return nil, nil
+	}
+
+	// Until we have verified a batch we have no tip to chain against, so accept
+	// the first available batch as-is, we will still verify it.
+	if v.tip == (common.Hash{}) {
+		return espressoBatchStreamer, nil
+	}
+
+	// Check if there was a fork, and search the streamer for the proper head.
+	if espressoBatchStreamer.Header().ParentHash != v.tip {
+		v.logger.Warn("head batch fork mismatch, seeking to proper head",
+			"batch_number", espressoBatchStreamer.Number(),
+			"batch_parent", espressoBatchStreamer.Header().ParentHash.Hex(),
+			"tip", v.tip.Hex(),
+		)
+		v.streamer.SetProperHead(v.tip)
+		return nil, nil
+	}
 
 	return espressoBatchStreamer, nil
 }

@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,7 +22,6 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
-	"github.com/ethereum/go-ethereum/rpc"
 )
 
 const l1FinalityWaitLogInterval = 5 * time.Second
@@ -119,48 +117,43 @@ func NewNitroEspressoBatchVerifier(
 		})
 	}
 
+	finalityPoller := sharedVerifier.NewFinalityPoller(
+		l2Client,
+		logger,
+		config.FinalityPollInterval,
+	)
+
 	espressoState := store.GetState()
-	startHotshotBlock := config.InitialHotshotBlock
-	if espressoState.FallbackHotshotHeight > startHotshotBlock {
-		startHotshotBlock = espressoState.FallbackHotshotHeight
-	}
 
 	// Upon startup see if finalized is ahead of stored
-	startNitroBlock := espressoState.L2BlockNumber
-	header, err := l2Client.HeaderByNumber(ctx, big.NewInt(int64(rpc.FinalizedBlockNumber)))
+	startL2BlockNumber := finalityPoller.MaxOfEspressoAndFinalized(ctx, espressoState.L2BlockNumber)
+	_, err = store.UpdateIfGreater(startL2BlockNumber, espressoState.FallbackHotshotHeight)
 	if err != nil {
-		logger.Warn("failed to get nitro finalized block on startup", "error", err)
-	} else if header == nil {
-		logger.Warn("nitro finalized block not found")
-	} else if header.Number.Uint64() > espressoState.L2BlockNumber {
-		logger.Warn("finalized block is ahead of stored espresso block", "espresso_height", startNitroBlock, "finalized_height", header.Number.Uint64())
-		startNitroBlock = header.Number.Uint64()
+		logger.Crit("failed to update espresso store", "error", err)
+		return nil
 	}
+
 	streamer := nitroStreamer.NewEspressoStreamer(
 		config.Namespace,
-		startHotshotBlock,
+		espressoState.FallbackHotshotHeight,
 		client,
 		addrRanges,
 		time.Second,
-		startNitroBlock+1,
+		startL2BlockNumber+1,
 		logger,
 	)
 
 	feed := feedclient.NewFeedClient(config.FeedURL, config.Namespace, espressoState.L2BlockNumber, logger)
 
 	return &NitroEspressoBatchVerifier{
-		streamer:      streamer,
-		feedClient:    feed,
-		l2Client:      l2Client,
-		l1Client:      l1Client,
-		espressoStore: store,
-		config:        config,
-		logger:        logger,
-		finalityPoller: sharedVerifier.NewFinalityPoller(
-			l2Client,
-			logger,
-			config.FinalityPollInterval,
-		),
+		streamer:       streamer,
+		feedClient:     feed,
+		l2Client:       l2Client,
+		l1Client:       l1Client,
+		espressoStore:  store,
+		config:         config,
+		logger:         logger,
+		finalityPoller: finalityPoller,
 		delayedMsgFetcher: delayedmessagefetcher.MustNewDelayedMessageFetcher(
 			ctx,
 			l1Client,
