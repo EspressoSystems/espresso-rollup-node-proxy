@@ -73,7 +73,7 @@ func (c *coderUpgrader) Upgrade(w http.ResponseWriter, r *http.Request, options 
 	}
 
 	conn, err := websocket.Accept(w, r, &acceptOptions)
-	if err != nil && conn == nil {
+	if err != nil || conn == nil {
 		return nil, err
 	}
 	return AdaptCoder(conn), err
