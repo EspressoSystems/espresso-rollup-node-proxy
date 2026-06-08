@@ -204,15 +204,16 @@ func createWsServer(logger log.Logger, cfg *Config, interceptor adapters.Interce
 		logger.Warn("received invalid URL for webSocket, disabling websocket", "url", upstreamURL, "err", err)
 		return nil
 	}
-	var upgrader websocket.Upgrader = adapters.WebSocketUpgraderInterceptor(websocket.GorillaUpgrader(), interceptor)
-	reverseProxy := NewSingleHostWSReverseProxy(upstreamURL, upgrader)
-	upgrader = reverseProxy
+
+	upgrader := websocket.GorillaUpgrader()
+	interceptorUpgrader := adapters.WebSocketUpgraderInterceptor(upgrader, interceptor)
+	reverseProxy := NewSingleHostWSReverseProxy(upstreamURL, interceptorUpgrader)
 
 	return &http.Server{
 		Addr: cfg.WsListenAddr,
 		Handler: proxyhttp.WebSocketUpgrader(
 			logger,
-			upgrader,
+			reverseProxy,
 		),
 		ReadTimeout:       15 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,

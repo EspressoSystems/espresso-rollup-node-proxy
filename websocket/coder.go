@@ -21,11 +21,7 @@ func AdaptCoder(conn *websocket.Conn) Conn {
 
 // Close implements [Conn].
 func (a *coderAdapter) Close(code Status, reason string) error {
-	if err := a.conn.Close(websocket.StatusCode(code), reason); err != nil {
-		return a.conn.CloseNow()
-	}
-
-	return nil
+	return a.conn.Close(websocket.StatusCode(code), reason)
 }
 
 // Read implements [Conn].
@@ -71,13 +67,15 @@ func (c *coderUpgrader) Upgrade(w http.ResponseWriter, r *http.Request, options 
 		}
 	}
 
+	// Apply the config to the Accept options
 	acceptOptions := websocket.AcceptOptions{
 		Subprotocols: config.SubProtocols,
 	}
 
-	// Apply the config to the Accept options
-
 	conn, err := websocket.Accept(w, r, &acceptOptions)
+	if err != nil && conn == nil {
+		return nil, err
+	}
 	return AdaptCoder(conn), err
 }
 
@@ -101,6 +99,10 @@ func (d *coderDialer) Dial(ctx context.Context, urlString string, options ...Dia
 	}
 
 	conn, response, err := websocket.Dial(ctx, urlString, &dialOptions)
+	if err != nil || conn == nil {
+		return nil, response, err
+	}
+
 	return AdaptCoder(conn), response, err
 }
 

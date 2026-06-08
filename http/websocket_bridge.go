@@ -16,6 +16,7 @@ import (
 type websocketUpgrader struct {
 	logger   log.Logger
 	upgrader websocket.Upgrader
+	options  []websocket.UpgradeOption
 }
 
 // ServeHTTP implements [http.Handler].
@@ -29,11 +30,23 @@ type websocketUpgrader struct {
 // messages as needed.
 func (u *websocketUpgrader) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	conn, err := u.upgrader.Upgrade(w, r)
+	conn, err := u.upgrader.Upgrade(w, r, u.options...)
 	if err != nil {
 		u.logger.Debug("failed to upgrade connection to websocket", "error", err)
 		return
 	}
+
+	// Ensure the connection is shutdown when we're done.
+	defer func() {
+		if err := conn.Close(websocket.StatusNormalClosure, "closing"); err != nil {
+			if _, ok := conn.IsCloseError(err); !ok {
+				// Already closed
+				return
+			}
+
+			u.logger.Warn("failed to close websocket connection", "error", err)
+		}
+	}()
 
 	// We want to read messages until the user is done.
 	if err := websocketutil.ReadAllMessages(ctx, conn); err != nil {
@@ -45,9 +58,10 @@ func (u *websocketUpgrader) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // [websocket.Upgrader] that will automatically attempt to upgrade any
 // incoming request into websocket connection, and consume every message by
 // reading until the connection errors, or closes.
-func WebSocketUpgrader(logger log.Logger, upgrader websocket.Upgrader) http.Handler {
+func WebSocketUpgrader(logger log.Logger, upgrader websocket.Upgrader, options ...websocket.UpgradeOption) http.Handler {
 	return &websocketUpgrader{
 		logger:   logger,
 		upgrader: upgrader,
+		options:  options,
 	}
 }

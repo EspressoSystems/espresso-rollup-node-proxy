@@ -150,6 +150,9 @@ func (u *gorillaUpgrader) Upgrade(w http.ResponseWriter, r *http.Request, option
 	upgrader.Subprotocols = config.SubProtocols
 
 	conn, err := upgrader.Upgrade(w, r, config.Headers)
+	if err != nil || conn == nil {
+		return nil, err
+	}
 	return AdaptGorilla(conn), err
 }
 
@@ -174,7 +177,10 @@ func (d *gorillaDialer) Dial(ctx context.Context, urlString string, options ...D
 	// Apply the options to the Dialer, and whatever other functions we need.
 	dialer.Subprotocols = config.SubProtocols
 
-	conn, response, err := dialer.Dial(urlString, config.Headers)
+	conn, response, err := dialer.DialContext(ctx, urlString, config.Headers)
+	if err != nil || conn == nil {
+		return nil, response, err
+	}
 	return AdaptGorilla(conn), response, err
 }
 

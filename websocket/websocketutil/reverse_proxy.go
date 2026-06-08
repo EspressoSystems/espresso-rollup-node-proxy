@@ -112,6 +112,11 @@ func (r *ReverseProxy) Upgrade(w http.ResponseWriter, req *http.Request, options
 			Reader:       &teeReader{r: upstream, w: downstream},
 			ErrorChecker: MultiErrorChecker{upstream, downstream},
 		}
+
+		defer func() {
+			_ = upstream.Close(websocket.StatusNormalClosure, "closing")
+		}()
+
 		err := ReadAllMessages(ctx, bridge)
 		if err != nil {
 			r.getLogger().Info("error encountered bridging websocket connections", "error", err)

@@ -55,7 +55,7 @@ func WebSocketUpgraderInterceptor(
 
 // Upgrade implements [websocket.Upgrader].
 func (u *interceptorUpgrader) Upgrade(w http.ResponseWriter, r *http.Request, options ...websocket.UpgradeOption) (websocket.Conn, error) {
-	conn, err := u.upgrader.Upgrade(w, r)
+	conn, err := u.upgrader.Upgrade(w, r, options...)
 	if err != nil {
 		return conn, err
 	}
@@ -81,7 +81,9 @@ func (i *webSocketJSONRPCDownstreamIntercept) Read(ctx context.Context) (message
 			WriteJSONRPCResponseToWebSocket(i.Conn, jsonrpcv2.Response{
 				Error: &jsonRPCError,
 			})
-			return
+
+			// Make the error explicitly returned
+			return messageType, message, err
 		}
 
 		WriteJSONRPCErrorToWebSocket(i.Conn, nil, jsonrpcv2.CodeInternalError, "failed to intercept request")
