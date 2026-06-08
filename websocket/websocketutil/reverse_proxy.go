@@ -115,6 +115,11 @@ func (r *ReverseProxy) Upgrade(w http.ResponseWriter, req *http.Request, options
 
 		defer func() {
 			_ = upstream.Close(websocket.StatusNormalClosure, "closing")
+
+			// For the sake of consistency we'll also close the downstream here as
+			// well, though it's almost surely the case that this would already
+			// be occurring.
+			_ = downstream.Close(websocket.StatusNormalClosure, "closing")
 		}()
 
 		err := ReadAllMessages(ctx, bridge)
