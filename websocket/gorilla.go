@@ -3,6 +3,7 @@ package websocket
 import (
 	"context"
 	"errors"
+	"net"
 	"time"
 
 	"github.com/gorilla/websocket"
