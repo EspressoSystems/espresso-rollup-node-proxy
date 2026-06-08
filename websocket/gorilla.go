@@ -44,9 +44,10 @@ func (a *gorillaAdapter) Close(code Status, reason string) error {
 		return nil
 	}
 
-	if errors.Is(writeError, websocket.ErrCloseSent) {
-		// Close already sent.  This is probably fine.
-		return a.conn.Close()
+	if errors.Is(writeError, websocket.ErrCloseSent) || errors.Is(writeError, net.ErrClosed) {
+		// Close already sent or connection already closed.  This is fine.
+		_ = a.conn.Close()
+		return nil
 	}
 
 	if writeError != nil {
