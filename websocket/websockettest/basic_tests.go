@@ -122,6 +122,8 @@ func (b *BasicSuite) RunBasicWriteMessageTest(t *testing.T, newServer ServerCrea
 
 		require.Equal(expectedMessageType, messageType)
 		require.Equal(expectedMessage, message)
+
+		_ = conn.Close(websocket.StatusNormalClosure, "goodbye")
 	})
 
 	// Start the WebSocket server with a handler that will read a message and
@@ -139,6 +141,9 @@ func (b *BasicSuite) RunBasicWriteMessageTest(t *testing.T, newServer ServerCrea
 	require.NoError(conn.Write(ctx, expectedMessageType, []byte(expectedMessage)))
 
 	require.NoError(conn.Close(websocket.StatusNormalClosure, "goodbye"))
+
+	_, _, err = conn.Read(ctx)
+	require.Error(err)
 }
 
 // RunBasicReadMessageTest tests that a message
