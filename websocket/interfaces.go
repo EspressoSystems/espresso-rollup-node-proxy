@@ -351,4 +351,4 @@ type Dialer interface {
 // size for the specific implementation.
 //
 // NOTE: In the case of Gorilla, and Coder, this limit is max int64.
-var ErrSpecifiedReadSizeLimitTooLarge = errors.New("Specified Read size limit exceeds maximum supported the implementation")
+var ErrSpecifiedReadSizeLimitTooLarge = errors.New("specified read size limit exceeds maximum supported the implementation")
