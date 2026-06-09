@@ -2,9 +2,9 @@ package websocket_test
 
 import (
 	"net/http"
+	"proxy/websocket"
 	"testing"
 
-	"github.com/EspressoSystems/espresso-rollup-node-proxy/websocket"
 	"github.com/stretchr/testify/require"
 )
 
