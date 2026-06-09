@@ -163,6 +163,9 @@ func (v *NitroEspressoBatchVerifier) fetchFinalitySnapshot(ctx context.Context) 
 	if err != nil {
 		return nil, err
 	}
+	if header == nil {
+		return nil, fmt.Errorf("nitro finalized block not found")
+	}
 	return NitroFinalitySnapshot(header.Number.Uint64()), nil
 }
 

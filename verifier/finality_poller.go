@@ -91,6 +91,10 @@ func (p *FinalityPoller) run(ctx context.Context) {
 				p.logger.Error("failed to fetch finalized block", "error", err)
 				continue
 			}
+			if snapshot == nil {
+				p.logger.Error("fetched snapshot is nil")
+				continue
+			}
 			p.logger.Debug("finality poller updating", "block_num", snapshot.FinalizedL2())
 			p.finalitySnapshot.Store(snapshot)
 		}
