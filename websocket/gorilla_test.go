@@ -4,6 +4,9 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"proxy/websocket"
+	"proxy/websocket/websockettest"
+	"proxy/websocket/websocketutil"
 	"testing"
 	"time"
 
