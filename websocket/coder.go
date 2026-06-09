@@ -3,6 +3,7 @@ package websocket
 import (
 	"context"
 	"errors"
+	"math"
 	"net/http"
 
 	"github.com/coder/websocket"
@@ -67,7 +68,7 @@ func (c *coderUpgrader) Upgrade(w http.ResponseWriter, r *http.Request, options 
 	// ReadSizeLimit larger than Max int64 is not supported by Gorilla,
 	// so we should return an error if the user tries to set it to something
 	// larger than that.
-	if config.ReadSizeLimit > 0x7FFFFFFF {
+	if config.ReadSizeLimit > math.MaxInt64 {
 		return nil, ErrSpecifiedReadSizeLimitTooLarge
 	}
 
