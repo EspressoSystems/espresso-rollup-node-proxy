@@ -96,7 +96,7 @@ func (r *ReverseProxy) Upgrade(w http.ResponseWriter, req *http.Request, options
 	}
 
 	conn := &components{
-		Reader:            &teeReader{r: downstream, w: upstream},
+		Reader:            Tee(upstream, downstream),
 		Writer:            downstream,
 		Closer:            MultiCloser{upstream, downstream},
 		ErrorChecker:      MultiErrorChecker{upstream, downstream},
@@ -107,7 +107,7 @@ func (r *ReverseProxy) Upgrade(w http.ResponseWriter, req *http.Request, options
 	// the downstream.
 	go func() {
 		bridge := &components{
-			Reader:       &teeReader{r: upstream, w: downstream},
+			Reader:       Tee(downstream, upstream),
 			ErrorChecker: MultiErrorChecker{upstream, downstream},
 		}
 
