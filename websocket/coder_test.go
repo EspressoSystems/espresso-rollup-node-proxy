@@ -4,10 +4,11 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"proxy/websocket"
+	"proxy/websocket/websockettest"
 	"testing"
 
 	coderwebsocket "github.com/coder/websocket"
-
 )
 
 // TestCoderBasicSuite runs the basic suite of tests on the Adapters
