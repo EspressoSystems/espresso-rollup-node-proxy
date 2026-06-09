@@ -3,12 +3,11 @@ package websocket_test
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
-	"proxy/websocket"
-	"proxy/websocket/websockettest"
-	"proxy/websocket/websocketutil"
+	gorillawebsocket "github.com/gorilla/websocket"
 
 	"github.com/stretchr/testify/require"
 )
@@ -72,4 +71,44 @@ func TestGorillaServerReadTimeout(t *testing.T) {
 	time.Sleep(readTimeout)
 
 	_ = conn.Write(ctx, websocket.MessageTypeText, []byte("hello there"))
+}
+
+// ExampleGorillaCoder demonstrates how to use the AdaptCoder function to
+// adapt a [*gorillawebsocket.Conn] connection to the [websocket.Conn]
+// interface.
+func ExampleAdaptGorilla() {
+	ctx := context.Background()
+	rawConn, _, err := gorillawebsocket.DefaultDialer.DialContext(ctx, "wss://echo.websocket.org/", nil)
+	if err != nil {
+		panic(err)
+	}
+
+	conn := websocket.AdaptGorilla(rawConn)
+	_ = conn
+}
+
+// ExampleGorillaUpgrader demonstrates how to use the
+// [websocket.GorillaUpgrader] to upgrade an WebSocket connection using the
+// github.com/gorilla/websocket package.
+func ExampleGorillaUpgrader() {
+	upgrader := websocket.GorillaUpgrader()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r)
+
+		_ = conn
+		_ = err
+	}))
+	defer server.Close()
+}
+
+// ExampleGorillaDialer demonstrates how to use the CoderDialer to dial connect
+// to a server endpoint that serves a Websocket connection.
+func ExampleGorillaDialer() {
+	dialer := websocket.GorillaDialer()
+	conn, _, err := dialer.Dial(context.Background(), "wss://echo.websocket.org/")
+	if err != nil {
+		panic(err)
+	}
+
+	_ = conn
 }

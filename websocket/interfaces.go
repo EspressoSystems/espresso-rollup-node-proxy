@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 )
