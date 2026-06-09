@@ -88,9 +88,7 @@ func (r *ReverseProxy) Upgrade(w http.ResponseWriter, req *http.Request, options
 		r.getLogger().Warn("failed to dial upstream websocket server", "error", err)
 		if err := downstream.Close(websocket.StatusInternalServerError, "failed to dial upstream"); err != nil {
 			// Oh dear... we failed to close the downstream connection after failing
-			// to dial the upstream. Log this, but there's not much else we can downstream
-			// about it.
-			// Perhaps log it.
+			// to dial the upstream. Not much to do about it other than log it.
 			r.getLogger().Warn("failed to close downstream connection after upstream dial failure", "error", err)
 		}
 
