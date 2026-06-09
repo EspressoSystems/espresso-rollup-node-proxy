@@ -21,6 +21,7 @@ import (
 	proxypkg "proxy/proxy"
 
 	espressoStore "proxy/store"
+	sharedVerifier "proxy/verifier"
 
 	opStreamer "github.com/EspressoSystems/espresso-streamers/op"
 	"github.com/EspressoSystems/espresso-streamers/op/derivation"
@@ -55,9 +56,12 @@ type mockFinalityPoller struct {
 	mock.Mock
 }
 
-func (m *mockFinalityPoller) LastFinalized() uint64 {
+func (m *mockFinalityPoller) LastSnapshot() sharedVerifier.LatestSnapshot {
 	args := m.Called()
-	return args.Get(0).(uint64)
+	if args.Get(0) == nil {
+		return nil
+	}
+	return args.Get(0).(sharedVerifier.LatestSnapshot)
 }
 func (m *mockFinalityPoller) Start(_ context.Context) {}
 func (m *mockFinalityPoller) Stop()                   {}
@@ -312,7 +316,7 @@ func TestVerify(t *testing.T) {
 		},
 	}
 	h.endpointProv.On("RollupClient", mock.Anything).Return(h.rollupClient, nil)
-	h.finalityPoller.On("LastFinalized").Return(uint64(1))
+	h.finalityPoller.On("LastSnapshot").Return(OpFinalitySnapshot{syncStatus: syncStatus})
 	h.endpointProv.On("EthClient", mock.Anything).Return(h.ethClient, nil)
 	h.ethClient.On("BlockByNumber", mock.Anything, new(big.Int).SetUint64(100)).Return(block, nil)
 	h.rollupClient.On("SyncStatus", mock.Anything).Return(syncStatus, nil)
@@ -351,6 +355,7 @@ func TestStoresEthereumFinalizedBlockWhenAhead(t *testing.T) {
 		ctx := context.Background()
 		syncStatus := &eth.SyncStatus{
 			FinalizedL1: eth.L1BlockRef{Number: 10, Hash: common.Hash{1}},
+			FinalizedL2: eth.L2BlockRef{Number: 105},
 			SafeL2: eth.L2BlockRef{
 				Number:   5,
 				L1Origin: eth.BlockID{Number: 10, Hash: common.Hash{1}},
@@ -360,7 +365,7 @@ func TestStoresEthereumFinalizedBlockWhenAhead(t *testing.T) {
 		h.streamer.On("GetFallbackHotshotPos").Return(uint64(1))
 		h.endpointProv.On("EthClient", mock.Anything).Return(h.ethClient, nil)
 		h.endpointProv.On("RollupClient", mock.Anything).Return(h.rollupClient, nil)
-		h.finalityPoller.On("LastFinalized").Return(uint64(105))
+		h.finalityPoller.On("LastSnapshot").Return(OpFinalitySnapshot{syncStatus: syncStatus})
 		h.rollupClient.On("SyncStatus", mock.Anything).Return(syncStatus, nil)
 		h.streamer.On("Refresh", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		h.streamer.On("HasNext", mock.Anything).Return(false)
@@ -380,6 +385,7 @@ func TestProxyUsesEthereumFinalizedBlockWhenEspressoStopsAdvancing(t *testing.T)
 	ctx := context.Background()
 	syncStatus := &eth.SyncStatus{
 		FinalizedL1: eth.L1BlockRef{Number: 10, Hash: common.Hash{1}},
+		FinalizedL2: eth.L2BlockRef{Number: 105},
 		SafeL2: eth.L2BlockRef{
 			Number:   5,
 			L1Origin: eth.BlockID{Number: 10, Hash: common.Hash{1}},
@@ -389,7 +395,7 @@ func TestProxyUsesEthereumFinalizedBlockWhenEspressoStopsAdvancing(t *testing.T)
 	h.streamer.On("GetFallbackHotshotPos").Return(uint64(1))
 	h.endpointProv.On("EthClient", mock.Anything).Return(h.ethClient, nil)
 	h.endpointProv.On("RollupClient", mock.Anything).Return(h.rollupClient, nil)
-	h.finalityPoller.On("LastFinalized").Return(uint64(105))
+	h.finalityPoller.On("LastSnapshot").Return(OpFinalitySnapshot{syncStatus: syncStatus})
 	h.rollupClient.On("SyncStatus", mock.Anything).Return(syncStatus, nil)
 	h.streamer.On("Refresh", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	h.streamer.On("HasNext", mock.Anything).Return(false)

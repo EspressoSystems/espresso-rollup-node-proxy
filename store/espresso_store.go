@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/google/renameio"
 )
 
@@ -67,7 +66,6 @@ func (es *EspressoStore) GetState() EspressoState {
 func (es *EspressoStore) UpdateIfGreater(l2BlockNumber uint64, fallbackHotshotHeight uint64) (bool, error) {
 	state := es.GetState()
 	if state.L2BlockNumber >= l2BlockNumber {
-		log.Warn("L2 block number should only ever increase", "current", state.L2BlockNumber, "new", l2BlockNumber)
 		return false, nil
 	}
 

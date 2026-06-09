@@ -2,36 +2,39 @@ package verifier
 
 import (
 	"context"
-	"math/big"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/rpc"
 )
 
 const DefaultFinalityPollInterval = time.Second
 
+type LatestSnapshot interface {
+	FinalizedL2() uint64
+}
+
 type FinalityPollerInterface interface {
-	LastFinalized() uint64
+	LastSnapshot() LatestSnapshot
 	Start(ctx context.Context)
 	Stop()
 }
 
+// FinalityPoller periodically calls fetch and caches the latest snapshot so
+// callers can read finality
 type FinalityPoller struct {
-	client   *ethclient.Client
-	logger   log.Logger
-	interval time.Duration
-	last     atomic.Uint64
-	running  atomic.Bool
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
+	finalityPollFunc func(ctx context.Context) (LatestSnapshot, error)
+	logger           log.Logger
+	interval         time.Duration
+	finalitySnapshot atomic.Value
+	running          atomic.Bool
+	cancel           context.CancelFunc
+	wg               sync.WaitGroup
 }
 
 func NewFinalityPoller(
-	client *ethclient.Client,
+	finalityPollFunc func(ctx context.Context) (LatestSnapshot, error),
 	logger log.Logger,
 	interval time.Duration,
 ) *FinalityPoller {
@@ -39,28 +42,17 @@ func NewFinalityPoller(
 		interval = DefaultFinalityPollInterval
 	}
 	return &FinalityPoller{
-		client:   client,
-		logger:   logger,
-		interval: interval,
+		finalityPollFunc: finalityPollFunc,
+		logger:           logger,
+		interval:         interval,
 	}
 }
 
-func (p *FinalityPoller) MaxOfEspressoAndFinalized(ctx context.Context, l2BlockNumber uint64) uint64 {
-	finalized, err := p.client.HeaderByNumber(ctx, big.NewInt(rpc.FinalizedBlockNumber.Int64()))
-	if err != nil {
-		p.logger.Warn("failed to get finalized block number", "error", err)
-	} else if finalized.Number.Uint64() > l2BlockNumber {
-		p.logger.Info(
-			"finalized block number from L2 is ahead of espresso state, will update the espresso state with the finalized block number",
-			"finalized_block_number", finalized.Number.Uint64(),
-			"espresso_store_block_number", l2BlockNumber)
-		l2BlockNumber = finalized.Number.Uint64()
-	}
-	return l2BlockNumber
-}
-
-func (p *FinalityPoller) LastFinalized() uint64 {
-	return p.last.Load()
+// LastSnapshot returns the most recently polled snapshot, or nil if none has been
+// fetched yet.
+func (p *FinalityPoller) LastSnapshot() LatestSnapshot {
+	snapshot, _ := p.finalitySnapshot.Load().(LatestSnapshot)
+	return snapshot
 }
 
 func (p *FinalityPoller) Start(ctx context.Context) {
@@ -83,7 +75,6 @@ func (p *FinalityPoller) Stop() {
 		p.cancel()
 	}
 	p.wg.Wait()
-	p.client.Close()
 }
 
 func (p *FinalityPoller) run(ctx context.Context) {
@@ -95,13 +86,13 @@ func (p *FinalityPoller) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			header, err := p.client.HeaderByNumber(ctx, big.NewInt(rpc.FinalizedBlockNumber.Int64()))
+			snapshot, err := p.finalityPollFunc(ctx)
 			if err != nil {
 				p.logger.Error("failed to fetch finalized block", "error", err)
 				continue
 			}
-			p.logger.Debug("finality poller updating", "block_num", header.Number.Uint64())
-			p.last.Store(header.Number.Uint64())
+			p.logger.Debug("finality poller updating", "block_num", snapshot.FinalizedL2())
+			p.finalitySnapshot.Store(snapshot)
 		}
 	}
 }
