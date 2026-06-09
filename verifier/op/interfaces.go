@@ -9,4 +9,9 @@ type OpFinalitySnapshot struct {
 	syncStatus *eth.SyncStatus
 }
 
-func (s OpFinalitySnapshot) FinalizedL2() uint64 { return s.syncStatus.FinalizedL2.Number }
+func (s OpFinalitySnapshot) FinalizedL2() uint64 {
+	if s.syncStatus == nil {
+		return 0
+	}
+	return s.syncStatus.FinalizedL2.Number
+}

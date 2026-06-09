@@ -369,10 +369,9 @@ func (v *OPEspressoBatchVerifier) Refresh(ctx context.Context) error {
 		return err
 	}
 
-	state := v.espressoStore.GetState()
-
 	// Refresh the OP streamer with latest finalized or state block from the OP node.
 	// We should never be refreshing backwards
+	state := v.espressoStore.GetState()
 	fallbackPos := state.L2BlockNumber
 	ethFinalizedBlockNumber := syncStatus.FinalizedL2.Number
 	if state.L2BlockNumber < ethFinalizedBlockNumber {
@@ -396,7 +395,7 @@ func (v *OPEspressoBatchVerifier) Refresh(ctx context.Context) error {
 func (v *OPEspressoBatchVerifier) lastSyncStatus() (*eth.SyncStatus, error) {
 	snapshot := v.finalityPoller.LastSnapshot()
 	if snapshot == nil {
-		return nil, nil
+		return nil, fmt.Errorf("finality poller has no snap shot")
 	}
 	opSnapshot, ok := snapshot.(OpFinalitySnapshot)
 	if !ok {
