@@ -526,33 +526,38 @@ func (f *DelayedMessageFetcher) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			timeoutCtx, cancel := context.WithTimeout(ctx, timeoutPerCall)
-			defer cancel()
-			latestHeader, err := f.parentChainClient.HeaderByNumber(timeoutCtx, nil)
-			if err != nil {
-				f.logger.Warn("failed to fetch parent chain latest header", "error", err)
-				continue
-			}
-			finalizedHeader, err := f.parentChainClient.HeaderByNumber(timeoutCtx, big.NewInt(rpc.FinalizedBlockNumber.Int64()))
-			if err != nil {
-				f.logger.Warn("failed to fetch parent chain finalized header", "error", err)
-				continue
-			}
-
-			finalized := finalizedHeader.Number.Uint64()
-			endBlock := latestHeader.Number.Uint64()
-			parentBlock := f.parentBlockNumber
-
-			if parentBlock > endBlock {
-				continue
-			}
-			if endBlock-parentBlock >= maxBlocksPerScan {
-				endBlock = parentBlock + maxBlocksPerScan
-			}
-			if err := f.fetchDelayedMessageFromParentChain(timeoutCtx, endBlock, finalized); err != nil {
-				f.logger.Warn("failed to fetch delayed messages", "error", err)
-			}
+			f.poll(ctx)
 		}
+	}
+}
+
+func (f *DelayedMessageFetcher) poll(ctx context.Context) {
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeoutPerCall)
+	defer cancel()
+
+	latestHeader, err := f.parentChainClient.HeaderByNumber(timeoutCtx, nil)
+	if err != nil {
+		f.logger.Warn("failed to fetch parent chain latest header", "error", err)
+		return
+	}
+	finalizedHeader, err := f.parentChainClient.HeaderByNumber(timeoutCtx, big.NewInt(rpc.FinalizedBlockNumber.Int64()))
+	if err != nil {
+		f.logger.Warn("failed to fetch parent chain finalized header", "error", err)
+		return
+	}
+
+	finalized := finalizedHeader.Number.Uint64()
+	endBlock := latestHeader.Number.Uint64()
+	parentBlock := f.parentBlockNumber
+
+	if parentBlock > endBlock {
+		return
+	}
+	if endBlock-parentBlock >= maxBlocksPerScan {
+		endBlock = parentBlock + maxBlocksPerScan
+	}
+	if err := f.fetchDelayedMessageFromParentChain(timeoutCtx, endBlock, finalized); err != nil {
+		f.logger.Warn("failed to fetch delayed messages", "error", err)
 	}
 }
 

@@ -9,7 +9,13 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 )
 
-const DefaultFinalityPollInterval = time.Second
+const (
+	DefaultFinalityPollInterval = time.Second
+
+	// finalityPollTimeout bounds a single finality fetch so a hung RPC cannot
+	// stall the poll loop indefinitely.
+	finalityPollTimeout = 5 * time.Second
+)
 
 type LatestSnapshot interface {
 	FinalizedL2() uint64
@@ -86,17 +92,24 @@ func (p *FinalityPoller) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			snapshot, err := p.finalityPollFunc(ctx)
-			if err != nil {
-				p.logger.Error("failed to fetch finalized block", "error", err)
-				continue
-			}
-			if snapshot == nil {
-				p.logger.Error("fetched snapshot is nil")
-				continue
-			}
-			p.logger.Debug("finality poller updating", "block_num", snapshot.FinalizedL2())
-			p.finalitySnapshot.Store(snapshot)
+			p.poll(ctx)
 		}
 	}
+}
+
+func (p *FinalityPoller) poll(ctx context.Context) {
+	fetchCtx, cancel := context.WithTimeout(ctx, finalityPollTimeout)
+	defer cancel()
+
+	snapshot, err := p.finalityPollFunc(fetchCtx)
+	if err != nil {
+		p.logger.Error("failed to fetch finalized block", "error", err)
+		return
+	}
+	if snapshot == nil {
+		p.logger.Error("fetched snapshot is nil")
+		return
+	}
+	p.logger.Debug("finality poller updating", "block_num", snapshot.FinalizedL2())
+	p.finalitySnapshot.Store(snapshot)
 }
