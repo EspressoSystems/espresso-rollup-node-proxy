@@ -142,14 +142,25 @@ func (a *gorillaAdapter) SubProtocol() string {
 // gorillaUpgrader is an Upgrader implementation that uses the Gorilla
 // WebSocket implementation to perform the upgrade, and then adapts the
 // resulting connection to the Conn interface using [AdaptGorilla].
-type gorillaUpgrader struct{}
+type gorillaUpgrader struct {
+	options []UpgradeOption
+}
 
 // Compile-time type check assertion to ensure interface adherence.
 var _ Upgrader = (*gorillaUpgrader)(nil)
 
 // Upgrade implements [Upgrader]
 func (u *gorillaUpgrader) Upgrade(w http.ResponseWriter, r *http.Request, options ...UpgradeOption) (Conn, error) {
-	config := UpgradeConfigWithOptions(options...)
+	config := UpgradeConfigWithOptions(u.options...)
+	ApplyMultipleUpgradeOptions(options)(&config)
+
+	// ReadSizeLimit larger than Max int64 is not supported by Gorilla,
+	// so we should return an error if the user tries to set it to something
+	// larger than that.
+	if config.ReadSizeLimit > 0x7FFFFFFF {
+		return nil, ErrSpecifiedReadSizeLimitTooLarge
+	}
+
 	var upgrader websocket.Upgrader
 
 	// Apply the options to the Gorilla Upgrader
@@ -159,25 +170,40 @@ func (u *gorillaUpgrader) Upgrade(w http.ResponseWriter, r *http.Request, option
 	if err != nil || conn == nil {
 		return nil, err
 	}
+
+	if config.ReadSizeLimit > 0 {
+		// This should be a safe cast to int64 as we checked the size already.
+		conn.SetReadLimit(int64(config.ReadSizeLimit))
+	}
+
 	return AdaptGorilla(conn), err
 }
 
-// GorillaDial dials a WebSocket server using the Gorilla WebSocket library,
-// and
-func GorillaUpgrader() Upgrader {
-	return &gorillaUpgrader{}
+// GorillaUpgrader creates an [Upgrader] that utilities the
+// github.com/gorilla/websocket implementation to perform the upgrade.
+//
+// The [UpgradeOption]s passed to this function will be applied to any call of
+// [Upgrader.Upgrade] before the pased in [UpgradeOption]s, so they can be
+// overwritten if desired.
+func GorillaUpgrader(options ...UpgradeOption) Upgrader {
+	return &gorillaUpgrader{
+		options: options,
+	}
 }
 
 // gorillaDialer is a Dialer implementation that uses the Gorilla WebSocket
 // library.
-type gorillaDialer struct{}
+type gorillaDialer struct {
+	options []DialerOption
+}
 
 // Compile-time type check assertion to ensure interface adherence.
 var _ Dialer = (*gorillaDialer)(nil)
 
 // Dial implements [Dialer]
 func (d *gorillaDialer) Dial(ctx context.Context, urlString string, options ...DialerOption) (Conn, *http.Response, error) {
-	config := DialerConfigWithOptions(options...)
+	config := DialerConfigWithOptions(d.options...)
+	ApplyMultipleDialerOptions(options)(&config)
 	dialer := *websocket.DefaultDialer
 
 	// Apply the options to the Dialer, and whatever other functions we need.
@@ -190,6 +216,14 @@ func (d *gorillaDialer) Dial(ctx context.Context, urlString string, options ...D
 	return AdaptGorilla(conn), response, err
 }
 
-func GorillaDialer() Dialer {
-	return &gorillaDialer{}
+// GorillaDialer creates [Dialer] that utilies the github.com/gorilla/websocket
+// package to perform the establishing of the WebSocket connection.
+//
+// These options will automatically be applied to any calls of [Dialer.Dial]
+// and will be applied before incoming [DialerOption], so they can be
+// overwritten if desired.
+func GorillaDialer(options ...DialerOption) Dialer {
+	return &gorillaDialer{
+		options: options,
+	}
 }

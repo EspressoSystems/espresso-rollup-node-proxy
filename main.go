@@ -205,7 +205,7 @@ func createWsServer(logger log.Logger, cfg *Config, interceptor adapters.Interce
 		return nil
 	}
 
-	upgrader := websocket.GorillaUpgrader()
+	upgrader := websocket.GorillaUpgrader(websocket.SetUpgradeReadSizeLimit(uint64(cfg.MaxRequestBodySize)))
 	interceptorUpgrader := adapters.WebSocketUpgraderInterceptor(upgrader, interceptor)
 	reverseProxy := NewSingleHostWSReverseProxy(upstreamURL, interceptorUpgrader)
 

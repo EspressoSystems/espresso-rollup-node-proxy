@@ -221,18 +221,24 @@ type Conn interface {
 // to a fresh configuration type, and returns the resulting configuration
 // type.
 func applyOptionsToConfig[Config any, Option ~func(*Config)](options ...Option) (config Config) {
-	for _, opt := range options {
-		opt(&config)
-	}
-
+	applyOptionsToExistingConfig(&config, options)
 	return config
+}
+
+// applyOptionsToExistingConfig is a helper function that applies the given
+// options to the given pointer to a Config type.
+func applyOptionsToExistingConfig[Config any, Option ~func(*Config)](config *Config, options []Option) {
+	for _, opt := range options {
+		opt(config)
+	}
 }
 
 // UpgradeConfig represents the configuration options for upgrading an HTTP
 // request to a WebSocket connection.
 type UpgradeConfig struct {
-	Headers      http.Header
-	SubProtocols []string
+	Headers       http.Header
+	SubProtocols  []string
+	ReadSizeLimit uint64
 }
 
 // UpgradeOption represents a functional option for configuring the
@@ -253,6 +259,26 @@ func SetUpgradeHeaders(headers http.Header) UpgradeOption {
 func SetUpgradeSubProtocols(subProtocols []string) UpgradeOption {
 	return func(c *UpgradeConfig) {
 		c.SubProtocols = subProtocols
+	}
+}
+
+// SetUpgradeReadSizeLimit sets the maximum size of a message that can be
+// read in a single message.
+//
+// Exceeding this limit will result in the [Reader.Read] call failing with
+// an error, and the connection being terminated.
+func SetUpgradeReadSizeLimit(limit uint64) UpgradeOption {
+	return func(c *UpgradeConfig) {
+		c.ReadSizeLimit = limit
+	}
+}
+
+// ApplyMultipleUpgradeOptions is a helper function that takes in a slice of
+// multiple [UpgradeOption]s and returns an [UpgradeOption] that applies all
+// of them.
+func ApplyMultipleUpgradeOptions(options []UpgradeOption) UpgradeOption {
+	return func(c *UpgradeConfig) {
+		applyOptionsToExistingConfig(c, options)
 	}
 }
 
@@ -297,6 +323,15 @@ func SetDialerSubProtocols(subProtocols []string) DialerOption {
 	}
 }
 
+// ApplyMultipleDialerOptions is a helper function that takes in a
+// slice of [DialerOption]s and returns a [DialerOption] that will apply
+// all of the options.
+func ApplyMultipleDialerOptions(options []DialerOption) DialerOption {
+	return func(c *DialerConfig) {
+		applyOptionsToExistingConfig(c, options)
+	}
+}
+
 // DialerConfigWithOptions applies the given options to a new [DialerConfig]
 // and returns the resulting [DialerConfig].
 func DialerConfigWithOptions(options ...DialerOption) (config DialerConfig) {
@@ -311,4 +346,9 @@ type Dialer interface {
 	Dial(ctx context.Context, urlString string, options ...DialerOption) (Conn, *http.Response, error)
 }
 
-type Middleware func(Conn) Conn
+// ErrSpecifiedReadSizeLimitTooLarge is an error that is returned when the
+// user specifies a read size limit the exceeds the maximum supported
+// size for the specific implementation.
+//
+// NOTE: In the case of Gorilla, and Coder, this limit is max int64.
+var ErrSpecifiedReadSizeLimitTooLarge = errors.New("Specified Read size limit exceeds maximum supported the implementation")
