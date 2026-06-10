@@ -39,7 +39,7 @@ func (u *websocketUpgrader) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Ensure the connection is shutdown when we're done.
 	defer func() {
 		if err := conn.Close(websocket.StatusNormalClosure, "closing"); err != nil {
-			if _, ok := conn.IsCloseError(err); !ok {
+			if _, ok := conn.IsCloseError(err); ok {
 				// Already closed
 				return
 			}
