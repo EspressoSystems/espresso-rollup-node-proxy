@@ -306,7 +306,7 @@ func (f *DelayedMessageFetcher) fetchDelayedMessageFromParentChain(
 	f.mu.RLock()
 	startBlock := f.parentBlockNumber
 	f.mu.RUnlock()
-	delivered, err := f.fetchBridgeEvents(ctx, startBlock, endBlock)
+	delivered, err := fetchBridgeEvents(ctx, f.bridgeFilterer, startBlock, endBlock, f.logger)
 	if err != nil {
 		return err
 	}
@@ -338,8 +338,14 @@ func (f *DelayedMessageFetcher) updateParentBlockNumber(previous uint64, target 
 }
 
 // fetchBridgeEvents queries the parent chain for Bridge MessageDelivered events for a given range
-func (f *DelayedMessageFetcher) fetchBridgeEvents(ctx context.Context, startBlock, endBlock uint64) ([]*nitroabi.BridgeMessageDelivered, error) {
-	messageDeliveredIter, err := f.bridgeFilterer.FilterMessageDelivered(
+func fetchBridgeEvents(
+	ctx context.Context,
+	bridgeFilterer *nitroabi.BridgeFilterer,
+	startBlock uint64,
+	endBlock uint64,
+	logger log.Logger,
+) ([]*nitroabi.BridgeMessageDelivered, error) {
+	messageDeliveredIter, err := bridgeFilterer.FilterMessageDelivered(
 		&bind.FilterOpts{Context: ctx, Start: startBlock, End: &endBlock},
 		nil,
 		nil,
@@ -350,7 +356,7 @@ func (f *DelayedMessageFetcher) fetchBridgeEvents(ctx context.Context, startBloc
 	defer func() {
 		if err := messageDeliveredIter.Close(); err != nil {
 			// This should be unreachable as `Close()` doesnt actually return an error, but we log just in case
-			f.logger.Warn("failed to close message delivered iterator", "error", err)
+			logger.Warn("failed to close message delivered iterator", "error", err)
 		}
 	}()
 
@@ -403,7 +409,6 @@ func (f *DelayedMessageFetcher) fetchInboxData(
 			"old_parent_block_number", startBlock,
 			"new_parent_block_number", endBlock+1,
 		)
-		f.updateParentBlockNumber(startBlock, endBlock+1)
 		return nil
 	}
 
