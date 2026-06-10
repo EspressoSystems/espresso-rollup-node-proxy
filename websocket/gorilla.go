@@ -75,7 +75,7 @@ func (a *gorillaAdapter) Read(ctx context.Context) (messageType MessageType, mes
 		return messageType, message, ctx.Err()
 	}
 
-	{
+	if ctx.Done() != nil {
 		// Setup a goroutine for handling context cancellation on Read requests.
 		done := make(chan struct{})
 		defer close(done)
@@ -104,7 +104,7 @@ func (a *gorillaAdapter) Write(ctx context.Context, messageType MessageType, mes
 		return ctx.Err()
 	}
 
-	{
+	if ctx.Done() != nil {
 		// Setup a goroutine for handling context cancellation on write requests.
 		done := make(chan struct{})
 		defer close(done)
