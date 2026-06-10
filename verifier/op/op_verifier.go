@@ -299,15 +299,14 @@ func (v *OPEspressoBatchVerifier) syncEspressoStateWithEthereumFinality(syncStat
 		"eth_finalized_block", ethFinalizedBlockNumber,
 		"espresso_finalized_block", espressoFinalizedBlockNumber)
 
-	updated, err := v.espressoStore.UpdateIfGreater(ethFinalizedBlockNumber, v.streamer.GetFallbackHotshotPos())
-	if err != nil {
+	// Update always advances here (eth > current store, single writer), so ignore the bool.
+	if _, err := v.espressoStore.UpdateIfGreater(ethFinalizedBlockNumber, v.streamer.GetFallbackHotshotPos()); err != nil {
 		return espressoFinalizedBlockNumber, err
 	}
-	if updated {
-		// The store now sits at the eth-finalized block, so the next batch must
-		// chain onto it.
-		v.tip = syncStatus.FinalizedL2.Hash
-	}
+
+	// The store now sits at the eth-finalized l2 block, so the next batch must
+	// chain onto it and refresh from there.
+	v.tip = syncStatus.FinalizedL2.Hash
 	return ethFinalizedBlockNumber, nil
 }
 
@@ -415,7 +414,12 @@ func (v *OPEspressoBatchVerifier) refresh(ctx context.Context) error {
 	return nil
 }
 
-// peekNextBatch follows the pattern Update -> Peek
+// peekNextBatch follows the pattern Update -> Peek, then checks the peeked batch
+// against our last verified head (tip): if it does not chain onto tip it is on a
+// fork and ErrForkMismatch is returned for the caller streamer.
+// Before any batch has been verified (tip unset) the first available batch is
+// accepted as-is, since there is nothing to chain against yet. This will still be verified.
+//
 // It doesnt call Next because Proxy only calls Next if the full node block matches
 // what Espresso has finalized, otherwise it remains stuck on the same batch until the OP node catches up.
 func (v *OPEspressoBatchVerifier) peekNextBatch(ctx context.Context) (*derivation.EspressoBatch, error) {
