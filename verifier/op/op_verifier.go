@@ -390,29 +390,29 @@ func (v *OPEspressoBatchVerifier) peekNextBatch(ctx context.Context) (*derivatio
 	}
 
 	// Now we Peek the next batch and return it for verification
-	espressoBatchStreamer := v.streamer.Peek(ctx)
-	if espressoBatchStreamer == nil {
+	espressoBatch := v.streamer.Peek(ctx)
+	if espressoBatch == nil {
 		return nil, nil
 	}
 
 	// Until we have verified a batch we have no tip to chain against, so accept
 	// the first available batch as-is, we will still verify it.
 	if v.tip == (common.Hash{}) {
-		return espressoBatchStreamer, nil
+		return espressoBatch, nil
 	}
 
 	// Check if there was a fork, and search the streamer for the proper head.
-	if espressoBatchStreamer.Header().ParentHash != v.tip {
-		v.logger.Warn("head batch fork mismatch, seeking to proper head",
-			"batch_number", espressoBatchStreamer.Number(),
-			"batch_parent", espressoBatchStreamer.Header().ParentHash.Hex(),
-			"tip", v.tip.Hex(),
-		)
+	if espressoBatch.Header().ParentHash != v.tip {
 		v.streamer.SetProperHead(v.tip)
-		return nil, nil
+		return nil, fmt.Errorf(
+			"head batch fork mismatch: batch_number=%d batch_parent=%s tip=%s",
+			espressoBatch.Number(),
+			espressoBatch.Header().ParentHash.Hex(),
+			v.tip.Hex(),
+		)
 	}
 
-	return espressoBatchStreamer, nil
+	return espressoBatch, nil
 }
 
 func (v *OPEspressoBatchVerifier) Stop() {
