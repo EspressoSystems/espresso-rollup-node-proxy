@@ -92,7 +92,13 @@ func (i *Interceptor) InterceptRequest(request jsonrpcv2.Request) (jsonrpcv2.Req
 func (i *Interceptor) InterceptBatchRequests(requests []jsonrpcv2.Request) ([]jsonrpcv2.Request, error) {
 	if len(requests) > i.maxBatchSize {
 		// We're over our limit of maximum batches to process.
-		return nil, ErrMaxBatchSizeExceeded
+		return nil, errors.Join(
+			ErrMaxBatchSizeExceeded,
+			jsonrpcv2.Error{
+				Code:    jsonrpcv2.CodeInvalidRequest,
+				Message: fmt.Sprintf("batch size %d exceeds maximum batch size of %d", len(requests), i.maxBatchSize),
+			},
+		)
 	}
 
 	finalizedEspressoBlockNumber, err := i.getCurrentEspressoFinalizedBlockNumber()
@@ -136,7 +142,13 @@ func (i *Interceptor) interceptRequest(request jsonrpcv2.Request, espressoFinali
 // exact matches of the espresso tag with a hex block number.
 func (i *Interceptor) replaceTagInParams(params any, espressoFinalizedBlockNumber uint64, depth int) (any, bool, error) {
 	if depth > maxJSONDepth {
-		return nil, false, ErrMaxJSONDepthExceeded
+		return nil, false, errors.Join(
+			ErrMaxJSONDepthExceeded,
+			jsonrpcv2.Error{
+				Code:    jsonrpcv2.CodeInternalError,
+				Message: fmt.Sprintf("JSON nesting depth exceeds limit of %d", maxJSONDepth),
+			},
+		)
 	}
 
 	// Case 1: params is a string containing the espresso tag
