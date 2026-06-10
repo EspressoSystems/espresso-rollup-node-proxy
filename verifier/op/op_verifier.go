@@ -28,6 +28,11 @@ import (
 	espressoClient "github.com/EspressoSystems/espresso-network/sdks/go/client"
 )
 
+// ErrForkMismatch is returned by peekNextBatch when the next batch does not
+// build on the last verified head (tip). The caller is expected to reposition
+// the streamer to the proper head via SetProperHead.
+var ErrForkMismatch = errors.New("head batch fork mismatch")
+
 type OPEspressoBatchVerifierConfig struct {
 	L1RPC                     string         `json:"l1_rpc"`
 	FullNodeExecutionRPC      string         `json:"full_node_execution_rpc"`
@@ -60,6 +65,8 @@ type OPEspressoBatchVerifier struct {
 	running           atomic.Bool
 	totalBatchLatency time.Duration
 	batchCount        uint64
+	// tip is the header hash of the last successfully verified batch,
+	tip common.Hash
 }
 
 func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *espressoStore.EspressoStore, l1Client *ethclient.Client, espressoLightClient opStreamer.LightClientCallerInterface, opVerifierConfig *OPEspressoBatchVerifierConfig) *OPEspressoBatchVerifier {
@@ -204,7 +211,10 @@ func (v *OPEspressoBatchVerifier) drainAndVerifyBatches(ctx context.Context) *de
 
 		espressoBatch, err := v.VerifyNextBatch(ctx)
 		if err != nil {
-			if err.Error() == "not found" {
+			if errors.Is(err, ErrForkMismatch) {
+				v.logger.Warn("seeking to proper head", "error", err)
+				v.streamer.SetProperHead(v.tip)
+			} else if err.Error() == "not found" {
 				v.logger.Debug("batch not found on OP node yet, will try again on next interval")
 			} else if strings.Contains(err.Error(), "retryable") {
 				v.logger.Debug("espresso has not finalized the batch yet", "error", err)
@@ -233,6 +243,7 @@ func (v *OPEspressoBatchVerifier) drainAndVerifyBatches(ctx context.Context) *de
 
 		v.streamer.Next(ctx)
 		verifiedBatch = espressoBatch
+		v.tip = espressoBatch.Header().Hash()
 		v.logger.Info("Successfully verified OP batch", "batch_number", batchNumber)
 	}
 	return verifiedBatch
@@ -287,6 +298,9 @@ func (v *OPEspressoBatchVerifier) blockNumberToStore(espressoFinalizedBlockNumbe
 			"eth_finalized_block", ethFinalizedBlockNumber,
 			"espresso_finalized_block", espressoFinalizedBlockNumber)
 		blockNumberToStore = ethFinalizedBlockNumber
+		// TODO: Set to proper parent hash this can be done in later pr.
+		// currently we dont have the hash
+		v.tip = common.Hash{}
 	}
 
 	return blockNumberToStore
@@ -396,9 +410,31 @@ func (v *OPEspressoBatchVerifier) peekNextBatch(ctx context.Context) (*derivatio
 	}
 
 	// Now we Peek the next batch and return it for verification
-	espressoBatchStreamer := v.streamer.Peek(ctx)
+	espressoBatch := v.streamer.Peek(ctx)
+	if espressoBatch == nil {
+		return nil, nil
+	}
 
-	return espressoBatchStreamer, nil
+	// Until we have verified a batch we have no tip to chain against, so accept
+	// the first available batch as-is, we will still verify it.
+	if v.tip == (common.Hash{}) {
+		return espressoBatch, nil
+	}
+
+	// If the next batch does not build on our last verified head (tip), it is on
+	// a fork. Surface ErrForkMismatch (wrapped with context); the caller
+	// repositions the streamer.
+	if espressoBatch.Header().ParentHash != v.tip {
+		return nil, fmt.Errorf(
+			"batch_number=%d batch_parent=%s tip=%s: %w",
+			espressoBatch.Number(),
+			espressoBatch.Header().ParentHash.Hex(),
+			v.tip.Hex(),
+			ErrForkMismatch,
+		)
+	}
+
+	return espressoBatch, nil
 }
 
 // lastSyncStatus returns the SyncStatus from the finality poller's most recent
