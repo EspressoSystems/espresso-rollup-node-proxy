@@ -168,13 +168,14 @@ func MustNewDelayedMessageFetcher(
 func (f *DelayedMessageFetcher) GetDelayedMessage(ctx context.Context, messageIndex uint64) ([]byte, error) {
 	f.mu.RLock()
 	delayedMsg := f.delayedMessages[messageIndex]
+	parentBlock := f.parentBlockNumber
 	f.mu.RUnlock()
 
 	if delayedMsg == nil {
 		return nil, fmt.Errorf(
 			"messageIndex=%d parentBlock=%d: %w",
 			messageIndex,
-			f.parentBlockNumber,
+			parentBlock,
 			ErrDelayedMessageNotFound,
 		)
 	}
@@ -291,8 +292,8 @@ func (f *DelayedMessageFetcher) rewind(msg *delayedMessage) {
 	)
 	f.mu.Lock()
 	f.delayedMessages = make(map[uint64]*delayedMessage)
-	f.mu.Unlock()
 	f.parentBlockNumber = msg.finalizedBlock
+	f.mu.Unlock()
 }
 
 // fetchDelayedMessageFromParentChain queries the parent chain for Bridge MessageDelivered events
@@ -302,32 +303,44 @@ func (f *DelayedMessageFetcher) fetchDelayedMessageFromParentChain(
 	endBlock uint64,
 	finalized uint64,
 ) error {
-	delivered, err := f.fetchBridgeEvents(ctx, endBlock)
+	f.mu.RLock()
+	startBlock := f.parentBlockNumber
+	f.mu.RUnlock()
+	delivered, err := f.fetchBridgeEvents(ctx, startBlock, endBlock)
 	if err != nil {
 		return err
 	}
 	if len(delivered) == 0 {
 		f.logger.Debug(
 			"no bridge message delivered events found, advancing parent block number",
-			"old_parent_block_number", f.parentBlockNumber,
+			"old_parent_block_number", startBlock,
 			"new_parent_block_number", endBlock+1,
 		)
-		f.parentBlockNumber = endBlock + 1
+		f.updateParentBlockNumber(startBlock, endBlock+1)
 		return nil
 	}
 
-	if err = f.fetchInboxData(ctx, delivered, endBlock, finalized); err != nil {
+	if err = f.fetchInboxData(ctx, delivered, startBlock, endBlock, finalized); err != nil {
 		return err
 	}
-	f.parentBlockNumber = endBlock + 1
+	f.updateParentBlockNumber(startBlock, endBlock+1)
 
 	return nil
 }
 
+func (f *DelayedMessageFetcher) updateParentBlockNumber(previous uint64, target uint64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.parentBlockNumber != previous {
+		return
+	}
+	f.parentBlockNumber = target
+}
+
 // fetchBridgeEvents queries the parent chain for Bridge MessageDelivered events for a given range
-func (f *DelayedMessageFetcher) fetchBridgeEvents(ctx context.Context, endBlock uint64) ([]*nitroabi.BridgeMessageDelivered, error) {
+func (f *DelayedMessageFetcher) fetchBridgeEvents(ctx context.Context, startBlock, endBlock uint64) ([]*nitroabi.BridgeMessageDelivered, error) {
 	messageDeliveredIter, err := f.bridgeFilterer.FilterMessageDelivered(
-		&bind.FilterOpts{Context: ctx, Start: f.parentBlockNumber, End: &endBlock},
+		&bind.FilterOpts{Context: ctx, Start: startBlock, End: &endBlock},
 		nil,
 		nil,
 	)
@@ -356,6 +369,7 @@ func (f *DelayedMessageFetcher) fetchBridgeEvents(ctx context.Context, endBlock 
 func (f *DelayedMessageFetcher) fetchInboxData(
 	ctx context.Context,
 	deliveredEvents []*nitroabi.BridgeMessageDelivered,
+	startBlock uint64,
 	endBlock uint64,
 	finalized uint64,
 ) error {
@@ -375,7 +389,7 @@ func (f *DelayedMessageFetcher) fetchInboxData(
 	}
 
 	logs, err := f.parentChainClient.FilterLogs(ctx, ethereum.FilterQuery{
-		FromBlock: new(big.Int).SetUint64(f.parentBlockNumber),
+		FromBlock: new(big.Int).SetUint64(startBlock),
 		ToBlock:   new(big.Int).SetUint64(endBlock),
 		Addresses: addresses,
 		Topics:    [][]common.Hash{{f.inboxMessageDeliveredTopic, f.inboxFromOriginTopic}, messageIds},
@@ -386,10 +400,10 @@ func (f *DelayedMessageFetcher) fetchInboxData(
 	if len(logs) == 0 {
 		f.logger.Info(
 			"no Inbox events found for message, advancing parent block number",
-			"old_parent_block_number", f.parentBlockNumber,
+			"old_parent_block_number", startBlock,
 			"new_parent_block_number", endBlock+1,
 		)
-		f.parentBlockNumber = endBlock + 1
+		f.updateParentBlockNumber(startBlock, endBlock+1)
 		return nil
 	}
 
@@ -533,7 +547,9 @@ func (f *DelayedMessageFetcher) poll(ctx context.Context) {
 
 	finalized := finalizedHeader.Number.Uint64()
 	endBlock := latestHeader.Number.Uint64()
+	f.mu.RLock()
 	parentBlock := f.parentBlockNumber
+	f.mu.RUnlock()
 
 	if parentBlock > endBlock {
 		return
