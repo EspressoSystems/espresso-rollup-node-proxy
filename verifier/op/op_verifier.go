@@ -257,13 +257,10 @@ func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
-	var ethFinalizedBlockNumber uint64
-	if snapshot := v.finalityPoller.LastSnapshot(); snapshot != nil {
-		ethFinalizedBlockNumber = snapshot.FinalizedL2()
-	}
-	if verifiedBatch == nil || verifiedBatch.Number() < ethFinalizedBlockNumber {
-		if err := v.syncEspressoStateWithEthereumFinality(ethFinalizedBlockNumber); err != nil {
-			v.logger.Error("failed to update espresso state to ethereum finalized block", "error", err, "eth_finalized_block", ethFinalizedBlockNumber)
+
+	if verifiedBatch == nil {
+		if err := v.syncEspressoStateWithEthereumFinality(); err != nil {
+			v.logger.Error("failed to update espresso state to ethereum finalized block", "error", err)
 		}
 		return
 	}
@@ -284,26 +281,32 @@ func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 	v.logger.Info("Successfully verified and advanced OP batches", "last_batch_number", verifiedBatch.Number(), "hotshot_height", hotshotFallbackPos)
 }
 
-func (v *OPEspressoBatchVerifier) syncEspressoStateWithEthereumFinality(ethFinalizedBlockNumber uint64) error {
-	espressoState := v.espressoStore.GetState()
-	blockNumberToStore := v.blockNumberToStore(espressoState.L2BlockNumber, ethFinalizedBlockNumber)
-	_, err := v.espressoStore.UpdateIfGreater(blockNumberToStore, v.streamer.GetFallbackHotshotPos())
-	return err
-}
-
-func (v *OPEspressoBatchVerifier) blockNumberToStore(espressoFinalizedBlockNumber uint64, ethFinalizedBlockNumber uint64) uint64 {
-	blockNumberToStore := espressoFinalizedBlockNumber
-	if ethFinalizedBlockNumber > espressoFinalizedBlockNumber {
-		v.logger.Error("ethereum finalized block is ahead of espresso finalized block",
-			"eth_finalized_block", ethFinalizedBlockNumber,
-			"espresso_finalized_block", espressoFinalizedBlockNumber)
-		blockNumberToStore = ethFinalizedBlockNumber
-		// TODO: Set to proper parent hash this can be done in later pr.
-		// currently we dont have the hash
-		v.tip = common.Hash{}
+func (v *OPEspressoBatchVerifier) syncEspressoStateWithEthereumFinality() error {
+	syncStatus, err := v.lastSyncStatus()
+	if err != nil {
+		return err
 	}
 
-	return blockNumberToStore
+	state := v.espressoStore.GetState()
+	ethFinalizedBlockNumber := syncStatus.FinalizedL2.Number
+	if ethFinalizedBlockNumber <= state.L2BlockNumber {
+		return nil
+	}
+
+	v.logger.Error("ethereum finalized block is ahead of espresso finalized block",
+		"eth_finalized_block", ethFinalizedBlockNumber,
+		"espresso_finalized_block", state.L2BlockNumber)
+
+	updated, err := v.espressoStore.UpdateIfGreater(ethFinalizedBlockNumber, v.streamer.GetFallbackHotshotPos())
+	if err != nil {
+		return err
+	}
+	if updated {
+		// The store now sits at the eth-finalized block, so the next batch must
+		// chain onto it
+		v.tip = syncStatus.FinalizedL2.Hash
+	}
+	return nil
 }
 
 // VerifyNextBatch peeks the next batch from the OP streamer, fetches the corresponding block from the OP node,
