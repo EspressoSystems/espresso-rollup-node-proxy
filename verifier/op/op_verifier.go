@@ -59,6 +59,8 @@ type OPEspressoBatchVerifier struct {
 	running           atomic.Bool
 	totalBatchLatency time.Duration
 	batchCount        uint64
+	// tip is the header hash of the last successfully verified batch,
+	tip common.Hash
 }
 
 func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *espressoStore.EspressoStore, l1Client *ethclient.Client, espressoLightClient opStreamer.LightClientCallerInterface, opVerifierConfig *OPEspressoBatchVerifierConfig) *OPEspressoBatchVerifier {
@@ -268,6 +270,9 @@ func (v *OPEspressoBatchVerifier) blockNumberToStore(espressoFinalizedBlockNumbe
 			"eth_finalized_block", ethFinalizedBlockNumber,
 			"espresso_finalized_block", espressoFinalizedBlockNumber)
 		blockNumberToStore = ethFinalizedBlockNumber
+		// TODO: Set to proper parent hash this can be done in later pr.
+		// currently we dont have the hash
+		v.tip = common.Hash{}
 	}
 
 	return blockNumberToStore
@@ -385,6 +390,26 @@ func (v *OPEspressoBatchVerifier) peekNextBatch(ctx context.Context) (*derivatio
 
 	// Now we Peek the next batch and return it for verification
 	espressoBatchStreamer := v.streamer.Peek(ctx)
+	if espressoBatchStreamer == nil {
+		return nil, nil
+	}
+
+	// Until we have verified a batch we have no tip to chain against, so accept
+	// the first available batch as-is, we will still verify it.
+	if v.tip == (common.Hash{}) {
+		return espressoBatchStreamer, nil
+	}
+
+	// Check if there was a fork, and search the streamer for the proper head.
+	if espressoBatchStreamer.Header().ParentHash != v.tip {
+		v.logger.Warn("head batch fork mismatch, seeking to proper head",
+			"batch_number", espressoBatchStreamer.Number(),
+			"batch_parent", espressoBatchStreamer.Header().ParentHash.Hex(),
+			"tip", v.tip.Hex(),
+		)
+		v.streamer.SetProperHead(v.tip)
+		return nil, nil
+	}
 
 	return espressoBatchStreamer, nil
 }
