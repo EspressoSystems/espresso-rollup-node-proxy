@@ -22,7 +22,17 @@ func AdaptCoder(conn *websocket.Conn) Conn {
 
 // Close implements [Conn].
 func (a *coderAdapter) Close(code Status, reason string) error {
-	return a.conn.Close(websocket.StatusCode(code), reason)
+	defer func() {
+		// We're not concerned with this error, as should should work no
+		// matter what.
+		_ = a.conn.CloseNow()
+	}()
+	err := a.conn.Close(websocket.StatusCode(code), reason)
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return nil
+	}
+
+	return err
 }
 
 // Read implements [Conn].

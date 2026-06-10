@@ -2,6 +2,7 @@ package websockettest
 
 import (
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,9 +30,11 @@ func (b *BasicSuite) RunBasicServerCloseTest(t *testing.T, newServer ServerCreat
 	// Setup
 	require := require.New(t)
 	ctx := t.Context()
+	var wg sync.WaitGroup
 
 	// This handler will immediately close any connection found
 	handler := WebSocketHandlerFunc(func(conn websocket.Conn, err error) {
+		defer wg.Done()
 		// We should not have an issue connecting to the server
 		require.NoError(err)
 
@@ -47,6 +50,7 @@ func (b *BasicSuite) RunBasicServerCloseTest(t *testing.T, newServer ServerCreat
 	server := newServer(b, handler)
 	defer server.Close()
 
+	wg.Add(1)
 	// Connect to the Server
 	conn, response, err := server.Connect(ctx, b)
 
@@ -63,6 +67,8 @@ func (b *BasicSuite) RunBasicServerCloseTest(t *testing.T, newServer ServerCreat
 	require.Equal(closeErr.Reason, message)
 
 	require.Error(conn.Write(ctx, websocket.MessageTypeText, []byte("hello there")))
+
+	wg.Wait()
 }
 
 // RunBasicClientCloseTest tests that a connection of the WebSocket will
@@ -72,8 +78,10 @@ func (b *BasicSuite) RunBasicClientCloseTest(t *testing.T, newServer ServerCreat
 	require := require.New(t)
 	ctx := t.Context()
 
+	var wg sync.WaitGroup
 	// This handler will immediately close any connection found
 	handler := WebSocketHandlerFunc(func(conn websocket.Conn, err error) {
+		defer wg.Done()
 		// We should not have an issue connecting to the server
 		require.NoError(err)
 
@@ -92,6 +100,7 @@ func (b *BasicSuite) RunBasicClientCloseTest(t *testing.T, newServer ServerCreat
 	// connection immediately
 	defer server.Close()
 
+	wg.Add(1)
 	// Connect to the Server
 	conn, response, err := server.Connect(ctx, b)
 
@@ -103,6 +112,8 @@ func (b *BasicSuite) RunBasicClientCloseTest(t *testing.T, newServer ServerCreat
 
 	_, _, err = conn.Read(ctx)
 	require.Error(err)
+
+	wg.Wait()
 }
 
 // RunBasicWriteMessageTest tests that a message
@@ -113,7 +124,9 @@ func (b *BasicSuite) RunBasicWriteMessageTest(t *testing.T, newServer ServerCrea
 	require := require.New(t)
 	ctx := t.Context()
 
+	var wg sync.WaitGroup
 	handler := WebSocketHandlerFunc(func(conn websocket.Conn, err error) {
+		defer wg.Done()
 		require.NoError(err)
 
 		// Ensure that we can read a message
@@ -131,6 +144,7 @@ func (b *BasicSuite) RunBasicWriteMessageTest(t *testing.T, newServer ServerCrea
 	server := NewServer(b, handler)
 	defer server.Close()
 
+	wg.Add(1)
 	// Connect to the Server
 	conn, response, err := server.Connect(ctx, b)
 
@@ -144,6 +158,8 @@ func (b *BasicSuite) RunBasicWriteMessageTest(t *testing.T, newServer ServerCrea
 
 	_, _, err = conn.Read(ctx)
 	require.Error(err)
+
+	wg.Wait()
 }
 
 // RunBasicReadMessageTest tests that a message
@@ -154,13 +170,20 @@ func (b *BasicSuite) RunBasicReadMessageTest(t *testing.T, newServer ServerCreat
 	require := require.New(t)
 	ctx := t.Context()
 
+	var wg sync.WaitGroup
 	handler := WebSocketHandlerFunc(func(conn websocket.Conn, err error) {
+		defer wg.Done()
 		require.NoError(err)
 
 		// Ensure that we can write a message
 		require.NoError(conn.Write(ctx, expectedMessageType, []byte(expectedMessage)))
 
+		// Close the connection after writing the message, to ensure that the
+		// client can read the message before the connection is closed.
 		require.NoError(conn.Close(websocket.StatusNormalClosure, "goodbye"))
+
+		_, _, err = conn.Read(ctx)
+		require.Error(err)
 	})
 
 	// Start the WebSocket server with a handler that will read a message and
@@ -168,6 +191,7 @@ func (b *BasicSuite) RunBasicReadMessageTest(t *testing.T, newServer ServerCreat
 	server := NewServer(b, handler)
 	defer server.Close()
 
+	wg.Add(1)
 	// Connect to the Server
 	conn, response, err := server.Connect(ctx, b)
 
@@ -179,6 +203,8 @@ func (b *BasicSuite) RunBasicReadMessageTest(t *testing.T, newServer ServerCreat
 	require.NoError(err)
 	require.Equal(expectedMessageType, messageType)
 	require.Equal(expectedMessage, message)
+
+	wg.Wait()
 }
 
 // CreateBasicServerCloseTest creates a test function that will perform the

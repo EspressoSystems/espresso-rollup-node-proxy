@@ -32,6 +32,11 @@ var _ Conn = (*gorillaAdapter)(nil)
 
 // Close implements [Conn].
 func (a *gorillaAdapter) Close(code Status, reason string) error {
+	defer func() {
+		// We don't care if this errors really
+		_ = a.conn.Close()
+	}()
+
 	now := time.Now()
 	deadline := now.Add(closeMessageTimeout)
 
@@ -47,9 +52,13 @@ func (a *gorillaAdapter) Close(code Status, reason string) error {
 		return nil
 	}
 
+	if errors.Is(writeError, context.DeadlineExceeded) || errors.Is(writeError, net.ErrWriteToConnected) {
+		// We were cancelled, let's return and just close the underlying connection.
+		return nil
+	}
+
 	if errors.Is(writeError, websocket.ErrCloseSent) || errors.Is(writeError, net.ErrClosed) {
 		// Close already sent or connection already closed.  This is fine.
-		_ = a.conn.Close()
 		return nil
 	}
 
@@ -57,11 +66,11 @@ func (a *gorillaAdapter) Close(code Status, reason string) error {
 		// Failed to send a graceful close message.
 		// try to close anyway.
 
-		return errors.Join(writeError, a.conn.Close())
+		return writeError
 	}
 
 	// Finally perform an actual close.
-	return a.conn.Close()
+	return nil
 }
 
 // Read implements [Conn].
