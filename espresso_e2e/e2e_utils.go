@@ -26,9 +26,9 @@ import (
 	"proxy/adapters"
 	proxyhttp "proxy/http"
 	"proxy/jsonrpcv2"
+	"proxy/log/logutil"
 	"proxy/proxy"
 	verifier "proxy/verifier/op"
-
 	espressostore "proxy/store"
 	nitroVerifier "proxy/verifier/nitro"
 
@@ -602,35 +602,16 @@ func jsonMarshal(t *testing.T, v any) json.RawMessage {
 	return b
 }
 
-type logCapturer struct {
-	mu       sync.Mutex
-	records  []slog.Record
-	delegate slog.Handler
-}
-
-func newCapturingLogger() (log.Logger, *logCapturer) {
-	capturer := &logCapturer{
-		delegate: log.NewTerminalHandlerWithLevel(os.Stdout, log.LevelInfo, true),
-	}
+func newCapturingLogger() (log.Logger, *logutil.CaptureLogger) {
+	capturer := logutil.NewCaptureLogger(
+		log.NewTerminalHandlerWithLevel(os.Stdout, log.LevelInfo, true),
+	)
 	logger := log.NewLogger(capturer)
 	log.SetDefault(logger)
 	return logger, capturer
 }
 
-func (c *logCapturer) Enabled(_ context.Context, _ slog.Level) bool { return true }
-func (c *logCapturer) Handle(ctx context.Context, r slog.Record) error {
-	c.mu.Lock()
-	c.records = append(c.records, r)
-	c.mu.Unlock()
-	if c.delegate != nil && c.delegate.Enabled(ctx, r.Level) {
-		return c.delegate.Handle(ctx, r)
-	}
-	return nil
-}
-func (c *logCapturer) WithAttrs(_ []slog.Attr) slog.Handler { return c }
-func (c *logCapturer) WithGroup(_ string) slog.Handler      { return c }
-
-func requireLogAttrs(t *testing.T, capturer *logCapturer, msg string, expected map[string]uint64) {
+func requireLogAttrs(t *testing.T, capturer *logutil.CaptureLogger, msg string, expected map[string]uint64) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -642,7 +623,7 @@ func requireLogAttrs(t *testing.T, capturer *logCapturer, msg string, expected m
 	t.Fatalf("expected log record %q with attrs %v not found in captured logs", msg, expected)
 }
 
-func requireLogStringAttrs(t *testing.T, capturer *logCapturer, msg string, expected map[string]string) {
+func requireLogStringAttrs(t *testing.T, capturer *logutil.CaptureLogger, msg string, expected map[string]string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -654,10 +635,10 @@ func requireLogStringAttrs(t *testing.T, capturer *logCapturer, msg string, expe
 	t.Fatalf("expected log record %q with attrs %v not found in captured logs", msg, expected)
 }
 
-func matchLogStringAttrs(capturer *logCapturer, msg string, expected map[string]string) bool {
-	capturer.mu.Lock()
-	defer capturer.mu.Unlock()
-	for _, r := range capturer.records {
+func matchLogStringAttrs(capturer *logutil.CaptureLogger, msg string, expected map[string]string) bool {
+	capturer.Lock()
+	defer capturer.Unlock()
+	for _, r := range capturer.Entries {
 		if r.Message != msg {
 			continue
 		}
@@ -684,10 +665,10 @@ func matchLogStringAttrs(capturer *logCapturer, msg string, expected map[string]
 	return false
 }
 
-func matchLogAttrs(capturer *logCapturer, msg string, expected map[string]uint64) bool {
-	capturer.mu.Lock()
-	defer capturer.mu.Unlock()
-	for _, r := range capturer.records {
+func matchLogAttrs(capturer *logutil.CaptureLogger, msg string, expected map[string]uint64) bool {
+	capturer.Lock()
+	defer capturer.Unlock()
+	for _, r := range capturer.Entries {
 		if r.Message != msg {
 			continue
 		}
