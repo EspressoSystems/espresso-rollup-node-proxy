@@ -219,6 +219,7 @@ func (v *OPEspressoBatchVerifier) drainAndVerifyBatches(ctx context.Context) *de
 
 		v.streamer.Next(ctx)
 		verifiedBatch = espressoBatch
+		v.tip = espressoBatch.Header().Hash()
 		v.logger.Info("Successfully verified OP batch", "batch_number", batchNumber)
 	}
 	return verifiedBatch
