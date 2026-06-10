@@ -7,10 +7,11 @@ import (
 	"math"
 	"net/url"
 	"os"
+	"time"
+
 	"proxy/proxy"
 	nitroVerifier "proxy/verifier/nitro"
 	opVerifier "proxy/verifier/op"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
@@ -54,23 +55,25 @@ type NitroConfig struct {
 }
 
 type Config struct {
-	FullNodeExecutionRPC string      `json:"full_node_execution_rpc"`
-	L1RPC                string      `json:"l1_rpc"`
-	Mode                 string      `json:"mode"`
-	ListenAddr           string      `json:"listen_addr"`
-	EspressoTag          string      `json:"espresso_tag"`
-	StoreFilePath        string      `json:"store_file_path"`
-	QueryServiceURL      string      `json:"query_service_url"`
-	VerificationInterval Duration    `json:"verification_interval"`
-	FinalityPollInterval Duration    `json:"finality_poll_interval"`
-	InitialHotshotHeight uint64      `json:"initial_hotshot_height"`
-	MaxBatchSize         int         `json:"max_batch_size"`
-	MaxRequestBodySize   int         `json:"max_request_body_size"`
-	OPConfig             OPConfig    `json:"op"`
-	NitroConfig          NitroConfig `json:"nitro"`
-	LogLevel             string      `json:"log_level"`
-	LogFormat            string      `json:"log_format"`
-	TrackBatchLatency    bool        `json:"track_batch_latency"`
+	FullNodeExecutionRPC   string      `json:"full_node_execution_rpc"`
+	WsFullNodeExecutionRPC string      `json:"ws_full_node_execution_rpc"`
+	L1RPC                  string      `json:"l1_rpc"`
+	Mode                   string      `json:"mode"`
+	ListenAddr             string      `json:"listen_addr"`
+	WsListenAddr           string      `json:"ws_listen_addr"`
+	EspressoTag            string      `json:"espresso_tag"`
+	StoreFilePath          string      `json:"store_file_path"`
+	QueryServiceURL        string      `json:"query_service_url"`
+	VerificationInterval   Duration    `json:"verification_interval"`
+	FinalityPollInterval   Duration    `json:"finality_poll_interval"`
+	InitialHotshotHeight   uint64      `json:"initial_hotshot_height"`
+	MaxBatchSize           int         `json:"max_batch_size"`
+	MaxRequestBodySize     int         `json:"max_request_body_size"`
+	OPConfig               OPConfig    `json:"op"`
+	NitroConfig            NitroConfig `json:"nitro"`
+	LogLevel               string      `json:"log_level"`
+	LogFormat              string      `json:"log_format"`
+	TrackBatchLatency      bool        `json:"track_batch_latency"`
 }
 
 func defaultConfig() *Config {
@@ -108,11 +111,13 @@ func parseConfig() *Config {
 	pflag.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "logging level (e.g., debug, info, warn, error)")
 	pflag.StringVar(&cfg.LogFormat, "log-format", cfg.LogFormat, "log output format (text or json)")
 	pflag.StringVar(&cfg.ListenAddr, "listen-addr", cfg.ListenAddr, "proxy listen address")
+	pflag.StringVar(&cfg.WsListenAddr, "ws.listen-addr", cfg.WsListenAddr, "proxy WebSocket listen address")
 	pflag.StringVar(&cfg.FullNodeExecutionRPC, "full-node-execution-rpc", cfg.FullNodeExecutionRPC, "full node execution RPC URL")
 	pflag.StringVar(&cfg.L1RPC, "l1-rpc", cfg.L1RPC, "L1 RPC URL")
 	pflag.TextVar(&cfg.OPConfig.LightClientAddress, "op.light-client-address", cfg.OPConfig.LightClientAddress, "Espresso light client contract address")
 	pflag.TextVar(&cfg.OPConfig.BatcherAddress, "op.batcher-address", cfg.OPConfig.BatcherAddress, "OP batcher address")
 	pflag.TextVar(&cfg.OPConfig.BatchAuthenticatorAddress, "op.batch-authenticator-address", cfg.OPConfig.BatchAuthenticatorAddress, "Espresso batch authenticator contract address")
+	pflag.StringVar(&cfg.WsFullNodeExecutionRPC, "ws.full-node-execution-rpc", cfg.WsFullNodeExecutionRPC, "full node execution RPC URL (websocket)")
 	pflag.StringVar(&cfg.EspressoTag, "espresso-tag", cfg.EspressoTag, "espresso tag")
 	pflag.StringVar(&cfg.StoreFilePath, "store-file-path", cfg.StoreFilePath, "path to state persistence file")
 	pflag.Uint64Var(&cfg.InitialHotshotHeight, "initial-hotshot-height", cfg.InitialHotshotHeight, "initial hotshot height")
@@ -238,15 +243,6 @@ func (c *Config) validate() error {
 	}
 
 	return errors.Join(errs...)
-}
-
-func (c *Config) toProxyConfig() *proxy.ProxyConfig {
-	return &proxy.ProxyConfig{
-		FullNodeExecutionRPC: c.FullNodeExecutionRPC,
-		EspressoTag:          c.EspressoTag,
-		MaxBatchSize:         c.MaxBatchSize,
-		MaxRequestBodySize:   c.MaxRequestBodySize,
-	}
 }
 
 func (c *Config) toOPVerifierConfig() *opVerifier.OPEspressoBatchVerifierConfig {
