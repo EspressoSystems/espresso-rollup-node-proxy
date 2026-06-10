@@ -43,7 +43,6 @@ type NitroEspressoBatchVerifierConfig struct {
 	FinalityPollInterval  time.Duration          `json:"finality_poll_interval"`
 	QueryServiceURL       string                 `json:"query_service_url"`
 	Namespace             uint64                 `json:"namespace"`
-	InitialHotshotBlock   uint64                 `json:"initial_hotshot_block"`
 	ValidBatcherAddresses []BatcherAddressConfig `json:"valid_batcher_addresses"`
 	WaitForL1Finalization bool                   `json:"wait_for_l1_finalization"`
 }
