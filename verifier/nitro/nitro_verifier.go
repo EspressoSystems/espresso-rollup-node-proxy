@@ -119,48 +119,12 @@ func NewNitroEspressoBatchVerifier(
 		})
 	}
 
-	espressoState := store.GetState()
-	startHotshotBlock := config.InitialHotshotBlock
-	if espressoState.FallbackHotshotHeight > startHotshotBlock {
-		startHotshotBlock = espressoState.FallbackHotshotHeight
-	}
-
-	// Upon startup see if finalized is ahead of stored
-	startNitroBlock := espressoState.L2BlockNumber
-	header, err := l2Client.HeaderByNumber(ctx, big.NewInt(int64(rpc.FinalizedBlockNumber)))
-	if err != nil {
-		logger.Warn("failed to get nitro finalized block on startup", "error", err)
-	} else if header == nil {
-		logger.Warn("nitro finalized block not found")
-	} else if header.Number.Uint64() > espressoState.L2BlockNumber {
-		logger.Warn("finalized block is ahead of stored espresso block", "espresso_height", startNitroBlock, "finalized_height", header.Number.Uint64())
-		startNitroBlock = header.Number.Uint64()
-	}
-	streamer := nitroStreamer.NewEspressoStreamer(
-		config.Namespace,
-		startHotshotBlock,
-		client,
-		addrRanges,
-		time.Second,
-		startNitroBlock+1,
-		logger,
-	)
-
-	feed := feedclient.NewFeedClient(config.FeedURL, config.Namespace, espressoState.L2BlockNumber, logger)
-
-	return &NitroEspressoBatchVerifier{
-		streamer:      streamer,
-		feedClient:    feed,
+	v := &NitroEspressoBatchVerifier{
 		l2Client:      l2Client,
 		l1Client:      l1Client,
 		espressoStore: store,
 		config:        config,
 		logger:        logger,
-		finalityPoller: sharedVerifier.NewFinalityPoller(
-			l2Client,
-			logger,
-			config.FinalityPollInterval,
-		),
 		delayedMsgFetcher: delayedmessagefetcher.MustNewDelayedMessageFetcher(
 			ctx,
 			l1Client,
@@ -169,6 +133,41 @@ func NewNitroEspressoBatchVerifier(
 			logger,
 		),
 	}
+
+	v.finalityPoller = sharedVerifier.NewFinalityPoller(
+		v.fetchFinalitySnapshot,
+		logger,
+		config.FinalityPollInterval,
+	)
+
+	espressoState := store.GetState()
+
+	v.streamer = nitroStreamer.NewEspressoStreamer(
+		config.Namespace,
+		espressoState.FallbackHotshotHeight,
+		client,
+		addrRanges,
+		time.Second,
+		espressoState.L2BlockNumber+1,
+		logger,
+	)
+
+	v.feedClient = feedclient.NewFeedClient(config.FeedURL, config.Namespace, espressoState.L2BlockNumber, logger)
+
+	return v
+}
+
+// fetchFinalitySnapshot polls the Nitro L2 node's finalized block and wraps it
+// as a LatestSnapshot for the finality poller.
+func (v *NitroEspressoBatchVerifier) fetchFinalitySnapshot(ctx context.Context) (sharedVerifier.LatestSnapshot, error) {
+	header, err := v.l2Client.HeaderByNumber(ctx, big.NewInt(rpc.FinalizedBlockNumber.Int64()))
+	if err != nil {
+		return nil, err
+	}
+	if header == nil {
+		return nil, fmt.Errorf("nitro finalized block not found")
+	}
+	return NitroFinalitySnapshot(header.Number.Uint64()), nil
 }
 
 func (v *NitroEspressoBatchVerifier) Start(ctx context.Context) {
@@ -303,11 +302,12 @@ func (v *NitroEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
-	nitroFinalizedBlock := v.finalityPoller.LastFinalized()
-	if verifiedMsg == nil || verifiedMsg.Pos < nitroFinalizedBlock {
-		if err := v.syncEspressoStateWithNitroFinality(nitroFinalizedBlock); err != nil {
-			v.logger.Error("failed to sync espresso state with Nitro finality", "error", err)
-		}
+	if err := v.syncEspressoStateWithNitroFinality(); err != nil {
+		v.logger.Error("failed to sync espresso state with Nitro finality", "error", err)
+		return
+	}
+	if verifiedMsg == nil {
+		v.logger.Debug("no verified msg found")
 		return
 	}
 
@@ -346,20 +346,23 @@ func (v *NitroEspressoBatchVerifier) advanceTo(pos uint64) {
 	v.feedClient.AdvanceTo(pos)
 }
 
-func (v *NitroEspressoBatchVerifier) syncEspressoStateWithNitroFinality(nitroFinalizedBlock uint64) error {
+func (v *NitroEspressoBatchVerifier) syncEspressoStateWithNitroFinality() error {
 	espressoState := v.espressoStore.GetState()
-	blockNumberToStore := espressoState.L2BlockNumber
-	if nitroFinalizedBlock > blockNumberToStore {
+
+	var nitroFinalizedBlock uint64
+	if snapshot := v.finalityPoller.LastSnapshot(); snapshot != nil {
+		nitroFinalizedBlock = snapshot.FinalizedL2()
+	}
+	if nitroFinalizedBlock > espressoState.L2BlockNumber {
 		v.logger.Error("nitro finalized block is ahead of Espresso finalized block",
 			"nitro_finalized", nitroFinalizedBlock,
 			"espresso_finalized", espressoState.L2BlockNumber,
 		)
-		blockNumberToStore = nitroFinalizedBlock
-		hotshotFallback := v.streamer.GetCurrentEarliestHotShotBlockNumber(blockNumberToStore)
-		updated, err := v.espressoStore.UpdateIfGreater(blockNumberToStore, hotshotFallback)
+		hotshotFallback := v.streamer.GetCurrentEarliestHotShotBlockNumber(nitroFinalizedBlock)
+		updated, err := v.espressoStore.UpdateIfGreater(nitroFinalizedBlock, hotshotFallback)
 		if updated {
 			// We add 1 here because we are looking for the finalized + 1 on next `peek()` call
-			v.advanceTo(blockNumberToStore + 1)
+			v.advanceTo(nitroFinalizedBlock + 1)
 		}
 		return err
 	}
