@@ -416,7 +416,7 @@ func (v *OPEspressoBatchVerifier) refresh(ctx context.Context) error {
 
 // peekNextBatch follows the pattern Update -> Peek, then checks the peeked batch
 // against our last verified head (tip): if it does not chain onto tip it is on a
-// fork and ErrForkMismatch is returned for the caller streamer.
+// fork and ErrForkMismatch is returned for the caller.
 // Before any batch has been verified (tip unset) the first available batch is
 // accepted as-is, since there is nothing to chain against yet. This will still be verified.
 //
