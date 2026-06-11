@@ -134,7 +134,7 @@ func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 func NewSingleHostWSReverseProxy(target *url.URL, upgrader websocket.Upgrader) *websocketutil.ReverseProxy {
 	return websocketutil.NewReverseProxy(
 		target,
-		websocket.GorillaDialer(),
+		websocket.CoderDialer(),
 		upgrader,
 	)
 }
@@ -205,7 +205,7 @@ func createWsServer(logger log.Logger, cfg *Config, interceptor adapters.Interce
 		return nil
 	}
 
-	upgrader := websocket.GorillaUpgrader(websocket.SetUpgradeReadSizeLimit(uint64(cfg.MaxRequestBodySize)))
+	upgrader := websocket.CoderUpgrader(websocket.SetUpgradeReadSizeLimit(uint64(cfg.MaxRequestBodySize)))
 	interceptorUpgrader := adapters.WebSocketUpgraderInterceptor(upgrader, interceptor)
 	reverseProxy := NewSingleHostWSReverseProxy(upstreamURL, interceptorUpgrader)
 
