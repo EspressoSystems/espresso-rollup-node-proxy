@@ -374,7 +374,7 @@ func (m *httpCORSMiddleware) processPreflightRequest(w http.ResponseWriter, r *h
 		if len(m.allowedMethods) <= 0 {
 			responseHeaders.AllowMethods(requestedMethod)
 		} else {
-			responseHeaders.AllowMethods(strings.Join(m.allowedMethods, ","))
+			responseHeaders.AllowMethods(m.allowedMethods...)
 		}
 	}
 
