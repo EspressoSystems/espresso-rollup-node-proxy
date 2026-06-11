@@ -7,6 +7,7 @@ import (
 	"proxy/websocket"
 	"proxy/websocket/websockettest"
 	"proxy/websocket/websocketutil"
+	"sync"
 	"testing"
 	"time"
 
@@ -50,7 +51,9 @@ func TestGorillaServerReadTimeout(t *testing.T) {
 	)
 	ctx := t.Context()
 	require := require.New(t)
+	var wg sync.WaitGroup
 	handler := websockettest.WebSocketHandlerFunc(func(conn websocket.Conn, err error) {
+		defer wg.Done()
 		require.NoError(err)
 		ctx, cancel := context.WithTimeout(ctx, readTimeout)
 		defer cancel()
@@ -65,6 +68,7 @@ func TestGorillaServerReadTimeout(t *testing.T) {
 	server := websockettest.NewServer(websocket.GorillaUpgrader(), handler)
 	defer server.Close()
 
+	wg.Add(1)
 	conn, response, err := server.Connect(ctx, websocket.GorillaDialer())
 	require.NoError(err)
 	require.Equal(response.StatusCode, http.StatusSwitchingProtocols)
@@ -74,6 +78,8 @@ func TestGorillaServerReadTimeout(t *testing.T) {
 	time.Sleep(readTimeout)
 
 	_ = conn.Write(ctx, websocket.MessageTypeText, []byte("hello there"))
+
+	wg.Wait()
 }
 
 // ExampleGorillaCoder demonstrates how to use the AdaptCoder function to
