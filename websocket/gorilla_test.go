@@ -75,7 +75,7 @@ func TestGorillaServerReadTimeout(t *testing.T) {
 
 	// Don't write anything for the full duration of the timeout + 1ms.
 
-	time.Sleep(readTimeout)
+	time.Sleep(readTimeout + 50*time.Millisecond)
 
 	_ = conn.Write(ctx, websocket.MessageTypeText, []byte("hello there"))
 
