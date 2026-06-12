@@ -59,7 +59,7 @@ type OPEspressoBatchVerifier struct {
 	rollupConfig      *rollup.Config
 	logger            log.Logger
 	l1Client          *ethclient.Client
-	finalityPoller    sharedVerifier.FinalityPollerInterface[*eth.SyncStatus]
+	finalityPoller    sharedVerifier.FinalityPollerInterface[eth.SyncStatus]
 	cancel            context.CancelFunc
 	runWg             sync.WaitGroup
 	running           atomic.Bool
@@ -153,20 +153,20 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 // fetchFinalitySnapshot polls the OP node's sync status for the finality poller.
 // The full SyncStatus is cached so Refresh can reuse it without issuing its own
 // SyncStatus call.
-func (v *OPEspressoBatchVerifier) fetchFinalitySnapshot(ctx context.Context) (*eth.SyncStatus, error) {
+func (v *OPEspressoBatchVerifier) fetchFinalitySnapshot(ctx context.Context) (eth.SyncStatus, error) {
 	rollupClient, err := v.endpointProvider.RollupClient(ctx)
 	if err != nil {
-		return nil, err
+		return eth.SyncStatus{}, err
 	}
 	defer rollupClient.Close()
 	syncStatus, err := rollupClient.SyncStatus(ctx)
 	if err != nil {
-		return nil, err
+		return eth.SyncStatus{}, err
 	}
 	if syncStatus == nil {
-		return nil, fmt.Errorf("sync status is nil")
+		return eth.SyncStatus{}, fmt.Errorf("sync status is nil")
 	}
-	return syncStatus, nil
+	return *syncStatus, nil
 }
 
 func (v *OPEspressoBatchVerifier) Start(ctx context.Context) {
@@ -442,13 +442,10 @@ func (v *OPEspressoBatchVerifier) peekNextBatch(ctx context.Context) (*derivatio
 
 // lastSyncStatus returns the SyncStatus from the finality poller's most recent
 // snapshot.
-func (v *OPEspressoBatchVerifier) lastSyncStatus() (*eth.SyncStatus, error) {
+func (v *OPEspressoBatchVerifier) lastSyncStatus() (eth.SyncStatus, error) {
 	syncStatus, ok := v.finalityPoller.LastSnapshot()
 	if !ok {
-		return nil, fmt.Errorf("finality poller has no snapshot")
-	}
-	if syncStatus == nil {
-		return nil, fmt.Errorf("finality snapshot has no sync status")
+		return eth.SyncStatus{}, fmt.Errorf("finality poller has no snapshot")
 	}
 	return syncStatus, nil
 }
