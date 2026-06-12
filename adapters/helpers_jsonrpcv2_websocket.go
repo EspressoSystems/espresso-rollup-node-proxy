@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 
-	"proxy/jsonrpcv2"
-	"proxy/websocket"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/jsonrpcv2"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/websocket"
 
 	"github.com/ethereum/go-ethereum/log"
 )

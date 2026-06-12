@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
 
-	nitroVerifier "proxy/verifier/nitro"
+	nitroVerifier "github.com/EspressoSystems/espresso-rollup-node-proxy/verifier/nitro"
 )
 
 func TestDurationPflag(t *testing.T) {

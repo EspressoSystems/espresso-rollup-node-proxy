@@ -3,7 +3,7 @@ package espresso_e2e
 import (
 	"context"
 	"fmt"
-	espressostore "proxy/store"
+	espressostore "github.com/EspressoSystems/espresso-rollup-node-proxy/store"
 	"testing"
 	"time"
 

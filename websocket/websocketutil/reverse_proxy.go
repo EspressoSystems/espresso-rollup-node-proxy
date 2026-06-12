@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"net/url"
 
-	"proxy/websocket"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/websocket"
 
 	"github.com/ethereum/go-ethereum/log"
 )

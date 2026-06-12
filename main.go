@@ -13,16 +13,16 @@ import (
 	"syscall"
 	"time"
 
-	"proxy/adapters"
-	proxyhttp "proxy/http"
-	"proxy/proxy"
-	"proxy/store"
-	nitroVerifier "proxy/verifier/nitro"
-	opVerifier "proxy/verifier/op"
-	"proxy/websocket"
-	"proxy/websocket/websocketutil"
-
 	espressoLightClient "github.com/EspressoSystems/espresso-network/sdks/go/light-client"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/adapters"
+	proxyhttp "github.com/EspressoSystems/espresso-rollup-node-proxy/http"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/proxy"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/store"
+	nitroVerifier "github.com/EspressoSystems/espresso-rollup-node-proxy/verifier/nitro"
+	opVerifier "github.com/EspressoSystems/espresso-rollup-node-proxy/verifier/op"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/websocket"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/websocket/websocketutil"
+
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 )

@@ -7,7 +7,7 @@ import (
 	"io"
 	"net/http"
 
-	"proxy/jsonrpcv2"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/jsonrpcv2"
 )
 
 type httpJSONRPCInterceptor struct {

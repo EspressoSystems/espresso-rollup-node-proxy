@@ -8,9 +8,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	proxyhttp "proxy/http"
-	"proxy/log/logutil"
-	"proxy/websocket"
+	proxyhttp "github.com/EspressoSystems/espresso-rollup-node-proxy/http"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/log/logutil"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/websocket"
 
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/require"

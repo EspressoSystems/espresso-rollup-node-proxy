@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"proxy/jsonrpcv2"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/jsonrpcv2"
 
 	"github.com/stretchr/testify/assert"
 )

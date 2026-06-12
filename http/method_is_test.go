@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	proxyhttp "proxy/http"
+	proxyhttp "github.com/EspressoSystems/espresso-rollup-node-proxy/http"
 
 	"github.com/stretchr/testify/require"
 )

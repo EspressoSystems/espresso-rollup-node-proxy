@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 
-	"proxy/websocket"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/websocket"
 )
 
 // WebSocketHandler is an interface that represents a handler for WebSocket

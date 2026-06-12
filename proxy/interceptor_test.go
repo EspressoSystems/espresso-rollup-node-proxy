@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"proxy/adapters"
-	espressostore "proxy/store"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/adapters"
+	espressostore "github.com/EspressoSystems/espresso-rollup-node-proxy/store"
 
 	"github.com/stretchr/testify/require"
 )

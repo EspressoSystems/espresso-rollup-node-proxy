@@ -4,11 +4,12 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"proxy/websocket"
-	"proxy/websocket/websockettest"
 	"testing"
 
 	coderwebsocket "github.com/coder/websocket"
+
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/websocket"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/websocket/websockettest"
 )
 
 // TestCoderBasicSuite runs the basic suite of tests on the Adapters
