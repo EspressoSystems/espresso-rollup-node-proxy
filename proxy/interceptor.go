@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 
-	"proxy/jsonrpcv2"
-	espressoStore "proxy/store"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/jsonrpcv2"
+	espressoStore "github.com/EspressoSystems/espresso-rollup-node-proxy/store"
 
 	"github.com/ethereum/go-ethereum/log"
 )

@@ -19,7 +19,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rpc"
 
-	nitroabi "proxy/verifier/nitro/abi"
+	nitroabi "github.com/EspressoSystems/espresso-rollup-node-proxy/verifier/nitro/abi"
 )
 
 const (
@@ -228,7 +228,6 @@ func (f *DelayedMessageFetcher) Advance(toMessageIndex uint64) {
 			f.logger.Info("delayed message advanced", "message_index", toMessageIndex)
 		}
 	}
-
 }
 
 // ensureFinality checks that the parent block containing the delayed message is finalized. If not, it returns an error.

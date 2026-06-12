@@ -1,6 +1,6 @@
 package websocketutil
 
-import "proxy/websocket"
+import "github.com/EspressoSystems/espresso-rollup-node-proxy/websocket"
 
 // components is a utility struct that implements all of the main
 // websocket interfaces by embedding them.

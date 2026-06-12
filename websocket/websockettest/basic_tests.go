@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"proxy/websocket"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/websocket"
 
 	"github.com/stretchr/testify/require"
 )

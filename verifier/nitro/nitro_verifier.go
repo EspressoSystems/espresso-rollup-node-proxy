@@ -10,11 +10,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	sharedVerifier "proxy/verifier"
-	delayedmessagefetcher "proxy/verifier/nitro/delayed_message_fetcher"
-	feedclient "proxy/verifier/nitro/feed_client"
+	sharedVerifier "github.com/EspressoSystems/espresso-rollup-node-proxy/verifier"
+	delayedmessagefetcher "github.com/EspressoSystems/espresso-rollup-node-proxy/verifier/nitro/delayed_message_fetcher"
+	feedclient "github.com/EspressoSystems/espresso-rollup-node-proxy/verifier/nitro/feed_client"
 
-	espressoStore "proxy/store"
+	espressoStore "github.com/EspressoSystems/espresso-rollup-node-proxy/store"
 
 	espressoClient "github.com/EspressoSystems/espresso-network/sdks/go/client"
 	nitroStreamer "github.com/EspressoSystems/espresso-streamers/nitro"

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"proxy/websocket"
-	"proxy/websocket/websockettest"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/websocket"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/websocket/websockettest"
 )
 
 // ReverseProxyTestServer is a utility type that represents a test server

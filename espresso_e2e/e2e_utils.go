@@ -23,14 +23,15 @@ import (
 	"testing"
 	"time"
 
-	"proxy/adapters"
-	proxyhttp "proxy/http"
-	"proxy/jsonrpcv2"
-	"proxy/log/logutil"
-	"proxy/proxy"
-	verifier "proxy/verifier/op"
-	espressostore "proxy/store"
-	nitroVerifier "proxy/verifier/nitro"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/adapters"
+	proxyhttp "github.com/EspressoSystems/espresso-rollup-node-proxy/http"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/jsonrpcv2"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/log/logutil"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/proxy"
+	verifier "github.com/EspressoSystems/espresso-rollup-node-proxy/verifier/op"
+
+	espressostore "github.com/EspressoSystems/espresso-rollup-node-proxy/store"
+	nitroVerifier "github.com/EspressoSystems/espresso-rollup-node-proxy/verifier/nitro"
 
 	espressoClient "github.com/EspressoSystems/espresso-network/sdks/go/client"
 	opStreamer "github.com/EspressoSystems/espresso-streamers/op"

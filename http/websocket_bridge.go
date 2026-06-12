@@ -3,8 +3,8 @@ package http
 import (
 	"net/http"
 
-	"proxy/websocket"
-	"proxy/websocket/websocketutil"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/websocket"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/websocket/websocketutil"
 
 	"github.com/ethereum/go-ethereum/log"
 )

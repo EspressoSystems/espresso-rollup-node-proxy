@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"proxy/jsonrpcv2"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/jsonrpcv2"
 
 	"github.com/ethereum/go-ethereum/log"
 )

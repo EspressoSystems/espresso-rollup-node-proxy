@@ -9,12 +9,13 @@ import (
 	"os"
 	"time"
 
-	"proxy/proxy"
-	nitroVerifier "proxy/verifier/nitro"
-	opVerifier "proxy/verifier/op"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/proxy"
+	nitroVerifier "github.com/EspressoSystems/espresso-rollup-node-proxy/verifier/nitro"
+	opVerifier "github.com/EspressoSystems/espresso-rollup-node-proxy/verifier/op"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
+
 	"github.com/spf13/pflag"
 )
 

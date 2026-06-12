@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	feedclient "proxy/verifier/nitro/feed_client"
+	feedclient "github.com/EspressoSystems/espresso-rollup-node-proxy/verifier/nitro/feed_client"
 
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"

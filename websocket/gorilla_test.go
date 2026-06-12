@@ -4,14 +4,15 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"proxy/websocket"
-	"proxy/websocket/websockettest"
-	"proxy/websocket/websocketutil"
 	"sync"
 	"testing"
 	"time"
 
 	gorillawebsocket "github.com/gorilla/websocket"
+
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/websocket"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/websocket/websockettest"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/websocket/websocketutil"
 
 	"github.com/stretchr/testify/require"
 )

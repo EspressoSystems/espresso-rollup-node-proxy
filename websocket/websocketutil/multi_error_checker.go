@@ -1,6 +1,6 @@
 package websocketutil
 
-import "proxy/websocket"
+import "github.com/EspressoSystems/espresso-rollup-node-proxy/websocket"
 
 // MultiErrorChecker is a utility type that implements [websocket.ErrorChecker]
 // by delegating to each [websocket.ErrorChecker] in the slice.

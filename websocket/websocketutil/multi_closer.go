@@ -3,7 +3,7 @@ package websocketutil
 import (
 	"errors"
 
-	"proxy/websocket"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/websocket"
 )
 
 // MultiCloser is a utility type that implements [websocket.Closer] by

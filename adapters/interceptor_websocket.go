@@ -5,8 +5,8 @@ import (
 	"errors"
 	"net/http"
 
-	"proxy/jsonrpcv2"
-	"proxy/websocket"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/jsonrpcv2"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/websocket"
 )
 
 // webSocketJSONRPCDownstreamIntercept is a [websocket.Conn] that intercepts
