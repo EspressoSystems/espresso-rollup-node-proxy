@@ -300,12 +300,10 @@ func (f *DelayedMessageFetcher) rewind(msg *delayedMessage) {
 // For each MessageDelivered event, it then queries the respective Inbox contract for the message data
 func (f *DelayedMessageFetcher) fetchDelayedMessageFromParentChain(
 	ctx context.Context,
+	startBlock uint64,
 	endBlock uint64,
 	finalized uint64,
 ) error {
-	f.mu.RLock()
-	startBlock := f.parentBlockNumber
-	f.mu.RUnlock()
 	delivered, err := fetchBridgeEvents(ctx, f.bridgeFilterer, startBlock, endBlock, f.logger)
 	if err != nil {
 		return err
@@ -553,16 +551,17 @@ func (f *DelayedMessageFetcher) poll(ctx context.Context) {
 	finalized := finalizedHeader.Number.Uint64()
 	endBlock := latestHeader.Number.Uint64()
 	f.mu.RLock()
-	parentBlock := f.parentBlockNumber
+	startBlock := f.parentBlockNumber
 	f.mu.RUnlock()
 
-	if parentBlock > endBlock {
+	if startBlock > endBlock {
+		f.logger.Warn("start block is ahead of endblock", "start_block", startBlock, "end_block", endBlock)
 		return
 	}
-	if endBlock-parentBlock >= maxBlocksPerScan {
-		endBlock = parentBlock + maxBlocksPerScan
+	if endBlock-startBlock >= maxBlocksPerScan {
+		endBlock = startBlock + maxBlocksPerScan
 	}
-	if err := f.fetchDelayedMessageFromParentChain(timeoutCtx, endBlock, finalized); err != nil {
+	if err := f.fetchDelayedMessageFromParentChain(timeoutCtx, startBlock, endBlock, finalized); err != nil {
 		f.logger.Warn("failed to fetch delayed messages", "error", err)
 	}
 }
