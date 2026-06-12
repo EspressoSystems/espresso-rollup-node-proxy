@@ -1,4 +1,4 @@
-module proxy
+module github.com/EspressoSystems/espresso-rollup-node-proxy
 
 go 1.25.1
 

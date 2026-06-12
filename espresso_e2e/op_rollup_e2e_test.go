@@ -3,10 +3,11 @@ package espresso_e2e
 import (
 	"context"
 	"fmt"
-	"proxy/log/logutil"
-	espressostore "proxy/store"
 	"testing"
 	"time"
+
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/log/logutil"
+	espressostore "github.com/EspressoSystems/espresso-rollup-node-proxy/store"
 
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/require"

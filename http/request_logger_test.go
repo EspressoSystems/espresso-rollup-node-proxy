@@ -6,8 +6,8 @@ import (
 	"net/url"
 	"testing"
 
-	proxyhttp "proxy/http"
-	"proxy/log/logutil"
+	proxyhttp "github.com/EspressoSystems/espresso-rollup-node-proxy/http"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/log/logutil"
 
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/require"

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"proxy/jsonrpcv2"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/jsonrpcv2"
 )
 
 // isJSONSpace is a helper function that checks if the given rune is a valid

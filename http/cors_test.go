@@ -3,8 +3,9 @@ package http_test
 import (
 	"net/http"
 	"net/http/httptest"
-	proxyhttp "proxy/http"
 	"testing"
+
+	proxyhttp "github.com/EspressoSystems/espresso-rollup-node-proxy/http"
 
 	"github.com/stretchr/testify/require"
 )

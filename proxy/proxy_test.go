@@ -11,10 +11,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"proxy/adapters"
-	proxyhttp "proxy/http"
-	"proxy/jsonrpcv2"
-	espressoStore "proxy/store"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/adapters"
+	proxyhttp "github.com/EspressoSystems/espresso-rollup-node-proxy/http"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/jsonrpcv2"
+	espressoStore "github.com/EspressoSystems/espresso-rollup-node-proxy/store"
 
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/require"

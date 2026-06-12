@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"proxy/websocket"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/websocket"
 )
 
 // ReadErrorChecker is an interface that combines the [websocket.Reader] and

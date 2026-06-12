@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"proxy/websocket"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/websocket"
 )
 
 // ReadCloser is a utility interface that combines [websocket.Reader],

@@ -6,11 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	espressoStore "proxy/store"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	espressoStore "github.com/EspressoSystems/espresso-rollup-node-proxy/store"
 
 	opStreamer "github.com/EspressoSystems/espresso-streamers/op"
 	"github.com/EspressoSystems/espresso-streamers/op/derivation"
@@ -23,7 +24,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 
-	sharedVerifier "proxy/verifier"
+	sharedVerifier "github.com/EspressoSystems/espresso-rollup-node-proxy/verifier"
 
 	espressoClient "github.com/EspressoSystems/espresso-network/sdks/go/client"
 )
@@ -139,7 +140,6 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 		opVerifierConfig.BatchAuthenticatorAddress,
 		opVerifierConfig.TrackBatchLatency,
 	)
-
 	if err != nil {
 		logger.Crit("failed to create OP streamer", "error", err)
 		return nil

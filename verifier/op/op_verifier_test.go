@@ -12,16 +12,16 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"path/filepath"
-	sharedVerifier "proxy/verifier"
 	"testing"
 	"time"
 
-	"proxy/adapters"
-	proxyhttp "proxy/http"
-	"proxy/jsonrpcv2"
-	proxypkg "proxy/proxy"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/adapters"
+	proxyhttp "github.com/EspressoSystems/espresso-rollup-node-proxy/http"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/jsonrpcv2"
+	proxypkg "github.com/EspressoSystems/espresso-rollup-node-proxy/proxy"
+	sharedVerifier "github.com/EspressoSystems/espresso-rollup-node-proxy/verifier"
 
-	espressoStore "proxy/store"
+	espressoStore "github.com/EspressoSystems/espresso-rollup-node-proxy/store"
 
 	opStreamer "github.com/EspressoSystems/espresso-streamers/op"
 	"github.com/EspressoSystems/espresso-streamers/op/derivation"

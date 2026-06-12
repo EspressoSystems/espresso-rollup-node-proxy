@@ -3,8 +3,9 @@ package websocket_test
 import (
 	"context"
 	"fmt"
-	"proxy/websocket"
-	"proxy/websocket/websockettest"
+
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/websocket"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/websocket/websockettest"
 )
 
 // Example_echoServer demonstrates how to use the websocket package to
