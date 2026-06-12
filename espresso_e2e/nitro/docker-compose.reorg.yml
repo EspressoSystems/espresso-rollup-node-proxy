@@ -91,7 +91,7 @@ services:
       - /data/lighthouse-validator
       - --suggested-fee-recipient
       - ${OPERATOR_ADDRESS}
-      
+
   espresso-dev-node:
     image: ${ESPRESSO_DEV_NODE_IMAGE}
     depends_on:
@@ -116,6 +116,7 @@ services:
 
   rollup-creator:
     image: ${ROLLUP_CREATOR_IMAGE}
+    platform: linux/amd64
     volumes:
       - "config:/config"
       - "./nitro-config:/nitro-config"
@@ -141,6 +142,7 @@ services:
 
   sequencer:
     image: ${NITRO_IMAGE}
+    platform: linux/amd64
     entrypoint: /usr/local/bin/nitro
     ports:
       - "8547:8547"
@@ -182,6 +184,7 @@ services:
 
   batch-poster:
     image: ${NITRO_IMAGE}
+    platform: linux/amd64
     entrypoint: /usr/local/bin/nitro
     volumes:
       - "nitro-batch-poster:/home/user/.arbitrum/local/nitro"
@@ -200,6 +203,7 @@ services:
 
   full-node:
     image: ${NITRO_IMAGE}
+    platform: linux/amd64
     entrypoint: /usr/local/bin/nitro
     ports:
       - "8549:8547"
@@ -244,3 +248,4 @@ volumes:
   nitro-sequencer:
   nitro-batch-poster:
   nitro-full-node:
+
