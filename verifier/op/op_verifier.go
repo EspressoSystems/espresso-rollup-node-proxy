@@ -17,6 +17,7 @@ import (
 
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
 	"github.com/ethereum-optimism/optimism/op-service/dial"
+	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
@@ -105,9 +106,24 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 		return nil
 	}
 
-	espressoState := store.GetState()
-
 	l1Adapter := NewAdaptL1BlockRefClient(l1Client)
+
+	v := &OPEspressoBatchVerifier{
+		espressoStore:    store,
+		config:           opVerifierConfig,
+		endpointProvider: endpointProvider,
+		rollupConfig:     rollupConfig,
+		logger:           logger,
+		l1Client:         l1Client,
+	}
+
+	v.finalityPoller = sharedVerifier.NewFinalityPoller(
+		v.fetchFinalitySnapshot,
+		logger,
+		opVerifierConfig.FinalityPollInterval,
+	)
+
+	espressoState := v.espressoStore.GetState()
 
 	// Create the OP streamer
 	streamer, err := opStreamer.NewEspressoStreamer(
@@ -129,28 +145,28 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 		return nil
 	}
 
-	bufferedStreamer := opStreamer.NewBufferedEspressoStreamer(streamer)
+	v.streamer = opStreamer.NewBufferedEspressoStreamer(streamer)
 
-	l2Client, err := ethclient.DialContext(ctx, opVerifierConfig.FullNodeExecutionRPC)
+	return v
+}
+
+// fetchFinalitySnapshot polls the OP node's sync status and wraps it as a
+// LatestSnapshot for the finality poller. The full SyncStatus is retained on the
+// snapshot so Refresh can reuse it without issuing its own SyncStatus call.
+func (v *OPEspressoBatchVerifier) fetchFinalitySnapshot(ctx context.Context) (sharedVerifier.LatestSnapshot, error) {
+	rollupClient, err := v.endpointProvider.RollupClient(ctx)
 	if err != nil {
-		logger.Crit("failed to dial L2 full node for finality poller", "error", err)
-		return nil
+		return nil, err
 	}
-
-	return &OPEspressoBatchVerifier{
-		streamer:         bufferedStreamer,
-		espressoStore:    store,
-		config:           opVerifierConfig,
-		endpointProvider: endpointProvider,
-		rollupConfig:     rollupConfig,
-		logger:           logger,
-		l1Client:         l1Client,
-		finalityPoller: sharedVerifier.NewFinalityPoller(
-			l2Client,
-			logger,
-			opVerifierConfig.FinalityPollInterval,
-		),
+	defer rollupClient.Close()
+	syncStatus, err := rollupClient.SyncStatus(ctx)
+	if err != nil {
+		return nil, err
 	}
+	if syncStatus == nil {
+		return nil, fmt.Errorf("sync status is nil")
+	}
+	return OpFinalitySnapshot{syncStatus: syncStatus}, nil
 }
 
 func (v *OPEspressoBatchVerifier) Start(ctx context.Context) {
@@ -241,10 +257,10 @@ func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
-	ethFinalizedBlockNumber := v.finalityPoller.LastFinalized()
-	if verifiedBatch == nil || verifiedBatch.Number() < ethFinalizedBlockNumber {
-		if err := v.syncEspressoStateWithEthereumFinality(ethFinalizedBlockNumber); err != nil {
-			v.logger.Error("failed to update espresso state to ethereum finalized block", "error", err, "eth_finalized_block", ethFinalizedBlockNumber)
+
+	if verifiedBatch == nil {
+		if err := v.syncEspressoStateWithEthereumFinality(); err != nil {
+			v.logger.Error("failed to update espresso state to ethereum finalized block", "error", err)
 		}
 		return
 	}
@@ -265,26 +281,32 @@ func (v *OPEspressoBatchVerifier) verifyAndAdvance(ctx context.Context) {
 	v.logger.Info("Successfully verified and advanced OP batches", "last_batch_number", verifiedBatch.Number(), "hotshot_height", hotshotFallbackPos)
 }
 
-func (v *OPEspressoBatchVerifier) syncEspressoStateWithEthereumFinality(ethFinalizedBlockNumber uint64) error {
-	espressoState := v.espressoStore.GetState()
-	blockNumberToStore := v.blockNumberToStore(espressoState.L2BlockNumber, ethFinalizedBlockNumber)
-	_, err := v.espressoStore.UpdateIfGreater(blockNumberToStore, v.streamer.GetFallbackHotshotPos())
-	return err
-}
-
-func (v *OPEspressoBatchVerifier) blockNumberToStore(espressoFinalizedBlockNumber uint64, ethFinalizedBlockNumber uint64) uint64 {
-	blockNumberToStore := espressoFinalizedBlockNumber
-	if ethFinalizedBlockNumber > espressoFinalizedBlockNumber {
-		v.logger.Error("ethereum finalized block is ahead of espresso finalized block",
-			"eth_finalized_block", ethFinalizedBlockNumber,
-			"espresso_finalized_block", espressoFinalizedBlockNumber)
-		blockNumberToStore = ethFinalizedBlockNumber
-		// TODO: Set to proper parent hash this can be done in later pr.
-		// currently we dont have the hash
-		v.tip = common.Hash{}
+func (v *OPEspressoBatchVerifier) syncEspressoStateWithEthereumFinality() error {
+	syncStatus, err := v.lastSyncStatus()
+	if err != nil {
+		return err
 	}
 
-	return blockNumberToStore
+	state := v.espressoStore.GetState()
+	ethFinalizedBlockNumber := syncStatus.FinalizedL2.Number
+	if ethFinalizedBlockNumber <= state.L2BlockNumber {
+		return nil
+	}
+
+	v.logger.Error("ethereum finalized block is ahead of espresso finalized block",
+		"eth_finalized_block", ethFinalizedBlockNumber,
+		"espresso_finalized_block", state.L2BlockNumber)
+
+	updated, err := v.espressoStore.UpdateIfGreater(ethFinalizedBlockNumber, v.streamer.GetFallbackHotshotPos())
+	if err != nil {
+		return err
+	}
+	if updated {
+		// The store now sits at the eth-finalized block, so the next batch must
+		// chain onto it
+		v.tip = syncStatus.FinalizedL2.Hash
+	}
+	return nil
 }
 
 // VerifyNextBatch peeks the next batch from the OP streamer, fetches the corresponding block from the OP node,
@@ -371,17 +393,10 @@ func ensureBatchesMatch(a, b *derivation.EspressoBatch) error {
 // It doesnt call Next because Proxy only calls Next if the full node block matches
 // what Espresso has finalized, otherwise it remains stuck on the same batch until the OP node catches up.
 func (v *OPEspressoBatchVerifier) peekNextBatch(ctx context.Context) (*derivation.EspressoBatch, error) {
-	// Get the latest L2 block ref from the OP node
-	rollupClient, err := v.endpointProvider.RollupClient(ctx)
+	// Reuse the latest sync status cached by the finality poller
+	syncStatus, err := v.lastSyncStatus()
 	if err != nil {
-		v.logger.Error("failed to create consensus client", "error", err)
-		return nil, err
-	}
-	defer rollupClient.Close()
-	syncStatus, err := rollupClient.SyncStatus(ctx)
-	if err != nil {
-		v.logger.Error("failed to get L2 head block", "error", err)
-		return nil, err
+		return nil, fmt.Errorf("failed to get sync status from OP node: %w", err)
 	}
 
 	err = v.streamer.Refresh(ctx, syncStatus.FinalizedL1, syncStatus.SafeL2.Number, syncStatus.SafeL2.L1Origin)
@@ -423,6 +438,23 @@ func (v *OPEspressoBatchVerifier) peekNextBatch(ctx context.Context) (*derivatio
 	}
 
 	return espressoBatch, nil
+}
+
+// lastSyncStatus returns the SyncStatus from the finality poller's most recent
+// snapshot.
+func (v *OPEspressoBatchVerifier) lastSyncStatus() (*eth.SyncStatus, error) {
+	snapshot := v.finalityPoller.LastSnapshot()
+	if snapshot == nil {
+		return nil, fmt.Errorf("finality poller has no snap shot")
+	}
+	opSnapshot, ok := snapshot.(OpFinalitySnapshot)
+	if !ok {
+		return nil, fmt.Errorf("unexpected finality snapshot type %T", snapshot)
+	}
+	if opSnapshot.syncStatus == nil {
+		return nil, fmt.Errorf("finality snapshot has no sync status")
+	}
+	return opSnapshot.syncStatus, nil
 }
 
 func (v *OPEspressoBatchVerifier) Stop() {

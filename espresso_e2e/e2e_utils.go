@@ -136,7 +136,6 @@ func startNitroVerifierWithLogger(ctx context.Context, t *testing.T, logger log.
 			VerificationInterval: 250 * time.Millisecond,
 			QueryServiceURL:      nitroEspressoURL,
 			Namespace:            nitroNamespace,
-			InitialHotshotBlock:  0,
 			BridgeAddress:        common.HexToAddress(nitroBridgeAddress),
 			ValidBatcherAddresses: []nitroVerifier.BatcherAddressConfig{
 				{Address: nitroBatchPoster, From: 0, To: math.MaxUint64},

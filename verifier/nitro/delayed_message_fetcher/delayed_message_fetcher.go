@@ -168,13 +168,14 @@ func MustNewDelayedMessageFetcher(
 func (f *DelayedMessageFetcher) GetDelayedMessage(ctx context.Context, messageIndex uint64) ([]byte, error) {
 	f.mu.RLock()
 	delayedMsg := f.delayedMessages[messageIndex]
+	parentBlock := f.parentBlockNumber
 	f.mu.RUnlock()
 
 	if delayedMsg == nil {
 		return nil, fmt.Errorf(
 			"messageIndex=%d parentBlock=%d: %w",
 			messageIndex,
-			f.parentBlockNumber,
+			parentBlock,
 			ErrDelayedMessageNotFound,
 		)
 	}
@@ -291,43 +292,59 @@ func (f *DelayedMessageFetcher) rewind(msg *delayedMessage) {
 	)
 	f.mu.Lock()
 	f.delayedMessages = make(map[uint64]*delayedMessage)
-	f.mu.Unlock()
 	f.parentBlockNumber = msg.finalizedBlock
+	f.mu.Unlock()
 }
 
 // fetchDelayedMessageFromParentChain queries the parent chain for Bridge MessageDelivered events
 // For each MessageDelivered event, it then queries the respective Inbox contract for the message data
 func (f *DelayedMessageFetcher) fetchDelayedMessageFromParentChain(
 	ctx context.Context,
+	startBlock uint64,
 	endBlock uint64,
 	finalized uint64,
 ) error {
-	delivered, err := f.fetchBridgeEvents(ctx, endBlock)
+	delivered, err := fetchBridgeEvents(ctx, f.bridgeFilterer, startBlock, endBlock, f.logger)
 	if err != nil {
 		return err
 	}
 	if len(delivered) == 0 {
 		f.logger.Debug(
 			"no bridge message delivered events found, advancing parent block number",
-			"old_parent_block_number", f.parentBlockNumber,
+			"old_parent_block_number", startBlock,
 			"new_parent_block_number", endBlock+1,
 		)
-		f.parentBlockNumber = endBlock + 1
+		f.updateParentBlockNumber(startBlock, endBlock+1)
 		return nil
 	}
 
-	if err = f.fetchInboxData(ctx, delivered, endBlock, finalized); err != nil {
+	if err = f.fetchInboxData(ctx, delivered, startBlock, endBlock, finalized); err != nil {
 		return err
 	}
-	f.parentBlockNumber = endBlock + 1
+	f.updateParentBlockNumber(startBlock, endBlock+1)
 
 	return nil
 }
 
+func (f *DelayedMessageFetcher) updateParentBlockNumber(previous uint64, target uint64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.parentBlockNumber != previous {
+		return
+	}
+	f.parentBlockNumber = target
+}
+
 // fetchBridgeEvents queries the parent chain for Bridge MessageDelivered events for a given range
-func (f *DelayedMessageFetcher) fetchBridgeEvents(ctx context.Context, endBlock uint64) ([]*nitroabi.BridgeMessageDelivered, error) {
-	messageDeliveredIter, err := f.bridgeFilterer.FilterMessageDelivered(
-		&bind.FilterOpts{Context: ctx, Start: f.parentBlockNumber, End: &endBlock},
+func fetchBridgeEvents(
+	ctx context.Context,
+	bridgeFilterer *nitroabi.BridgeFilterer,
+	startBlock uint64,
+	endBlock uint64,
+	logger log.Logger,
+) ([]*nitroabi.BridgeMessageDelivered, error) {
+	messageDeliveredIter, err := bridgeFilterer.FilterMessageDelivered(
+		&bind.FilterOpts{Context: ctx, Start: startBlock, End: &endBlock},
 		nil,
 		nil,
 	)
@@ -337,7 +354,7 @@ func (f *DelayedMessageFetcher) fetchBridgeEvents(ctx context.Context, endBlock 
 	defer func() {
 		if err := messageDeliveredIter.Close(); err != nil {
 			// This should be unreachable as `Close()` doesnt actually return an error, but we log just in case
-			f.logger.Warn("failed to close message delivered iterator", "error", err)
+			logger.Warn("failed to close message delivered iterator", "error", err)
 		}
 	}()
 
@@ -356,6 +373,7 @@ func (f *DelayedMessageFetcher) fetchBridgeEvents(ctx context.Context, endBlock 
 func (f *DelayedMessageFetcher) fetchInboxData(
 	ctx context.Context,
 	deliveredEvents []*nitroabi.BridgeMessageDelivered,
+	startBlock uint64,
 	endBlock uint64,
 	finalized uint64,
 ) error {
@@ -375,7 +393,7 @@ func (f *DelayedMessageFetcher) fetchInboxData(
 	}
 
 	logs, err := f.parentChainClient.FilterLogs(ctx, ethereum.FilterQuery{
-		FromBlock: new(big.Int).SetUint64(f.parentBlockNumber),
+		FromBlock: new(big.Int).SetUint64(startBlock),
 		ToBlock:   new(big.Int).SetUint64(endBlock),
 		Addresses: addresses,
 		Topics:    [][]common.Hash{{f.inboxMessageDeliveredTopic, f.inboxFromOriginTopic}, messageIds},
@@ -386,10 +404,9 @@ func (f *DelayedMessageFetcher) fetchInboxData(
 	if len(logs) == 0 {
 		f.logger.Info(
 			"no Inbox events found for message, advancing parent block number",
-			"old_parent_block_number", f.parentBlockNumber,
+			"old_parent_block_number", startBlock,
 			"new_parent_block_number", endBlock+1,
 		)
-		f.parentBlockNumber = endBlock + 1
 		return nil
 	}
 
@@ -516,6 +533,39 @@ func (f *DelayedMessageFetcher) extractFromInboxFromOrigin(ctx context.Context, 
 	return l2Msg.MessageData, nil
 }
 
+func (f *DelayedMessageFetcher) poll(ctx context.Context) {
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeoutPerCall)
+	defer cancel()
+
+	latestHeader, err := f.parentChainClient.HeaderByNumber(timeoutCtx, nil)
+	if err != nil {
+		f.logger.Warn("failed to fetch parent chain latest header", "error", err)
+		return
+	}
+	finalizedHeader, err := f.parentChainClient.HeaderByNumber(timeoutCtx, big.NewInt(rpc.FinalizedBlockNumber.Int64()))
+	if err != nil {
+		f.logger.Warn("failed to fetch parent chain finalized header", "error", err)
+		return
+	}
+
+	finalized := finalizedHeader.Number.Uint64()
+	endBlock := latestHeader.Number.Uint64()
+	f.mu.RLock()
+	startBlock := f.parentBlockNumber
+	f.mu.RUnlock()
+
+	if startBlock > endBlock {
+		f.logger.Warn("start block is ahead of endblock", "start_block", startBlock, "end_block", endBlock)
+		return
+	}
+	if endBlock-startBlock >= maxBlocksPerScan {
+		endBlock = startBlock + maxBlocksPerScan
+	}
+	if err := f.fetchDelayedMessageFromParentChain(timeoutCtx, startBlock, endBlock, finalized); err != nil {
+		f.logger.Warn("failed to fetch delayed messages", "error", err)
+	}
+}
+
 func (f *DelayedMessageFetcher) run(ctx context.Context) {
 	defer f.runWg.Done()
 	ticker := time.NewTicker(pollInterval)
@@ -526,32 +576,7 @@ func (f *DelayedMessageFetcher) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			timeoutCtx, cancel := context.WithTimeout(ctx, timeoutPerCall)
-			defer cancel()
-			latestHeader, err := f.parentChainClient.HeaderByNumber(timeoutCtx, nil)
-			if err != nil {
-				f.logger.Warn("failed to fetch parent chain latest header", "error", err)
-				continue
-			}
-			finalizedHeader, err := f.parentChainClient.HeaderByNumber(timeoutCtx, big.NewInt(rpc.FinalizedBlockNumber.Int64()))
-			if err != nil {
-				f.logger.Warn("failed to fetch parent chain finalized header", "error", err)
-				continue
-			}
-
-			finalized := finalizedHeader.Number.Uint64()
-			endBlock := latestHeader.Number.Uint64()
-			parentBlock := f.parentBlockNumber
-
-			if parentBlock > endBlock {
-				continue
-			}
-			if endBlock-parentBlock >= maxBlocksPerScan {
-				endBlock = parentBlock + maxBlocksPerScan
-			}
-			if err := f.fetchDelayedMessageFromParentChain(timeoutCtx, endBlock, finalized); err != nil {
-				f.logger.Warn("failed to fetch delayed messages", "error", err)
-			}
+			f.poll(ctx)
 		}
 	}
 }
