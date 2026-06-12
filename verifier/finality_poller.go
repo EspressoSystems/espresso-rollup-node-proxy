@@ -35,6 +35,10 @@ type FinalityPoller[T any] struct {
 	wg               sync.WaitGroup
 }
 
+// Compile-time assertion that *FinalityPoller[T] implements
+// FinalityPollerInterface[T].
+var _ FinalityPollerInterface[any] = (*FinalityPoller[any])(nil)
+
 func NewFinalityPoller[T any](
 	finalityPollFunc func(ctx context.Context) (T, error),
 	logger log.Logger,
