@@ -2,7 +2,9 @@ package websocket
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 )
 
 // OpCode represents WebSocket OpCodes as defined in RFC 6455 Section 5.2, and
@@ -192,6 +194,17 @@ type ErrorChecker interface {
 	IsCloseError(err error) (CloseError, bool)
 }
 
+// SubProtoRetriever is an interface that allows for various implementations of
+// the WebSocket abstraction to retrieve the negotiated subprotocol for the
+// WebSocket connection.  This is useful for implementations that need to know
+// the negotiated subprotocol in order to properly handle the messages being
+// sent to the server.
+type SubProtoRetriever interface {
+	// SubProtocol returns the negotiated subprotocol for the WebSocket
+	// connection.
+	SubProtocol() string
+}
+
 // Conn represents the interactive interface that we wish to interact with
 // for WebSocket connections.  It is designed to be a simple interface that
 // can be easily implemented by various implementsations of WebSocket
@@ -202,7 +215,141 @@ type Conn interface {
 	Writer
 	Reader
 	ErrorChecker
+	SubProtoRetriever
 }
 
-// Middleware is a function that takes a Connection and returns a Connection.
-type Middleware func(Conn) Conn
+// applyOptionsToConfig is a helper function that applies the given options
+// to a fresh configuration type, and returns the resulting configuration
+// type.
+func applyOptionsToConfig[Config any, Option ~func(*Config)](options ...Option) (config Config) {
+	applyOptionsToExistingConfig(&config, options)
+	return config
+}
+
+// applyOptionsToExistingConfig is a helper function that applies the given
+// options to the given pointer to a Config type.
+func applyOptionsToExistingConfig[Config any, Option ~func(*Config)](config *Config, options []Option) {
+	for _, opt := range options {
+		opt(config)
+	}
+}
+
+// UpgradeConfig represents the configuration options for upgrading an HTTP
+// request to a WebSocket connection.
+type UpgradeConfig struct {
+	Headers       http.Header
+	SubProtocols  []string
+	ReadSizeLimit uint64
+}
+
+// UpgradeOption represents a functional option for configuring the
+// [UpgradeConfig] when calling [Upgrader.Upgrade] on an [Upgrader].
+type UpgradeOption func(c *UpgradeConfig)
+
+// SetUpgradeHeaders sets the headers to be sent in the WebSocket handshake
+// response.
+func SetUpgradeHeaders(headers http.Header) UpgradeOption {
+	return func(c *UpgradeConfig) {
+		c.Headers = headers
+	}
+}
+
+// SetUpgradeSubProtocols sets the subprotocols to list as being supported
+// in the Upgrader for subprotocol negotiation when upgrading an HTTP request
+// to a WebSocket.
+func SetUpgradeSubProtocols(subProtocols []string) UpgradeOption {
+	return func(c *UpgradeConfig) {
+		c.SubProtocols = subProtocols
+	}
+}
+
+// SetUpgradeReadSizeLimit sets the maximum size of a message that can be
+// read in a single message.
+//
+// Exceeding this limit will result in the [Reader.Read] call failing with
+// an error, and the connection being terminated.
+func SetUpgradeReadSizeLimit(limit uint64) UpgradeOption {
+	return func(c *UpgradeConfig) {
+		c.ReadSizeLimit = limit
+	}
+}
+
+// ApplyMultipleUpgradeOptions is a helper function that takes in a slice of
+// multiple [UpgradeOption]s and returns an [UpgradeOption] that applies all
+// of them.
+func ApplyMultipleUpgradeOptions(options []UpgradeOption) UpgradeOption {
+	return func(c *UpgradeConfig) {
+		applyOptionsToExistingConfig(c, options)
+	}
+}
+
+// UpgradeConfigWithOptions applies the given options to a new [UpgradeConfig]
+// and returns the resulting [UpgradeConfig].
+func UpgradeConfigWithOptions(options ...UpgradeOption) (config UpgradeConfig) {
+	return applyOptionsToConfig(options...)
+}
+
+// Upgrader is an interface that defines the method to upgrade an HTTP
+// connection to a WebSocket connection.
+type Upgrader interface {
+	// Upgrade upgrades the HTTP connection to a WebSocket connection. It returns
+	// a [Conn] upon success, or any error encountered if it is not.
+	Upgrade(w http.ResponseWriter, r *http.Request, options ...UpgradeOption) (Conn, error)
+}
+
+// DialerConfig represents the configuration options for dialing a WebSocket
+// connection.
+type DialerConfig struct {
+	Headers      http.Header
+	SubProtocols []string
+}
+
+// DialerOption represents a functional option for configuring the
+// [DialerConfig] when calling [Dialer.Dial] on a [Dialer].
+type DialerOption func(c *DialerConfig)
+
+// SetDialerHeaders sets the headers to be sent in the WebSocket handshake
+// request when dialing a WebSocket server.
+func SetDialerHeaders(headers http.Header) DialerOption {
+	return func(c *DialerConfig) {
+		c.Headers = headers
+	}
+}
+
+// SetDialerSubProtocols sets the subprotocols to be sent in the WebSocket
+// request for subprotocol negotiation when dialing a WebSocket server.
+func SetDialerSubProtocols(subProtocols []string) DialerOption {
+	return func(c *DialerConfig) {
+		c.SubProtocols = subProtocols
+	}
+}
+
+// ApplyMultipleDialerOptions is a helper function that takes in a
+// slice of [DialerOption]s and returns a [DialerOption] that will apply
+// all of the options.
+func ApplyMultipleDialerOptions(options []DialerOption) DialerOption {
+	return func(c *DialerConfig) {
+		applyOptionsToExistingConfig(c, options)
+	}
+}
+
+// DialerConfigWithOptions applies the given options to a new [DialerConfig]
+// and returns the resulting [DialerConfig].
+func DialerConfigWithOptions(options ...DialerOption) (config DialerConfig) {
+	return applyOptionsToConfig(options...)
+}
+
+// Dialer is an interface that allows for the connection to a WebSocket
+// server.
+type Dialer interface {
+	// Dial performs a connection to an HTTP 1.1 Server with a WebSocket upgrade
+	// request.
+	Dial(ctx context.Context, urlString string, options ...DialerOption) (Conn, *http.Response, error)
+}
+
+// ErrSpecifiedReadSizeLimitTooLarge is an error that is returned when the
+// user specifies a read size limit the exceeds the maximum supported
+// size for the specific implementation.
+//
+// NOTE: In the case of Gorilla, and Coder, this limit is max int64.
+var ErrSpecifiedReadSizeLimitTooLarge = errors.New("specified read size limit exceeds maximum supported the implementation")

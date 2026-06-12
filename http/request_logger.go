@@ -12,6 +12,9 @@ type statusResponseWriter struct {
 	statusCode int
 }
 
+// WriteHeader implements [http.ResponseWriter].
+//
+// This method stores the code parameter passed to it for future inspection.
 func (w *statusResponseWriter) WriteHeader(code int) {
 	w.statusCode = code
 	w.ResponseWriter.WriteHeader(code)

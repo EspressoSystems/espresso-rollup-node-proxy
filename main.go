@@ -19,6 +19,8 @@ import (
 	"proxy/store"
 	nitroVerifier "proxy/verifier/nitro"
 	opVerifier "proxy/verifier/op"
+	"proxy/websocket"
+	"proxy/websocket/websocketutil"
 
 	espressoLightClient "github.com/EspressoSystems/espresso-network/sdks/go/light-client"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -129,6 +131,14 @@ func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "OK", http.StatusOK)
 }
 
+func NewSingleHostWSReverseProxy(target *url.URL, upgrader websocket.Upgrader) *websocketutil.ReverseProxy {
+	return websocketutil.NewReverseProxy(
+		target,
+		websocket.CoderDialer(),
+		upgrader,
+	)
+}
+
 // NewSingleHostReverseProxy creates a ReverseProxy that forwards requests to
 // the specified target URL.
 //
@@ -195,12 +205,15 @@ func createWsServer(logger log.Logger, cfg *Config, interceptor adapters.Interce
 		return nil
 	}
 
+	upgrader := websocket.CoderUpgrader(websocket.SetUpgradeReadSizeLimit(uint64(cfg.MaxRequestBodySize)))
+	interceptorUpgrader := adapters.WebSocketUpgraderInterceptor(upgrader, interceptor)
+	reverseProxy := NewSingleHostWSReverseProxy(upstreamURL, interceptorUpgrader)
+
 	return &http.Server{
 		Addr: cfg.WsListenAddr,
-		Handler: proxyhttp.WebSocketJSONRPCHTTPBridge(
+		Handler: proxyhttp.WebSocketUpgrader(
 			logger,
-			upstreamURL,
-			adapters.NewWebsocketJSONRPCDownstreamInterceptMiddleware(interceptor),
+			reverseProxy,
 		),
 		ReadTimeout:       15 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,

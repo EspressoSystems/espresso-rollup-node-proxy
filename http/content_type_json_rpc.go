@@ -1,12 +1,8 @@
 package http
 
 import (
-	"fmt"
 	"mime"
 	"net/http"
-
-	"proxy/adapters"
-	"proxy/jsonrpcv2"
 
 	"github.com/ethereum/go-ethereum/log"
 )
@@ -34,23 +30,13 @@ type httpEnsureContentTypeIsJSONRPCMiddleware struct {
 func (m *httpEnsureContentTypeIsJSONRPCMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil {
-		adapters.WriteJSONRPCErrorToHTTPResponseWriter(
-			w,
-			nil,
-			jsonrpcv2.CodeInvalidRequest,
-			"unable to determine content type of request body",
-		)
+		http.Error(w, "unable to determine Content-Type", http.StatusUnsupportedMediaType)
 		return
 	}
 
 	switch mediaType {
 	default:
-		adapters.WriteJSONRPCErrorToHTTPResponseWriter(
-			w,
-			nil,
-			jsonrpcv2.CodeInvalidRequest,
-			fmt.Sprintf("expecting content type of application/json, received %s instead", mediaType),
-		)
+		http.Error(w, "invalid media type requested", http.StatusUnsupportedMediaType)
 		return
 
 	case "application/json", "application/json-rpc", "application/jsonrequest":
