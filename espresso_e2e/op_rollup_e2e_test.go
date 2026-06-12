@@ -3,6 +3,7 @@ package espresso_e2e
 import (
 	"context"
 	"fmt"
+	"proxy/log/logutil"
 	espressostore "proxy/store"
 	"testing"
 	"time"
@@ -179,7 +180,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		_, err = initialStore.UpdateIfGreater(finalizedL2Block, initialHotshotHeight)
 		require.NoError(t, err)
 
-		firstCapturer := &logCapturer{}
+		firstCapturer := logutil.NewCaptureLogger(nil)
 
 		proxyURL, shutdownProxy := startTestProxy(ctx, t, opGethFullNode, initialStore, espressoTag)
 
@@ -229,7 +230,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		directResult = jsonRPCCall(t, opGethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{fmt.Sprintf("0x%x", preRestartBlock), false}))
 		require.JSONEq(t, string(directResult), string(proxyResult), "espresso tag should resolve to preRestartBlock")
 
-		secondCapturer := &logCapturer{}
+		secondCapturer := logutil.NewCaptureLogger(nil)
 		verifier = startOpVerifier(ctx, t, log.NewLogger(secondCapturer), newStore)
 		defer verifier.Stop()
 		// Check that the verifier starts with the block number and hotshot height from before the restart
@@ -387,7 +388,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		proxyURL, shutdownProxy := startTestProxy(ctx, t, opGethFullNode, store, "finalized")
 		defer shutdownProxy()
 
-		capturer := &logCapturer{}
+		capturer := logutil.NewCaptureLogger(nil)
 		v := startOpVerifier(ctx, t, log.NewLogger(capturer), store)
 		defer v.Stop()
 
@@ -439,5 +440,4 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		require.NotNil(t, resp.Result, "proxy should return a result for finalized tag")
 		t.Log("Confirmed: proxy still works with finalized tag after espresso batcher stopped")
 	})
-
 }

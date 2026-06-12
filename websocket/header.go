@@ -51,7 +51,7 @@ func ShouldPruneForProxy(h string) bool {
 		return false
 
 	case HeaderUpgrade, HeaderHost, HeaderOrigin, HeaderSecWebSocketKey,
-		HeaderSecWebSocketVersion, HeaderSecWebSocketExtensions, HeaderConnection:
+		HeaderSecWebSocketVersion, HeaderSecWebSocketProtocol, HeaderSecWebSocketExtensions, HeaderConnection:
 		return true
 	}
 }

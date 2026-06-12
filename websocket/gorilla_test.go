@@ -4,277 +4,120 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
+	"proxy/websocket"
+	"proxy/websocket/websockettest"
+	"proxy/websocket/websocketutil"
 	"sync"
 	"testing"
 	"time"
 
-	proxywebsocket "proxy/websocket"
+	gorillawebsocket "github.com/gorilla/websocket"
 
-	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
 )
 
-type TestWebSocketServerConfig struct {
-	Upgrader websocket.Upgrader
-	Dialer   websocket.Dialer
+// TestGorillaBasicSuite runs the basic suite of tests on the
+// Gorilla WebSocket implementation. This is to ensure that the Gorilla
+// implementation is compliant with the basic WebSocket protocol.
+func TestGorillaBasicSuite(t *testing.T) {
+	suite := websockettest.NewBasicSuite(websocket.GorillaUpgrader(), websocket.GorillaDialer())
+	newServer := websockettest.TestServerCreator
+	t.Run("ServerClose", suite.CreateBasicServerCloseTest(newServer, websocket.StatusGoingAway, "goodbye"))
+	t.Run("ClientClose", suite.CreateBasicClientCloseTest(newServer, websocket.StatusNormalClosure, "goodbye"))
+	t.Run("ClientWrite", suite.CreateBasicWriteMessageTest(newServer, websocket.MessageTypeText, []byte("hello there")))
+	t.Run("ClientRead", suite.CreateBasicReadMessageTest(newServer, websocket.MessageTypeText, []byte("hello there")))
 }
 
-func NewGorillaWebsocketServer(handler func(conn proxywebsocket.Conn, err error)) (*url.URL, *httptest.Server) {
-	var config TestWebSocketServerConfig
+// TestGorillaReverseProxyBasicSuite runs the basic suite of tests on the
+// a reverse proxy setup using the Gorilla WebSocket implementation.
+// This is to ensure that the Gorilla reverse proxy implementation is
+// compliant with the basic WebSocket protocol, and that the reverse proxy
+// setup does not interfere with the basic WebSocket protocol behavior.
+func TestGorillaReverseProxyBasicSuite(t *testing.T) {
+	suite := websockettest.NewBasicSuite(websocket.GorillaUpgrader(), websocket.GorillaDialer())
+	newServer := websocketutil.TestServerCreator(websocket.GorillaDialer())
+	t.Run("ServerClose", suite.CreateBasicServerCloseTest(newServer, websocket.StatusGoingAway, "goodbye"))
+	t.Run("ClientClose", suite.CreateBasicClientCloseTest(newServer, websocket.StatusNormalClosure, "goodbye"))
+	t.Run("ClientWrite", suite.CreateBasicWriteMessageTest(newServer, websocket.MessageTypeText, []byte("hello there")))
+	t.Run("ClientRead", suite.CreateBasicReadMessageTest(newServer, websocket.MessageTypeText, []byte("hello there")))
+}
+
+// TestGorillaServerReadTimeout tests that the Gorilla WebSocket
+// implementation times out the weboskcet connection as expected when the
+// context provided has a deadline.
+func TestGorillaServerReadTimeout(t *testing.T) {
+	const (
+		readTimeout = 200 * time.Millisecond
+	)
+	ctx := t.Context()
+	require := require.New(t)
+	var wg sync.WaitGroup
+	handler := websockettest.WebSocketHandlerFunc(func(conn websocket.Conn, err error) {
+		defer wg.Done()
+		require.NoError(err)
+		ctx, cancel := context.WithTimeout(ctx, readTimeout)
+		defer cancel()
+		_, _, err = conn.Read(ctx)
+
+		// Should be a Timeout error of some kind.
+		require.Error(err)
+
+		require.NoError(conn.Close(websocket.StatusNormalClosure, "goodbye"))
+	})
+
+	server := websockettest.NewServer(websocket.GorillaUpgrader(), handler)
+	defer server.Close()
+
+	wg.Add(1)
+	conn, response, err := server.Connect(ctx, websocket.GorillaDialer())
+	require.NoError(err)
+	require.Equal(response.StatusCode, http.StatusSwitchingProtocols)
+
+	// Don't write anything for the full duration of the timeout + 1ms.
+
+	time.Sleep(readTimeout + 50*time.Millisecond)
+
+	_ = conn.Write(ctx, websocket.MessageTypeText, []byte("hello there"))
+
+	wg.Wait()
+}
+
+// ExampleGorillaCoder demonstrates how to use the AdaptCoder function to
+// adapt a [*gorillawebsocket.Conn] connection to the [websocket.Conn]
+// interface.
+func ExampleAdaptGorilla() {
+	ctx := context.Background()
+	rawConn, _, err := gorillawebsocket.DefaultDialer.DialContext(ctx, "wss://echo.websocket.org/", nil)
+	if err != nil {
+		panic(err)
+	}
+
+	conn := websocket.AdaptGorilla(rawConn)
+	_ = conn
+}
+
+// ExampleGorillaUpgrader demonstrates how to use the
+// [websocket.GorillaUpgrader] to upgrade an WebSocket connection using the
+// github.com/gorilla/websocket package.
+func ExampleGorillaUpgrader() {
+	upgrader := websocket.GorillaUpgrader()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, err := config.Upgrader.Upgrade(w, r, nil)
-		handler(proxywebsocket.AdaptGorilla(conn), err)
+		conn, err := upgrader.Upgrade(w, r)
+
+		_ = conn
+		_ = err
 	}))
-
-	return &url.URL{
-		Scheme: "ws",
-		Host:   server.Listener.Addr().String(),
-	}, server
+	defer server.Close()
 }
 
-func GorillaDial(u *url.URL) (proxywebsocket.Conn, *http.Response, error) {
-	conn, response, err := websocket.DefaultDialer.Dial(u.String(), nil)
-	return proxywebsocket.AdaptGorilla(conn), response, err
-}
-
-// TestGorillaWebsocketAdapterServerClosesSuccessfully tests that a
-// connection of the WebSocket will be closed successfully, and that the
-// reported reason and status code will be returned successfully when
-// everything is setup correctly.
-func TestGorillaWebsocketAdapterServerClosesSuccessfully(t *testing.T) {
-	// Setup
-	require := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Configured constants for testings
-	const (
-		status  = proxywebsocket.StatusNormalClosure
-		message = "test closing connection"
-	)
-
-	// This handler will immediately close any connection found
-	handler := func(conn proxywebsocket.Conn, err error) {
-		// We should not have an issue connecting to the server
-		require.NoError(err)
-
-		// Let's try to close the connection
-		require.NoError(conn.Close(status, message))
-
-		time.Sleep(time.Millisecond * 100)
-
-		_, _, err = conn.Read(ctx)
-		require.Error(err)
+// ExampleGorillaDialer demonstrates how to use the CoderDialer to dial connect
+// to a server endpoint that serves a Websocket connection.
+func ExampleGorillaDialer() {
+	dialer := websocket.GorillaDialer()
+	conn, _, err := dialer.Dial(context.Background(), "wss://echo.websocket.org/")
+	if err != nil {
+		panic(err)
 	}
 
-	// Start the WebSocket server with a handler that will close the
-	wsURL, wsServer := NewGorillaWebsocketServer(handler)
-	// connection immediately
-	defer wsServer.Close()
-
-	// Connect to the Server
-	conn, response, err := GorillaDial(wsURL)
-
-	require.NoError(err)
-	require.Equal(response.StatusCode, http.StatusSwitchingProtocols)
-
-	// Try to read something from the connection, to force the Close connection
-	_, _, err = conn.Read(ctx)
-	require.Error(err)
-
-	closeErr, ok := conn.IsCloseError(err)
-	require.True(ok, "error should be a close error")
-	require.Equal(closeErr.Status, status)
-	require.Equal(closeErr.Reason, message)
-
-	require.Error(conn.Write(ctx, proxywebsocket.MessageTypeText, []byte("hello there")))
-}
-
-func TestGorillaWebsocketAdapterClientClosesSuccessfully(t *testing.T) {
-	// Setup
-	require := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Configured constants for testings
-	const (
-		status  = proxywebsocket.StatusNormalClosure
-		message = "test closing connection"
-	)
-
-	// This handler will immediately close any connection found
-	handler := func(conn proxywebsocket.Conn, err error) {
-		// We should not have an issue connecting to the server
-		require.NoError(err)
-
-		_, _, err = conn.Read(ctx)
-		require.Error(err)
-		closeErr, ok := conn.IsCloseError(err)
-		require.True(ok, "err should be a close error")
-		require.Equal(closeErr.Status, status)
-		require.Equal(closeErr.Reason, message)
-
-		require.NoError(conn.Close(status, message))
-	}
-
-	// Start the WebSocket server with a handler that will close the
-	wsURL, wsServer := NewGorillaWebsocketServer(handler)
-	// connection immediately
-	defer wsServer.Close()
-
-	// Connect to the Server
-	conn, response, err := GorillaDial(wsURL)
-
-	require.NoError(err)
-	require.Equal(response.StatusCode, http.StatusSwitchingProtocols)
-
-	// Try to read something from the connection, to force the Close connection
-	require.NoError(conn.Close(status, message))
-
-	_, _, err = conn.Read(ctx)
-	require.Error(err)
-}
-
-// TestGorillaWebSocketAdapterWritesMessageSuccessfully tests that a message
-// can be written to the WebSocket connection successfully, and that the
-// message is received on the other end of the connection.
-func TestGorillaWebSocketAdapterWritesMessageSuccessfully(t *testing.T) {
-	// Setup
-	require := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	const (
-		expectedMessageType = proxywebsocket.MessageTypeText
-		expectedMessage     = "hello there"
-	)
-
-	handler := func(conn proxywebsocket.Conn, err error) {
-		require.NoError(err)
-
-		// Ensure that we can read a message
-		messageType, message, err := conn.Read(ctx)
-		require.NoError(err)
-
-		require.Equal(expectedMessageType, messageType)
-		require.Equal(expectedMessage, string(message))
-	}
-
-	// Start the WebSocket server with a handler that will read a message and
-	// and verify that it matches the expected message and message type
-	wsURL, wsServer := NewGorillaWebsocketServer(handler)
-	defer wsServer.Close()
-
-	// Connect to the Server
-	conn, response, err := GorillaDial(wsURL)
-
-	require.NoError(err)
-	require.Equal(response.StatusCode, http.StatusSwitchingProtocols)
-
-	// Let's write something
-	require.NoError(conn.Write(ctx, expectedMessageType, []byte(expectedMessage)))
-}
-
-// TestGorillaWebSocketAdapterReadsMessagesSuccessfully tests that a message
-// can be read from the WebSocket connection successfully, and that the
-// server side will write the message successfully.
-func TestGorillaWebSocketAdapterReadsMessagesSuccessfully(t *testing.T) {
-	// Setup
-	require := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	const (
-		expectedMessageType = proxywebsocket.MessageTypeText
-		expectedMessage     = "hello there"
-	)
-
-	handler := func(conn proxywebsocket.Conn, err error) {
-		require.NoError(err)
-
-		// Ensure that we can write a message
-		require.NoError(conn.Write(ctx, expectedMessageType, []byte(expectedMessage)))
-	}
-
-	// Start the WebSocket server with a handler that will read a message and
-	// and verify that it matches the expected message and message type
-	wsURL, wsServer := NewGorillaWebsocketServer(handler)
-	defer wsServer.Close()
-
-	// Connect to the Server
-	conn, response, err := GorillaDial(wsURL)
-
-	require.NoError(err)
-	require.Equal(response.StatusCode, http.StatusSwitchingProtocols)
-
-	// Let's read something
-	messageType, message, err := conn.Read(ctx)
-	require.NoError(err)
-	require.Equal(expectedMessageType, messageType)
-	require.Equal(expectedMessage, string(message))
-}
-
-// TestGorillaAdapterPipe tests that the piping works as expected to send
-// messages through the connection, and that the connection will be closed
-// successfully
-func TestGorillaAdapterPipe(t *testing.T) {
-	// Setup
-	require := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	const (
-		expectedMessageType = proxywebsocket.MessageTypeText
-		expectedMessage     = "hello there"
-
-		expectedCloseStatus     = proxywebsocket.StatusNormalClosure
-		expectedCloseReasonText = "test closing connection"
-	)
-
-	var wg1 sync.WaitGroup
-	var wg2 sync.WaitGroup
-
-	wg1.Add(1)
-	wsURL1, wsServer1 := NewGorillaWebsocketServer(func(conn proxywebsocket.Conn, err error) {
-		defer wg1.Done()
-		require.NoError(err)
-		require.NoError(conn.Write(ctx, expectedMessageType, []byte(expectedMessage)))
-		require.NoError(conn.Close(expectedCloseStatus, expectedCloseReasonText))
-	})
-	defer wsServer1.Close()
-
-	wg2.Add(1)
-	wsURL2, wsServer2 := NewGorillaWebsocketServer(func(conn proxywebsocket.Conn, err error) {
-		defer wg2.Done()
-		require.NoError(err)
-
-		forwardConn, response, err := GorillaDial(wsURL1)
-		require.NoError(err)
-		require.Equal(response.StatusCode, http.StatusSwitchingProtocols)
-
-		// This might have an error, but that *should* be fine, I think.
-		_ = proxywebsocket.Bridge(ctx, forwardConn, conn)
-	})
-	defer wsServer2.Close()
-
-	conn, response, err := GorillaDial(wsURL2)
-	require.NoError(err)
-	require.Equal(response.StatusCode, http.StatusSwitchingProtocols)
-
-	messageType, message, err := conn.Read(ctx)
-	require.NoError(err)
-	require.Equal(expectedMessageType, messageType)
-	require.Equal(expectedMessage, string(message))
-
-	_, _, err = conn.Read(ctx)
-	require.Error(err)
-
-	closeErr, ok := conn.IsCloseError(err)
-	require.True(ok, "error should be a close error")
-	require.Equal(closeErr.Status, expectedCloseStatus)
-	require.Equal(closeErr.Reason, expectedCloseReasonText)
-
-	wg1.Wait()
-	wg2.Wait()
+	_ = conn
 }

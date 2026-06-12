@@ -217,6 +217,7 @@ func TestServe(t *testing.T) {
 
 		body := `[{"jsonrpc":"2.0","id":1,"method":"eth_chainId"},{"jsonrpc":"2.0","id":2,"method":"eth_chainId"},{"jsonrpc":"2.0","id":3,"method":"eth_chainId"}]`
 		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
+		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 
 		handler.ServeHTTP(rec, req)

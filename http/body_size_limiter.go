@@ -4,9 +4,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"proxy/adapters"
-	"proxy/jsonrpcv2"
-
 	"github.com/ethereum/go-ethereum/log"
 )
 
@@ -33,25 +30,20 @@ func (m *httpBodySizeLimiterMiddleware) ServeHTTP(w http.ResponseWriter, r *http
 
 	r.Body = http.MaxBytesReader(w, r.Body, m.maxRequestBodySize)
 
+	if r.ContentLength > m.maxRequestBodySize {
+		http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+
 	if contentLengthString := r.Header.Get("Content-Length"); contentLengthString != "" {
 		contentLength, err := strconv.ParseInt(contentLengthString, 10, 64)
 		if err != nil {
-			adapters.WriteJSONRPCErrorToHTTPResponseWriter(
-				w,
-				nil,
-				jsonrpcv2.CodeInvalidRequest,
-				"Unable to determine content length of request body",
-			)
+			http.Error(w, "unable to determine length", http.StatusLengthRequired)
 			return
 		}
 
 		if contentLength > m.maxRequestBodySize {
-			adapters.WriteJSONRPCErrorToHTTPResponseWriter(
-				w,
-				nil,
-				jsonrpcv2.CodeInvalidRequest,
-				"content length is too large",
-			)
+			http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
 			return
 		}
 	}
