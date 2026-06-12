@@ -59,7 +59,7 @@ type OPEspressoBatchVerifier struct {
 	rollupConfig      *rollup.Config
 	logger            log.Logger
 	l1Client          *ethclient.Client
-	finalityPoller    sharedVerifier.FinalityPollerInterface
+	finalityPoller    sharedVerifier.FinalityPollerInterface[*eth.SyncStatus]
 	cancel            context.CancelFunc
 	runWg             sync.WaitGroup
 	running           atomic.Bool
@@ -150,10 +150,10 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 	return v
 }
 
-// fetchFinalitySnapshot polls the OP node's sync status and wraps it as a
-// LatestSnapshot for the finality poller. The full SyncStatus is retained on the
-// snapshot so Refresh can reuse it without issuing its own SyncStatus call.
-func (v *OPEspressoBatchVerifier) fetchFinalitySnapshot(ctx context.Context) (sharedVerifier.LatestSnapshot, error) {
+// fetchFinalitySnapshot polls the OP node's sync status for the finality poller.
+// The full SyncStatus is cached so Refresh can reuse it without issuing its own
+// SyncStatus call.
+func (v *OPEspressoBatchVerifier) fetchFinalitySnapshot(ctx context.Context) (*eth.SyncStatus, error) {
 	rollupClient, err := v.endpointProvider.RollupClient(ctx)
 	if err != nil {
 		return nil, err
@@ -166,7 +166,7 @@ func (v *OPEspressoBatchVerifier) fetchFinalitySnapshot(ctx context.Context) (sh
 	if syncStatus == nil {
 		return nil, fmt.Errorf("sync status is nil")
 	}
-	return OpFinalitySnapshot{syncStatus: syncStatus}, nil
+	return syncStatus, nil
 }
 
 func (v *OPEspressoBatchVerifier) Start(ctx context.Context) {
@@ -443,18 +443,14 @@ func (v *OPEspressoBatchVerifier) peekNextBatch(ctx context.Context) (*derivatio
 // lastSyncStatus returns the SyncStatus from the finality poller's most recent
 // snapshot.
 func (v *OPEspressoBatchVerifier) lastSyncStatus() (*eth.SyncStatus, error) {
-	snapshot := v.finalityPoller.LastSnapshot()
-	if snapshot == nil {
-		return nil, fmt.Errorf("finality poller has no snap shot")
-	}
-	opSnapshot, ok := snapshot.(OpFinalitySnapshot)
+	syncStatus, ok := v.finalityPoller.LastSnapshot()
 	if !ok {
-		return nil, fmt.Errorf("unexpected finality snapshot type %T", snapshot)
+		return nil, fmt.Errorf("finality poller has no snapshot")
 	}
-	if opSnapshot.syncStatus == nil {
+	if syncStatus == nil {
 		return nil, fmt.Errorf("finality snapshot has no sync status")
 	}
-	return opSnapshot.syncStatus, nil
+	return syncStatus, nil
 }
 
 func (v *OPEspressoBatchVerifier) Stop() {

@@ -60,7 +60,7 @@ type NitroEspressoBatchVerifier struct {
 	l1Client            *ethclient.Client
 	espressoStore       *espressoStore.EspressoStore
 	config              *NitroEspressoBatchVerifierConfig
-	finalityPoller      sharedVerifier.FinalityPollerInterface
+	finalityPoller      sharedVerifier.FinalityPollerInterface[uint64]
 	delayedMsgFetcher   *delayedmessagefetcher.DelayedMessageFetcher
 	logger              log.Logger
 	cancel              context.CancelFunc
@@ -156,17 +156,17 @@ func NewNitroEspressoBatchVerifier(
 	return v
 }
 
-// fetchFinalitySnapshot polls the Nitro L2 node's finalized block and wraps it
-// as a LatestSnapshot for the finality poller.
-func (v *NitroEspressoBatchVerifier) fetchFinalitySnapshot(ctx context.Context) (sharedVerifier.LatestSnapshot, error) {
+// fetchFinalitySnapshot polls the Nitro L2 node's finalized block number for the
+// finality poller. Nitro only needs the finalized block number.
+func (v *NitroEspressoBatchVerifier) fetchFinalitySnapshot(ctx context.Context) (uint64, error) {
 	header, err := v.l2Client.HeaderByNumber(ctx, big.NewInt(rpc.FinalizedBlockNumber.Int64()))
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	if header == nil {
-		return nil, fmt.Errorf("nitro finalized block not found")
+		return 0, fmt.Errorf("nitro finalized block not found")
 	}
-	return NitroFinalitySnapshot(header.Number.Uint64()), nil
+	return header.Number.Uint64(), nil
 }
 
 func (v *NitroEspressoBatchVerifier) Start(ctx context.Context) {
@@ -349,8 +349,8 @@ func (v *NitroEspressoBatchVerifier) syncEspressoStateWithNitroFinality() error 
 	espressoState := v.espressoStore.GetState()
 
 	var nitroFinalizedBlock uint64
-	if snapshot := v.finalityPoller.LastSnapshot(); snapshot != nil {
-		nitroFinalizedBlock = snapshot.FinalizedL2()
+	if block, ok := v.finalityPoller.LastSnapshot(); ok {
+		nitroFinalizedBlock = block
 	}
 	if nitroFinalizedBlock > espressoState.L2BlockNumber {
 		v.logger.Error("nitro finalized block is ahead of Espresso finalized block",
