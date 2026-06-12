@@ -15,49 +15,57 @@ const (
 	finalityPollTimeout = 5 * time.Second
 )
 
-type LatestSnapshot interface {
-	FinalizedL2() uint64
-}
-
-type FinalityPollerInterface interface {
-	LastSnapshot() LatestSnapshot
+// FinalityPollerInterface is the finality poller as consumed by a verifier. T is
+// the verifier-specific snapshot type: the OP verifier uses *eth.SyncStatus (it
+// needs the full sync status), while the Nitro verifier uses
+// a plain uint64 block number
+type FinalityPollerInterface[T any] interface {
+	LastSnapshot() (T, bool)
 	Start(ctx context.Context)
 	Stop()
 }
 
-type FinalityPoller struct {
-	finalityPollFunc func(ctx context.Context) (LatestSnapshot, error)
+type FinalityPoller[T any] struct {
+	finalityPollFunc func(ctx context.Context) (T, error)
 	logger           log.Logger
 	interval         time.Duration
-	finalitySnapshot atomic.Value
+	finalitySnapshot atomic.Pointer[T]
 	running          atomic.Bool
 	cancel           context.CancelFunc
 	wg               sync.WaitGroup
 }
 
-func NewFinalityPoller(
-	finalityPollFunc func(ctx context.Context) (LatestSnapshot, error),
+// Compile-time assertion that *FinalityPoller[T] implements
+// FinalityPollerInterface[T].
+var _ FinalityPollerInterface[any] = (*FinalityPoller[any])(nil)
+
+func NewFinalityPoller[T any](
+	finalityPollFunc func(ctx context.Context) (T, error),
 	logger log.Logger,
 	interval time.Duration,
-) *FinalityPoller {
+) *FinalityPoller[T] {
 	if interval == 0 {
 		interval = defaultFinalityPollInterval
 	}
-	return &FinalityPoller{
+	return &FinalityPoller[T]{
 		finalityPollFunc: finalityPollFunc,
 		logger:           logger,
 		interval:         interval,
 	}
 }
 
-// LastSnapshot returns the most recently polled snapshot, or nil if none has been
-// fetched yet.
-func (p *FinalityPoller) LastSnapshot() LatestSnapshot {
-	snapshot, _ := p.finalitySnapshot.Load().(LatestSnapshot)
-	return snapshot
+// LastSnapshot returns the most recently polled snapshot. The bool is false if
+// no snapshot has been fetched yet.
+func (p *FinalityPoller[T]) LastSnapshot() (T, bool) {
+	snapshot := p.finalitySnapshot.Load()
+	if snapshot == nil {
+		var empty T
+		return empty, false
+	}
+	return *snapshot, true
 }
 
-func (p *FinalityPoller) Start(ctx context.Context) {
+func (p *FinalityPoller[T]) Start(ctx context.Context) {
 	if !p.running.CompareAndSwap(false, true) {
 		p.logger.Warn("Finality poller is already running or starting")
 		return
@@ -67,7 +75,7 @@ func (p *FinalityPoller) Start(ctx context.Context) {
 	go p.run(ctx)
 }
 
-func (p *FinalityPoller) Stop() {
+func (p *FinalityPoller[T]) Stop() {
 	if !p.running.CompareAndSwap(true, false) {
 		p.logger.Warn("Finality poller is not running or is already stopping")
 		return
@@ -79,7 +87,7 @@ func (p *FinalityPoller) Stop() {
 	p.wg.Wait()
 }
 
-func (p *FinalityPoller) poll(ctx context.Context) {
+func (p *FinalityPoller[T]) poll(ctx context.Context) {
 	fetchCtx, cancel := context.WithTimeout(ctx, finalityPollTimeout)
 	defer cancel()
 
@@ -88,15 +96,11 @@ func (p *FinalityPoller) poll(ctx context.Context) {
 		p.logger.Error("failed to fetch finalized block", "error", err)
 		return
 	}
-	if snapshot == nil {
-		p.logger.Error("fetched snapshot is nil")
-		return
-	}
-	p.logger.Debug("finality poller updating", "block_num", snapshot.FinalizedL2())
-	p.finalitySnapshot.Store(snapshot)
+	p.logger.Debug("finality poller updating", "snapshot", snapshot)
+	p.finalitySnapshot.Store(&snapshot)
 }
 
-func (p *FinalityPoller) run(ctx context.Context) {
+func (p *FinalityPoller[T]) run(ctx context.Context) {
 	defer p.wg.Done()
 	ticker := time.NewTicker(p.interval)
 	defer ticker.Stop()
