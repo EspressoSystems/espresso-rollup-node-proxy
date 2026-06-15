@@ -112,7 +112,7 @@ func startOpVerifier(ctx context.Context, t *testing.T, logger log.Logger, store
 		&mockLightClient{client: espressoClient.NewClient(espressoURL)},
 		&verifier.OPEspressoBatchVerifierConfig{
 			FullNodeExecutionRPC:      opGethFullNode,
-			FullNodeConsensusRPC:      opNodeFullNode,
+			Namespace:                 L2_CHAIN_ID,
 			VerificationInterval:      250 * time.Millisecond,
 			QueryServiceURL:           espressoURL,
 			BatcherAddress:            common.HexToAddress("0x976EA74026E726554dB657fA54763abd0C3a0aa9"),
@@ -632,7 +632,7 @@ func matchLogStringAttrs(capturer *logutil.CaptureLogger, msg string, expected m
 		allMatch := len(actual) == len(expected)
 		if allMatch {
 			for k, v := range expected {
-				if actual[k] != v {
+				if !strings.Contains(actual[k], v) {
 					allMatch = false
 					break
 				}

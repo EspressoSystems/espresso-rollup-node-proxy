@@ -69,6 +69,7 @@ func TestConfigValidate(t *testing.T) {
 		FullNodeExecutionRPC: "http://localhost:8545",
 		L1RPC:                "ws://localhost:8546",
 		Mode:                 ModeOP,
+		Namespace:            22266222,
 		ListenAddr:           ":8080",
 		EspressoTag:          "espresso",
 		StoreFilePath:        "espresso_store.json",
@@ -76,7 +77,6 @@ func TestConfigValidate(t *testing.T) {
 		QueryServiceURL:      "https://query.espresso.network",
 		VerificationInterval: Duration(1 * time.Millisecond),
 		OPConfig: OPConfig{
-			FullNodeConsensusRPC:      "http://localhost:9545",
 			LightClientAddress:        common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678"),
 			BatcherAddress:            common.HexToAddress("0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"),
 			BatchAuthenticatorAddress: common.HexToAddress("0x1111111111111111111111111111111111111111"),
@@ -88,10 +88,9 @@ func TestConfigValidate(t *testing.T) {
 	err := opEmpty.validate()
 	require.Error(t, err)
 	for _, field := range []string{
-		"full-node-execution-rpc", "l1-rpc",
-		"op.full-node-consensus-rpc", "query-service-url",
+		"full-node-execution-rpc", "l1-rpc", "query-service-url",
 		"op.light-client-address", "op.batcher-address", "op.batch-authenticator-address",
-		"listen-addr", "espresso-tag", "store-file-path",
+		"listen-addr", "espresso-tag", "store-file-path", "namespace",
 	} {
 		require.Contains(t, err.Error(), field)
 	}
@@ -100,7 +99,6 @@ func TestConfigValidate(t *testing.T) {
 	err = noMode.validate()
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "mode")
-	require.NotContains(t, err.Error(), "op.full-node-consensus-rpc")
 	require.NotContains(t, err.Error(), "op.light-client-address")
 
 	malformed := valid
@@ -133,6 +131,7 @@ func TestConfigValidate(t *testing.T) {
 		FullNodeExecutionRPC: "http://localhost:8547",
 		L1RPC:                "ws://localhost:8546",
 		Mode:                 ModeNitro,
+		Namespace:            412346,
 		ListenAddr:           ":8080",
 		EspressoTag:          "espresso",
 		StoreFilePath:        "espresso_store.json",
@@ -142,7 +141,6 @@ func TestConfigValidate(t *testing.T) {
 		NitroConfig: NitroConfig{
 			FeedURL:       "ws://localhost:9642",
 			BridgeAddress: common.HexToAddress("0x3f1Eae7D46d88F08fc2F8ed27FCb2AB183EB2d0E"),
-			Namespace:     412346,
 			ValidBatcherAddresses: []nitroVerifier.BatcherAddressConfig{
 				{Address: "0x3f1Eae7D46d88F08fc2F8ed27FCb2AB183EB2d0E"},
 			},
@@ -155,7 +153,7 @@ func TestConfigValidate(t *testing.T) {
 	require.Error(t, err)
 	for _, field := range []string{
 		"full-node-execution-rpc", "l1-rpc", "nitro.feed-url",
-		"nitro.bridge-address", "nitro.namespace", "nitro.valid-batcher-addresses",
+		"nitro.bridge-address", "namespace", "nitro.valid-batcher-addresses",
 		"query-service-url", "listen-addr", "espresso-tag", "store-file-path",
 	} {
 		require.Contains(t, err.Error(), field)

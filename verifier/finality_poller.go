@@ -16,9 +16,9 @@ const (
 )
 
 // FinalityPollerInterface is the finality poller as consumed by a verifier. T is
-// the verifier-specific snapshot type: the OP verifier uses *eth.SyncStatus (it
-// needs the full sync status), while the Nitro verifier uses
-// a plain uint64 block number
+// the verifier-specific snapshot type: the OP verifier uses a struct carrying the
+// finalized L2 and L1 blocks, while the Nitro verifier uses a plain uint64 block
+// number.
 type FinalityPollerInterface[T any] interface {
 	LastSnapshot() (T, bool)
 	Start(ctx context.Context)

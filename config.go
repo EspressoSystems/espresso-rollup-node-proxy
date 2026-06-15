@@ -40,7 +40,6 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 }
 
 type OPConfig struct {
-	FullNodeConsensusRPC      string         `json:"full_node_consensus_rpc"`
 	LightClientAddress        common.Address `json:"light_client_address"`
 	BatcherAddress            common.Address `json:"batcher_address"`
 	BatchAuthenticatorAddress common.Address `json:"batch_authenticator_address"`
@@ -49,7 +48,6 @@ type OPConfig struct {
 type NitroConfig struct {
 	FeedURL               string                               `json:"feed_url"`
 	BridgeAddress         common.Address                       `json:"bridge_address"`
-	Namespace             uint64                               `json:"namespace"`
 	ValidBatcherAddresses []nitroVerifier.BatcherAddressConfig `json:"valid_batcher_addresses"`
 	WaitForL1Finalization bool                                 `json:"wait_for_l1_finalization"`
 }
@@ -59,6 +57,7 @@ type Config struct {
 	WsFullNodeExecutionRPC string      `json:"ws_full_node_execution_rpc"`
 	L1RPC                  string      `json:"l1_rpc"`
 	Mode                   string      `json:"mode"`
+	Namespace              uint64      `json:"namespace"`
 	ListenAddr             string      `json:"listen_addr"`
 	WsListenAddr           string      `json:"ws_listen_addr"`
 	EspressoTag            string      `json:"espresso_tag"`
@@ -130,12 +129,11 @@ func parseConfig() *Config {
 	pflag.DurationVar((*time.Duration)(&cfg.FinalityPollInterval), "finality-poll-interval", time.Duration(cfg.FinalityPollInterval), "finality poll interval (default 1s)")
 
 	pflag.StringVar(&cfg.Mode, "mode", cfg.Mode, "verifier mode: op or nitro")
-	pflag.StringVar(&cfg.OPConfig.FullNodeConsensusRPC, "op.full-node-consensus-rpc", cfg.OPConfig.FullNodeConsensusRPC, "OP full node consensus RPC URL")
+	pflag.Uint64Var(&cfg.Namespace, "namespace", cfg.Namespace, "Espresso namespace (OP: the L2 chain id; Nitro: the namespace)")
 
 	pflag.StringVar(&cfg.NitroConfig.FeedURL, "nitro.feed-url", cfg.NitroConfig.FeedURL, "Nitro sequencer feed WebSocket URL")
 	pflag.TextVar(&cfg.NitroConfig.BridgeAddress, "nitro.bridge-address", cfg.NitroConfig.BridgeAddress, "Nitro Bridge contract address on L1")
 	pflag.BoolVar(&cfg.NitroConfig.WaitForL1Finalization, "nitro.wait-for-l1-finalization", cfg.NitroConfig.WaitForL1Finalization, "wait for L1 block finalization before fetching delayed messages")
-	pflag.Uint64Var(&cfg.NitroConfig.Namespace, "nitro.namespace", cfg.NitroConfig.Namespace, "Nitro namespace")
 	var batcherAddressFlags []string
 	pflag.StringArrayVar(&batcherAddressFlags, "nitro.valid-batcher-addresses", nil, "valid batcher addresses for Nitro verifier (full range; use config file for from/to)")
 
@@ -208,7 +206,6 @@ func (c *Config) validate() error {
 	}
 
 	if c.Mode == ModeOP {
-		errs = append(errs, validateURL("op.full-node-consensus-rpc", c.OPConfig.FullNodeConsensusRPC))
 		errs = append(errs, validateAddress("op.light-client-address", c.OPConfig.LightClientAddress))
 		errs = append(errs, validateAddress("op.batcher-address", c.OPConfig.BatcherAddress))
 		errs = append(errs, validateAddress("op.batch-authenticator-address", c.OPConfig.BatchAuthenticatorAddress))
@@ -217,9 +214,6 @@ func (c *Config) validate() error {
 	if c.Mode == ModeNitro {
 		errs = append(errs, validateURL("nitro.feed-url", c.NitroConfig.FeedURL))
 		errs = append(errs, validateAddress("nitro.bridge-address", c.NitroConfig.BridgeAddress))
-		if c.NitroConfig.Namespace == 0 {
-			errs = append(errs, fmt.Errorf("nitro.namespace: must not be zero"))
-		}
 		if len(c.NitroConfig.ValidBatcherAddresses) == 0 {
 			errs = append(errs, fmt.Errorf("nitro.valid-batcher-addresses: at least one address required"))
 		}
@@ -237,6 +231,9 @@ func (c *Config) validate() error {
 	if c.StoreFilePath == "" {
 		errs = append(errs, fmt.Errorf("store-file-path: must not be empty"))
 	}
+	if c.Namespace == 0 {
+		errs = append(errs, fmt.Errorf("namespace: must not be zero"))
+	}
 	if c.LogFormat != "" && c.LogFormat != "text" && c.LogFormat != "json" {
 		errs = append(errs, fmt.Errorf("log-format: must be \"text\" or \"json\", got %q", c.LogFormat))
 	}
@@ -248,7 +245,7 @@ func (c *Config) toOPVerifierConfig() *opVerifier.OPEspressoBatchVerifierConfig 
 	return &opVerifier.OPEspressoBatchVerifierConfig{
 		FullNodeExecutionRPC:      c.FullNodeExecutionRPC,
 		L1RPC:                     c.L1RPC,
-		FullNodeConsensusRPC:      c.OPConfig.FullNodeConsensusRPC,
+		Namespace:                 c.Namespace,
 		VerificationInterval:      time.Duration(c.VerificationInterval),
 		QueryServiceURL:           c.QueryServiceURL,
 		BatcherAddress:            c.OPConfig.BatcherAddress,
@@ -267,7 +264,7 @@ func (c *Config) toNitroVerifierConfig() *nitroVerifier.NitroEspressoBatchVerifi
 		VerificationInterval:  time.Duration(c.VerificationInterval),
 		FinalityPollInterval:  time.Duration(c.FinalityPollInterval),
 		QueryServiceURL:       c.QueryServiceURL,
-		Namespace:             c.NitroConfig.Namespace,
+		Namespace:             c.Namespace,
 		ValidBatcherAddresses: c.NitroConfig.ValidBatcherAddresses,
 		WaitForL1Finalization: c.NitroConfig.WaitForL1Finalization,
 	}

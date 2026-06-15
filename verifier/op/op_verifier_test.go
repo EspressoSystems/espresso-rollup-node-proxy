@@ -27,13 +27,11 @@ import (
 	"github.com/EspressoSystems/espresso-streamers/op/derivation"
 
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
-	"github.com/ethereum-optimism/optimism/op-service/dial"
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
@@ -56,17 +54,17 @@ type mockFinalityPoller struct {
 	mock.Mock
 }
 
-func (m *mockFinalityPoller) LastSnapshot() (eth.SyncStatus, bool) {
+func (m *mockFinalityPoller) LastSnapshot() (opFinalitySnapshot, bool) {
 	args := m.Called()
 	if args.Get(0) == nil {
-		return eth.SyncStatus{}, false
+		return opFinalitySnapshot{}, false
 	}
-	return args.Get(0).(eth.SyncStatus), args.Bool(1)
+	return args.Get(0).(opFinalitySnapshot), args.Bool(1)
 }
 func (m *mockFinalityPoller) Start(_ context.Context) {}
 func (m *mockFinalityPoller) Stop()                   {}
 
-var _ sharedVerifier.FinalityPollerInterface[eth.SyncStatus] = (*mockFinalityPoller)(nil)
+var _ sharedVerifier.FinalityPollerInterface[opFinalitySnapshot] = (*mockFinalityPoller)(nil)
 
 type mockStreamer struct {
 	mock.Mock
@@ -133,61 +131,6 @@ func (m *mockStreamer) SetProperHead(_ common.Hash) {}
 
 var _ opStreamer.EspressoStreamer[derivation.EspressoBatch] = (*mockStreamer)(nil)
 
-type mockEndpointProvider struct {
-	mock.Mock
-}
-
-func (m *mockEndpointProvider) RollupClient(ctx context.Context) (dial.RollupClientInterface, error) {
-	args := m.Called(ctx)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(dial.RollupClientInterface), args.Error(1)
-}
-
-func (m *mockEndpointProvider) EthClient(ctx context.Context) (dial.EthClientInterface, error) {
-	args := m.Called(ctx)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(dial.EthClientInterface), args.Error(1)
-}
-
-func (m *mockEndpointProvider) Close() {}
-
-type mockRollupClient struct {
-	mock.Mock
-}
-
-func (m *mockRollupClient) SyncStatus(ctx context.Context) (*eth.SyncStatus, error) {
-	args := m.Called(ctx)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*eth.SyncStatus), args.Error(1)
-}
-
-func (m *mockRollupClient) RollupConfig(ctx context.Context) (*rollup.Config, error) {
-	args := m.Called(ctx)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*rollup.Config), args.Error(1)
-}
-
-func (m *mockRollupClient) OutputAtBlock(ctx context.Context, blockNum uint64) (*eth.OutputResponse, error) {
-	panic("not implemented")
-}
-
-func (m *mockRollupClient) StartSequencer(ctx context.Context, unsafeHead common.Hash) error {
-	panic("not implemented")
-}
-
-func (m *mockRollupClient) SequencerActive(ctx context.Context) (bool, error) {
-	panic("not implemented")
-}
-func (m *mockRollupClient) Close() {}
-
 type mockEthClient struct {
 	mock.Mock
 }
@@ -200,14 +143,13 @@ func (m *mockEthClient) BlockByNumber(ctx context.Context, number *big.Int) (*ty
 	return args.Get(0).(*types.Block), args.Error(1)
 }
 
-func (m *mockEthClient) Client() *rpc.Client { return nil }
-func (m *mockEthClient) Close()              {}
+func (m *mockEthClient) Close() {}
+
+var _ ExecutionClient = (*mockEthClient)(nil)
 
 type testHarness struct {
 	verifier       *OPEspressoBatchVerifier
 	streamer       *mockStreamer
-	endpointProv   *mockEndpointProvider
-	rollupClient   *mockRollupClient
 	ethClient      *mockEthClient
 	finalityPoller *mockFinalityPoller
 	store          *espressoStore.EspressoStore
@@ -224,8 +166,6 @@ func newTestHarness(t *testing.T, logger log.Logger) *testHarness {
 		logger = log.NewLogger(log.DiscardHandler())
 	}
 	streamer := new(mockStreamer)
-	endpointProvider := new(mockEndpointProvider)
-	rollupClient := new(mockRollupClient)
 	ethClient := new(mockEthClient)
 	finalityPoller := new(mockFinalityPoller)
 	store, err := espressoStore.NewEspressoStore(tempFilePath(t), 1)
@@ -239,16 +179,13 @@ func newTestHarness(t *testing.T, logger log.Logger) *testHarness {
 		config: &OPEspressoBatchVerifierConfig{
 			VerificationInterval: time.Millisecond,
 		},
-		endpointProvider: endpointProvider,
-		rollupConfig:     &rollup.Config{},
-		logger:           logger,
-		finalityPoller:   finalityPoller,
+		l2Client:       ethClient,
+		logger:         logger,
+		finalityPoller: finalityPoller,
 	}
 	return &testHarness{
 		verifier:       verifier,
 		streamer:       streamer,
-		endpointProv:   endpointProvider,
-		rollupClient:   rollupClient,
 		ethClient:      ethClient,
 		finalityPoller: finalityPoller,
 		store:          store,
@@ -261,15 +198,6 @@ func TestPeekNextBatch(t *testing.T) {
 	batch := &derivation.EspressoBatch{
 		BatchHeader: &types.Header{Number: big.NewInt(100)},
 	}
-	syncStatus := &eth.SyncStatus{
-		FinalizedL1: eth.L1BlockRef{Number: 10, Hash: common.Hash{1}},
-		SafeL2: eth.L2BlockRef{
-			Number:   5,
-			L1Origin: eth.BlockID{Number: 10, Hash: common.Hash{1}},
-		},
-	}
-	h.finalityPoller.On("LastSnapshot").Return(*syncStatus, true)
-	h.streamer.On("Refresh", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	h.streamer.On("HasNext", mock.Anything).Return(true).Once()
 	h.streamer.On("Peek", mock.Anything).Return(batch).Once()
 
@@ -305,22 +233,16 @@ func TestVerify(t *testing.T) {
 		Transactions: []*types.Transaction{depositTx},
 	})
 
-	// Derive the expected EspressoBatch from the block so the RLP comparison in verify() passes
-	batch, err := derivation.BlockToEspressoBatch(h.verifier.rollupConfig, block)
+	// Derive the expected EspressoBatch from the block so its BatchHeader matches
+	// the full node block hash in VerifyNextBatch.
+	batch, err := derivation.BlockToEspressoBatch(&rollup.Config{}, block)
 	require.NoError(t, err)
 
-	syncStatus := &eth.SyncStatus{
-		FinalizedL1: eth.L1BlockRef{Number: 10, Hash: common.Hash{1}},
-		SafeL2: eth.L2BlockRef{
-			Number:   5,
-			L1Origin: eth.BlockID{Number: 10, Hash: common.Hash{1}},
-		},
+	snapshot := opFinalitySnapshot{
+		finalizedL1: eth.L1BlockRef{Number: 10, Hash: common.Hash{1}},
 	}
-	h.endpointProv.On("RollupClient", mock.Anything).Return(h.rollupClient, nil)
-	h.finalityPoller.On("LastSnapshot").Return(*syncStatus, true)
-	h.endpointProv.On("EthClient", mock.Anything).Return(h.ethClient, nil)
+	h.finalityPoller.On("LastSnapshot").Return(snapshot, true)
 	h.ethClient.On("BlockByNumber", mock.Anything, new(big.Int).SetUint64(100)).Return(block, nil)
-	h.rollupClient.On("SyncStatus", mock.Anything).Return(syncStatus, nil)
 	h.streamer.On("Refresh", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	h.streamer.On("HasNext", mock.Anything).Return(true).Once()
 	h.streamer.On("HasNext", mock.Anything).Return(false)
@@ -339,6 +261,48 @@ func TestVerify(t *testing.T) {
 	require.Equal(t, uint64(100), state.L2BlockNumber)
 }
 
+// TestVerifyRejectsMismatchedBlock ensures that when the full node returns a
+// block whose hash differs from the header Espresso finalized, verification
+// fails and the store is not advanced.
+func TestVerifyRejectsMismatchedBlock(t *testing.T) {
+	capturer := &logCapturer{}
+	h := newTestHarness(t, log.NewLogger(capturer))
+	ctx := context.Background()
+
+	l1InfoData := make([]byte, 4+32*8)
+	selector := crypto.Keccak256([]byte("setL1BlockValues(uint64,uint64,uint256,bytes32,uint64,bytes32,uint256,uint256)"))[:4]
+	copy(l1InfoData[:4], selector)
+	depositTx := types.NewTx(&types.DepositTx{Data: l1InfoData})
+
+	block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(100)}).WithBody(types.Body{
+		Transactions: []*types.Transaction{depositTx},
+	})
+	// Espresso batch carries the header for `block`...
+	batch, err := derivation.BlockToEspressoBatch(&rollup.Config{}, block)
+	require.NoError(t, err)
+
+	// ...but the full node returns a different block (different header => different hash).
+	mismatchedBlock := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(100), GasLimit: 1})
+	require.NotEqual(t, block.Hash(), mismatchedBlock.Hash())
+
+	snapshot := opFinalitySnapshot{
+		finalizedL1: eth.L1BlockRef{Number: 10, Hash: common.Hash{1}},
+	}
+	h.finalityPoller.On("LastSnapshot").Return(snapshot, true)
+	h.ethClient.On("BlockByNumber", mock.Anything, new(big.Int).SetUint64(100)).Return(mismatchedBlock, nil)
+	h.streamer.On("Refresh", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	h.streamer.On("HasNext", mock.Anything).Return(true)
+	h.streamer.On("Peek", mock.Anything).Return(batch)
+
+	h.verifier.verifyAndAdvance(ctx)
+
+	require.Contains(t, capturer.errorMessages, "batch verification failed",
+		"expected a verification failure to be logged")
+	h.streamer.AssertNotCalled(t, "Next", mock.Anything)
+	state := h.store.GetState()
+	require.Equal(t, uint64(1), state.L2BlockNumber, "store must not advance on a mismatched block")
+}
+
 func TestStoresEthereumFinalizedBlockWhenAhead(t *testing.T) {
 	assertEthereumFinalizedBlockStored := func(t *testing.T, h *testHarness, capturer *logCapturer, expectedFallbackPos uint64) {
 		t.Helper()
@@ -354,20 +318,13 @@ func TestStoresEthereumFinalizedBlockWhenAhead(t *testing.T) {
 		capturer := &logCapturer{}
 		h := newTestHarness(t, log.NewLogger(capturer))
 		ctx := context.Background()
-		syncStatus := &eth.SyncStatus{
-			FinalizedL1: eth.L1BlockRef{Number: 10, Hash: common.Hash{1}},
-			FinalizedL2: eth.L2BlockRef{Number: 105},
-			SafeL2: eth.L2BlockRef{
-				Number:   5,
-				L1Origin: eth.BlockID{Number: 10, Hash: common.Hash{1}},
-			},
+		snapshot := opFinalitySnapshot{
+			finalizedL1:       eth.L1BlockRef{Number: 10, Hash: common.Hash{1}},
+			finalizedL2Number: 105,
 		}
 
 		h.streamer.On("GetFallbackHotshotPos").Return(uint64(1))
-		h.endpointProv.On("EthClient", mock.Anything).Return(h.ethClient, nil)
-		h.endpointProv.On("RollupClient", mock.Anything).Return(h.rollupClient, nil)
-		h.finalityPoller.On("LastSnapshot").Return(*syncStatus, true)
-		h.rollupClient.On("SyncStatus", mock.Anything).Return(syncStatus, nil)
+		h.finalityPoller.On("LastSnapshot").Return(snapshot, true)
 		h.streamer.On("Refresh", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		h.streamer.On("HasNext", mock.Anything).Return(false)
 		h.streamer.On("Update", mock.Anything).Return(nil)
@@ -384,20 +341,13 @@ func TestProxyUsesEthereumFinalizedBlockWhenEspressoStopsAdvancing(t *testing.T)
 	capturer := &logCapturer{}
 	h := newTestHarness(t, log.NewLogger(capturer))
 	ctx := context.Background()
-	syncStatus := &eth.SyncStatus{
-		FinalizedL1: eth.L1BlockRef{Number: 10, Hash: common.Hash{1}},
-		FinalizedL2: eth.L2BlockRef{Number: 105},
-		SafeL2: eth.L2BlockRef{
-			Number:   5,
-			L1Origin: eth.BlockID{Number: 10, Hash: common.Hash{1}},
-		},
+	snapshot := opFinalitySnapshot{
+		finalizedL1:       eth.L1BlockRef{Number: 10, Hash: common.Hash{1}},
+		finalizedL2Number: 105,
 	}
 
 	h.streamer.On("GetFallbackHotshotPos").Return(uint64(1))
-	h.endpointProv.On("EthClient", mock.Anything).Return(h.ethClient, nil)
-	h.endpointProv.On("RollupClient", mock.Anything).Return(h.rollupClient, nil)
-	h.finalityPoller.On("LastSnapshot").Return(*syncStatus, true)
-	h.rollupClient.On("SyncStatus", mock.Anything).Return(syncStatus, nil)
+	h.finalityPoller.On("LastSnapshot").Return(snapshot, true)
 	h.streamer.On("Refresh", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	h.streamer.On("HasNext", mock.Anything).Return(false)
 	h.streamer.On("Update", mock.Anything).Return(nil)

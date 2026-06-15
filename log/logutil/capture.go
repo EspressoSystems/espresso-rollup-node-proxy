@@ -22,13 +22,18 @@ type LogEntry struct {
 type CaptureLogger struct {
 	Entries []slog.Record
 	Handler slog.Handler
+	Level   slog.Leveler
 	sync.Mutex
 }
 
 var _ slog.Handler = (*CaptureLogger)(nil)
 
 func (c *CaptureLogger) Enabled(ctx context.Context, level slog.Level) bool {
-	return true
+	minLevel := slog.LevelDebug
+	if c.Level != nil {
+		minLevel = c.Level.Level()
+	}
+	return level >= minLevel
 }
 
 // Handle implements [slog.Handler].
