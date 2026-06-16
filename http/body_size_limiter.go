@@ -2,7 +2,6 @@ package http
 
 import (
 	"net/http"
-	"strconv"
 )
 
 // httpBodySizeLimiterMiddleware is a middleware that limits the size of the
@@ -30,19 +29,6 @@ func (m *httpBodySizeLimiterMiddleware) ServeHTTP(w http.ResponseWriter, r *http
 	if r.ContentLength > m.maxRequestBodySize {
 		http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
 		return
-	}
-
-	if contentLengthString := r.Header.Get("Content-Length"); contentLengthString != "" {
-		contentLength, err := strconv.ParseInt(contentLengthString, 10, 64)
-		if err != nil {
-			http.Error(w, "unable to determine length", http.StatusLengthRequired)
-			return
-		}
-
-		if contentLength > m.maxRequestBodySize {
-			http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
-			return
-		}
 	}
 
 	m.handler.ServeHTTP(w, r)

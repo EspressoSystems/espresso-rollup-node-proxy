@@ -45,60 +45,6 @@ func TestBodySizeLimiterAllowsContentLengthUnderLimit(t *testing.T) {
 	require.Nil(result.Error, "expected error to be set in the response")
 }
 
-// TestBodySizeLimiterDetectsContentLengthHeaderBeingOverLimit tests that the
-// Content-Length header is inspected to ensure that the length of the
-// content is not anticipated to exceed the specified limit.
-//
-// When the Content-Length header is set to a valid number, and that
-// number exceeds the specified limit, we should should receive
-// an HTTP transport response error indicating that the request entity
-// is too large.
-func TestBodySizeLimiterDetectsContentLengthHeaderBeingOverLimit(t *testing.T) {
-	require := require.New(t)
-	recorder := httptest.NewRecorder()
-	handler := proxyhttp.RequestBodySizeLimiterMiddleware(
-		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Do nothing
-		}),
-		10,
-	)
-
-	handler.ServeHTTP(recorder, &http.Request{
-		Header: http.Header{
-			"Content-Length": []string{"100"},
-		},
-	})
-
-	resp := recorder.Result()
-	require.Equal(http.StatusRequestEntityTooLarge, resp.StatusCode, "expected to be entity too large")
-}
-
-// TestBodySizeLimiterDetectsContentLengthHeaderIsInvalid tests that the
-// Content-Length header value should be valid.
-//
-// If the Content-Length header is not set to a numeric value, we
-// should received a Transport error response indicating that the
-// length is required.
-func TestBodySizeLimiterDetectsContentLengthHeaderIsInvalid(t *testing.T) {
-	require := require.New(t)
-	recorder := httptest.NewRecorder()
-	handler := proxyhttp.RequestBodySizeLimiterMiddleware(
-		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Do nothing
-		}),
-		10,
-	)
-
-	handler.ServeHTTP(recorder, &http.Request{
-		Header: http.Header{
-			"Content-Length": []string{"invalid"},
-		},
-	})
-
-	resp := recorder.Result()
-	require.Equal(http.StatusLengthRequired, resp.StatusCode, "expected status code to be unsupported media type")
-}
-
 // TestBodySizeLimiterDetectsRequestContentLengthBeingOverLimit tests that the
 // ContentLength property on the [http.Request] is inspected and ensures that
 // the ContentLength does not exceed or limit.
