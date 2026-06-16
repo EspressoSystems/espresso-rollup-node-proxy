@@ -3,15 +3,12 @@ package http
 import (
 	"mime"
 	"net/http"
-
-	"github.com/ethereum/go-ethereum/log"
 )
 
 // httpEnsureContentTypeIsJSONRPCMiddleware is a middleware that checks the
 // the Content-Type of the incoming request, and ensures that it matches
 // the expected value for the JSON-RPC request.
 type httpEnsureContentTypeIsJSONRPCMiddleware struct {
-	logger  log.Logger
 	handler http.Handler
 }
 
@@ -51,6 +48,6 @@ func (m *httpEnsureContentTypeIsJSONRPCMiddleware) ServeHTTP(w http.ResponseWrit
 
 // ContentTypeIsJSONRPCMiddleware is a middleware that checks the Content-Type
 // of the incoming request, and only allows accepted values through.
-func ContentTypeIsJSONRPCMiddleware(next http.Handler, logger log.Logger) http.Handler {
-	return &httpEnsureContentTypeIsJSONRPCMiddleware{handler: next, logger: logger}
+func ContentTypeIsJSONRPCMiddleware(next http.Handler) http.Handler {
+	return &httpEnsureContentTypeIsJSONRPCMiddleware{handler: next}
 }

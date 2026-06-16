@@ -6,9 +6,7 @@ import (
 	"testing"
 
 	proxyhttp "github.com/EspressoSystems/espresso-rollup-node-proxy/http"
-	"github.com/EspressoSystems/espresso-rollup-node-proxy/log/logutil"
 
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,12 +32,10 @@ func TestContentTypeJSONRPCValidContentTypes(t *testing.T) {
 
 	for _, contentType := range acceptedContentTypes {
 		recorder := httptest.NewRecorder()
-		captureLogger := logutil.NewCaptureLogger(nil)
 		handler := proxyhttp.ContentTypeIsJSONRPCMiddleware(
 			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "OK", http.StatusOK)
 			}),
-			log.NewLogger(captureLogger),
 		)
 
 		handler.ServeHTTP(recorder, &http.Request{
@@ -64,12 +60,10 @@ func TestContentTypeJSONRPCInvalidContentType(t *testing.T) {
 	require := require.New(t)
 
 	recorder := httptest.NewRecorder()
-	captureLogger := logutil.NewCaptureLogger(nil)
 	handler := proxyhttp.ContentTypeIsJSONRPCMiddleware(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "OK", http.StatusOK)
 		}),
-		log.NewLogger(captureLogger),
 	)
 
 	handler.ServeHTTP(recorder, &http.Request{
@@ -92,12 +86,10 @@ func TestContentTypeJSONRPCUnsupportedContentType(t *testing.T) {
 	require := require.New(t)
 
 	recorder := httptest.NewRecorder()
-	captureLogger := logutil.NewCaptureLogger(nil)
 	handler := proxyhttp.ContentTypeIsJSONRPCMiddleware(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "OK", http.StatusOK)
 		}),
-		log.NewLogger(captureLogger),
 	)
 
 	handler.ServeHTTP(recorder, &http.Request{
@@ -122,12 +114,10 @@ func TestContentTypeJSONRPCNoContentType(t *testing.T) {
 	require := require.New(t)
 
 	recorder := httptest.NewRecorder()
-	captureLogger := logutil.NewCaptureLogger(nil)
 	handler := proxyhttp.ContentTypeIsJSONRPCMiddleware(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "OK", http.StatusOK)
 		}),
-		log.NewLogger(captureLogger),
 	)
 
 	handler.ServeHTTP(recorder, &http.Request{})

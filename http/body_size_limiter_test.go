@@ -10,9 +10,7 @@ import (
 
 	proxyhttp "github.com/EspressoSystems/espresso-rollup-node-proxy/http"
 	"github.com/EspressoSystems/espresso-rollup-node-proxy/jsonrpcv2"
-	"github.com/EspressoSystems/espresso-rollup-node-proxy/log/logutil"
 
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,7 +24,6 @@ import (
 func TestBodySizeLimiterAllowsContentLengthUnderLimit(t *testing.T) {
 	require := require.New(t)
 	recorder := httptest.NewRecorder()
-	captureLogger := logutil.NewCaptureLogger(nil)
 	handler := proxyhttp.RequestBodySizeLimiterMiddleware(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			enc := json.NewEncoder(w)
@@ -34,13 +31,11 @@ func TestBodySizeLimiterAllowsContentLengthUnderLimit(t *testing.T) {
 				Result: "ok",
 			}))
 		}),
-		log.NewLogger(captureLogger),
 		10,
 	)
 
 	handler.ServeHTTP(recorder, &http.Request{})
 
-	require.Empty(captureLogger.Entries, "expected no log entries since the content length exceeds the maximum")
 	resp := recorder.Result()
 	require.Equal(http.StatusOK, resp.StatusCode, "expected status code to be ok, since this is a JSON-RPC error")
 
@@ -61,12 +56,10 @@ func TestBodySizeLimiterAllowsContentLengthUnderLimit(t *testing.T) {
 func TestBodySizeLimiterDetectsContentLengthHeaderBeingOverLimit(t *testing.T) {
 	require := require.New(t)
 	recorder := httptest.NewRecorder()
-	captureLogger := logutil.NewCaptureLogger(nil)
 	handler := proxyhttp.RequestBodySizeLimiterMiddleware(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Do nothing
 		}),
-		log.NewLogger(captureLogger),
 		10,
 	)
 
@@ -76,7 +69,6 @@ func TestBodySizeLimiterDetectsContentLengthHeaderBeingOverLimit(t *testing.T) {
 		},
 	})
 
-	require.Empty(captureLogger.Entries, "expected no log entries since the content length exceeds the maximum")
 	resp := recorder.Result()
 	require.Equal(http.StatusRequestEntityTooLarge, resp.StatusCode, "expected to be entity too large")
 }
@@ -90,12 +82,10 @@ func TestBodySizeLimiterDetectsContentLengthHeaderBeingOverLimit(t *testing.T) {
 func TestBodySizeLimiterDetectsContentLengthHeaderIsInvalid(t *testing.T) {
 	require := require.New(t)
 	recorder := httptest.NewRecorder()
-	captureLogger := logutil.NewCaptureLogger(nil)
 	handler := proxyhttp.RequestBodySizeLimiterMiddleware(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Do nothing
 		}),
-		log.NewLogger(captureLogger),
 		10,
 	)
 
@@ -105,7 +95,6 @@ func TestBodySizeLimiterDetectsContentLengthHeaderIsInvalid(t *testing.T) {
 		},
 	})
 
-	require.Empty(captureLogger.Entries, "expected no log entries since the content length exceeds the maximum")
 	resp := recorder.Result()
 	require.Equal(http.StatusLengthRequired, resp.StatusCode, "expected status code to be unsupported media type")
 }
@@ -120,12 +109,10 @@ func TestBodySizeLimiterDetectsContentLengthHeaderIsInvalid(t *testing.T) {
 func TestBodySizeLimiterDetectsRequestContentLengthBeingOverLimit(t *testing.T) {
 	require := require.New(t)
 	recorder := httptest.NewRecorder()
-	captureLogger := logutil.NewCaptureLogger(nil)
 	handler := proxyhttp.RequestBodySizeLimiterMiddleware(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Do nothing
 		}),
-		log.NewLogger(captureLogger),
 		10,
 	)
 
@@ -133,7 +120,6 @@ func TestBodySizeLimiterDetectsRequestContentLengthBeingOverLimit(t *testing.T) 
 		ContentLength: 100,
 	})
 
-	require.Empty(captureLogger.Entries, "expected no log entries since the content length exceeds the maximum")
 	resp := recorder.Result()
 	require.Equal(http.StatusRequestEntityTooLarge, resp.StatusCode, "expected to be entity too large")
 }
@@ -158,7 +144,6 @@ func TestBodySizeLimiterDetectsRequestContentLengthBeingOverLimit(t *testing.T) 
 func TestBodySizeLimiterErrorWhenBodyIsOverLimit(t *testing.T) {
 	require := require.New(t)
 	recorder := httptest.NewRecorder()
-	captureLogger := logutil.NewCaptureLogger(nil)
 	handler := proxyhttp.RequestBodySizeLimiterMiddleware(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var request jsonrpcv2.Request
@@ -176,7 +161,6 @@ func TestBodySizeLimiterErrorWhenBodyIsOverLimit(t *testing.T) {
 				},
 			}))
 		}),
-		log.NewLogger(captureLogger),
 		10,
 	)
 
@@ -189,7 +173,6 @@ func TestBodySizeLimiterErrorWhenBodyIsOverLimit(t *testing.T) {
 		Body: io.NopCloser(bytes.NewBuffer(rawBody[:])),
 	})
 
-	require.Empty(captureLogger.Entries, "expected no log entries since the content length exceeds the maximum")
 	resp := recorder.Result()
 	require.Equal(http.StatusOK, resp.StatusCode, "expected status code to be ok, since this is a JSON-RPC error")
 
