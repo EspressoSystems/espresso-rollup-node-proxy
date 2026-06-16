@@ -433,7 +433,7 @@ func TestProxyUsesEthereumFinalizedBlockWhenEspressoStopsAdvancing(t *testing.T)
 		Host:   upstream.Listener.Addr().String(),
 	}
 	reverseProxy := httputil.NewSingleHostReverseProxy(upstreamURL)
-	interceptor := proxypkg.NewInterceptor(h.store, "finalized", proxypkg.DefaultMaxBatchSize)
+	interceptor := proxypkg.NewInterceptor(log.Root(), h.store, "finalized", proxypkg.DefaultMaxBatchSize)
 	handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), 0, adapters.NewHTTPJSONRPCInterceptor(reverseProxy, interceptor))
 	callProxy := func() string {
 		reqBody := `{"jsonrpc":"2.0","id":1,"method":"eth_getBlockByNumber","params":["finalized",false]}`

@@ -30,6 +30,7 @@ var ErrMaxJSONDepthExceeded = errors.New("JSON nesting depth exceeds limit")
 var ErrMaxBatchSizeExceeded = errors.New("maximum number of json requests in a single batch exceeded")
 
 type Interceptor struct {
+	logger       log.Logger
 	store        *espressoStore.EspressoStore
 	espressoTag  string
 	maxBatchSize int
@@ -44,8 +45,12 @@ func (e *BatchTooLargeError) Error() string {
 	return fmt.Sprintf("batch too large (count %d exceeds limit %d)", e.Count, e.Limit)
 }
 
-func NewInterceptor(store *espressoStore.EspressoStore, espressoTag string, maxBatchSize int) *Interceptor {
+func NewInterceptor(logger log.Logger, store *espressoStore.EspressoStore, espressoTag string, maxBatchSize int) *Interceptor {
+	if logger == nil {
+		logger = log.Root()
+	}
 	return &Interceptor{
+		logger:       logger,
 		store:        store,
 		espressoTag:  espressoTag,
 		maxBatchSize: maxBatchSize,
@@ -80,7 +85,7 @@ func (i *Interceptor) getCurrentEspressoFinalizedBlockNumber() (uint64, error) {
 func (i *Interceptor) InterceptRequest(request jsonrpcv2.Request) (jsonrpcv2.Request, error) {
 	finalizedEspressoBlockNumber, err := i.getCurrentEspressoFinalizedBlockNumber()
 	if err != nil {
-		log.Warn("espresso state is empty, sending rawRequest to the full node", "err", err)
+		i.logger.Warn("espresso state is empty, sending rawRequest to the full node", "err", err)
 		return request, nil
 	}
 
@@ -103,7 +108,7 @@ func (i *Interceptor) InterceptBatchRequests(requests []jsonrpcv2.Request) ([]js
 
 	finalizedEspressoBlockNumber, err := i.getCurrentEspressoFinalizedBlockNumber()
 	if err != nil {
-		log.Warn("espresso state is empty, sending rawRequest to the full node", "err", err)
+		i.logger.Warn("espresso state is empty, sending rawRequest to the full node", "err", err)
 		return requests, nil
 	}
 

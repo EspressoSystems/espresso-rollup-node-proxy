@@ -29,7 +29,7 @@ func newTestReverseProxyHandler(t *testing.T, upstreamURL *url.URL, l2BlockNumbe
 	require.True(t, updated)
 	require.NoError(t, err)
 	reverseProxy := httputil.NewSingleHostReverseProxy(upstreamURL)
-	interceptor := NewInterceptor(store, espressoTag, maxBatchSize)
+	interceptor := NewInterceptor(nil, store, espressoTag, maxBatchSize)
 	return adapters.NewHTTPJSONRPCInterceptor(reverseProxy, interceptor)
 }
 

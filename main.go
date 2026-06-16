@@ -299,6 +299,7 @@ func main() {
 	fullNodeVerifier.Start(ctx)
 	logger.Info("Verifier started")
 	interceptor := proxy.NewInterceptor(
+		logger,
 		espressoStore,
 		cfg.EspressoTag,
 		cfg.MaxBatchSize,
