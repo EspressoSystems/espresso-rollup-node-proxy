@@ -7,6 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 )
 
+// httpPanicRecoveryMiddleware is a middleware that cleanly handles panics
 // that may occur in the process of processing a request.
 //
 // While we do not expect any panics to reasonably occur, we don't want a
