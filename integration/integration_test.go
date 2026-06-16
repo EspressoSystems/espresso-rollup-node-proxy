@@ -1,4 +1,4 @@
-package proxy
+package integration_test
 
 import (
 	"bytes"
@@ -14,10 +14,16 @@ import (
 	"github.com/EspressoSystems/espresso-rollup-node-proxy/adapters"
 	proxyhttp "github.com/EspressoSystems/espresso-rollup-node-proxy/http"
 	"github.com/EspressoSystems/espresso-rollup-node-proxy/jsonrpcv2"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/proxy"
 	espressoStore "github.com/EspressoSystems/espresso-rollup-node-proxy/store"
 
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/require"
+)
+
+const (
+	DefaultMaxBatchSize       = proxy.DefaultMaxBatchSize
+	DefaultMaxRequestBodySize = proxy.DefaultMaxRequestBodySize
 )
 
 func newTestReverseProxyHandler(t *testing.T, upstreamURL *url.URL, l2BlockNumber uint64, espressoTag string, maxBatchSize int) http.Handler {
@@ -29,7 +35,7 @@ func newTestReverseProxyHandler(t *testing.T, upstreamURL *url.URL, l2BlockNumbe
 	require.True(t, updated)
 	require.NoError(t, err)
 	reverseProxy := httputil.NewSingleHostReverseProxy(upstreamURL)
-	interceptor := NewInterceptor(nil, store, espressoTag, maxBatchSize)
+	interceptor := proxy.NewInterceptor(nil, store, espressoTag, maxBatchSize)
 	return adapters.NewHTTPJSONRPCInterceptor(reverseProxy, interceptor)
 }
 
@@ -40,13 +46,6 @@ func (errReader) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
 // TestServe contains various tests ensuring that the full http server to
 // Proxy, Interceptor, and Reverse Proxy behaves as expected in various
 // scenarios.
-//
-// TODO: These tests are **NOT** isolated to the Proxy type and its behavior
-// directly, but instead act as some psuedo integration tests for combining
-// multiple components together.
-// As such, it is recommended that we should probaly relocate them to a
-// different file, and utilize this file for testing the Proxy and its
-// specific behavior directory.
 func TestServe(t *testing.T) {
 	// This test ensures that string requests to the ETH JSON RPC doesn't
 	// get modified by the Interceptor when the tag does not match
