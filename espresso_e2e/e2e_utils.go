@@ -677,6 +677,9 @@ func matchLogAttrs(capturer *logutil.CaptureLogger, msg string, expected map[str
 
 func startLoadGen(ctx context.Context, t *testing.T, rpcURL string) func() {
 	t.Helper()
+
+	// "well-known Hardhat/Anvil test key, never use in production
+	// nolint:gosec
 	const loadGenKey = "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
 	privateKey, err := crypto.HexToECDSA(loadGenKey)
 	require.NoError(t, err)
