@@ -13,7 +13,7 @@ type httpBodySizeLimiterMiddleware struct {
 	maxRequestBodySize int64
 }
 
-// ServeHttp implements http.Handler
+// ServeHTTP implements http.Handler
 //
 // This middleware replaces the Request body's io.ReaderCloser with a different
 // ReadCloser that limits the size of the content body.

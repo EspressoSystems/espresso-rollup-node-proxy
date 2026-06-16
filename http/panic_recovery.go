@@ -16,7 +16,7 @@ type httpPanicRecoveryMiddleware struct {
 	logger  log.Logger
 }
 
-// ServeHttp implements http.Handler
+// ServeHTTP implements http.Handler
 //
 // This automatically rocvers and captures panics that occur when the
 // underlying http.Handler is processing the request.

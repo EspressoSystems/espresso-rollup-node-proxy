@@ -27,7 +27,7 @@ type httpRequestLoggingMiddleware struct {
 	logger  log.Logger
 }
 
-// ServeHttp implements http.Handler
+// ServeHTTP implements http.Handler
 //
 // This times the request, and passes the request through to the next handler.
 // Once the request is processed, it will log the results.
