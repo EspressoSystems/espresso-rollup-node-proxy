@@ -44,7 +44,7 @@ func mustNewOPVerifier(ctx context.Context, logger log.Logger, cfg *Config, espr
 	}
 	lc, err := espressoLightClient.NewLightclientCaller(cfg.OPConfig.LightClientAddress, l1Client)
 	if err != nil || lc == nil {
-		logger.Crit("failed to create light client")
+		logger.Crit("failed to create light client", "error", err)
 		os.Exit(1)
 	}
 	v := opVerifier.NewOPEspressoBatchVerifier(ctx, logger, espressoStore, l1Client, lc, cfg.toOPVerifierConfig())
