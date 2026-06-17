@@ -1,6 +1,7 @@
 package adapters
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 
@@ -12,18 +13,14 @@ import (
 // WriteJSONRPCResponseToHTTPResponseWriter is a helper function that writes
 // the given JSON-RPC response
 func WriteJSONRPCResponseToHTTPResponseWriter(w http.ResponseWriter, response jsonrpcv2.Response) {
-	w.Header().Set("Content-Type", "application/json")
-	enc := json.NewEncoder(w)
-	if err := enc.Encode(response); err != nil {
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
 		log.Error("failed to encode JSON-RPC response", "error", err)
-
-		// We're expecting the Server to have successuflly sent a response in this
-		// case.  Yet our encoding failed.
-		// Fallback to a Transport error
 		http.Error(w, "failed to send response", http.StatusInternalServerError)
+		return
 	}
-
-	// Everything was send without issue
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write(buf.Bytes())
 }
 
 // WriteJSONRPCErrorToHTTPResponseWriter is a convenience function that
