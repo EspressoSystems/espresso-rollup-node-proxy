@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/EspressoSystems/espresso-rollup-node-proxy/adapters"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/jsonrpcv2"
 	espressostore "github.com/EspressoSystems/espresso-rollup-node-proxy/store"
 
 	"github.com/stretchr/testify/require"
@@ -103,5 +104,17 @@ func TestInterceptor(t *testing.T) {
 		result, err := adapters.PerformRequestIntercept([]byte(input), interceptor)
 		require.NoError(t, err)
 		require.JSONEq(t, input, string(result))
+	})
+
+	t.Run("InterceptBatchRequests returns nil slice on error", func(t *testing.T) {
+		store := newTestStore(t, blockNumber)
+		const maxBatch = 2
+		interceptor := NewInterceptor(nil, store, "espresso", maxBatch)
+
+		// Build a batch that exceeds the limit
+		requests := make([]jsonrpcv2.Request, maxBatch+1)
+		result, err := interceptor.InterceptBatchRequests(requests)
+		require.Error(t, err)
+		require.Nil(t, result)
 	})
 }
