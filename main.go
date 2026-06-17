@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httputil"
@@ -159,7 +158,8 @@ func NewSingleHostReverseProxy(target *url.URL) *httputil.ReverseProxy {
 func createHttpServer(logger log.Logger, cfg *Config, interceptor adapters.Interceptor) *http.Server {
 	fullNodeExecutionRPCURL, err := url.Parse(cfg.FullNodeExecutionRPC)
 	if err != nil {
-		panic(fmt.Sprintf("failed to parse full node execution RPC URL: %v", err))
+		logger.Crit("failed to parse full node execution RPC URL", "error", err)
+		os.Exit(1)
 	}
 
 	// Create the Reverse Proxy
