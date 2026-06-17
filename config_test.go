@@ -144,7 +144,7 @@ func TestConfigValidate(t *testing.T) {
 			BridgeAddress: common.HexToAddress("0x3f1Eae7D46d88F08fc2F8ed27FCb2AB183EB2d0E"),
 			Namespace:     412346,
 			ValidBatcherAddresses: []nitroVerifier.BatcherAddressConfig{
-				{Address: "0x3f1Eae7D46d88F08fc2F8ed27FCb2AB183EB2d0E"},
+				{Address: common.HexToAddress("0x3f1Eae7D46d88F08fc2F8ed27FCb2AB183EB2d0E")},
 			},
 		},
 	}
@@ -163,7 +163,7 @@ func TestConfigValidate(t *testing.T) {
 
 	nitroBadAddr := validNitro
 	nitroBadAddr.NitroConfig.ValidBatcherAddresses = []nitroVerifier.BatcherAddressConfig{
-		{Address: "0xNOTANADDR"},
+		{Address: common.HexToAddress("0xNOTANADDR")},
 	}
 	err = nitroBadAddr.validate()
 	require.Error(t, err)

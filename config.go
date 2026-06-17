@@ -184,16 +184,6 @@ func validateURL(field, s string) error {
 	return nil
 }
 
-func validateAddressString(field, s string) error {
-	if s == "" {
-		return fmt.Errorf("%s: must not be empty", field)
-	}
-	if !common.IsHexAddress(s) {
-		return fmt.Errorf("%s: invalid Ethereum address %q", field, s)
-	}
-	return nil
-}
-
 func validateAddress(field string, a common.Address) error {
 	if a == (common.Address{}) {
 		return fmt.Errorf("%s: must not be empty", field)
