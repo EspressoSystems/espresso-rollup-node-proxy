@@ -156,7 +156,7 @@ func TestWebSocketBridgeSuccess(t *testing.T) {
 	require := require.New(t)
 	recorder := httptest.NewRecorder()
 	captureLogger := logutil.NewCaptureLogger(nil)
-	handler := proxyhttp.WebSocketUpgrader(
+	handler := proxyhttp.WebSocketHandler(
 		log.NewLogger(captureLogger),
 		FakeWebSocketUpgrader(
 			behaviorNormal,
@@ -180,7 +180,7 @@ func TestWebSocketBridgeUpgradeError(t *testing.T) {
 	require := require.New(t)
 	recorder := httptest.NewRecorder()
 	captureLogger := logutil.NewCaptureLogger(nil)
-	handler := proxyhttp.WebSocketUpgrader(
+	handler := proxyhttp.WebSocketHandler(
 		log.NewLogger(captureLogger),
 		FakeWebSocketUpgrader(
 			behaviorUpgradeErr,
@@ -204,7 +204,7 @@ func TestWebSocketBridgeReadError(t *testing.T) {
 	require := require.New(t)
 	recorder := httptest.NewRecorder()
 	captureLogger := logutil.NewCaptureLogger(nil)
-	handler := proxyhttp.WebSocketUpgrader(
+	handler := proxyhttp.WebSocketHandler(
 		log.NewLogger(captureLogger),
 		FakeWebSocketUpgrader(
 			behaviorReadErrEOF,
@@ -228,7 +228,7 @@ func TestWebSocketBridgeCloseError(t *testing.T) {
 	require := require.New(t)
 	recorder := httptest.NewRecorder()
 	captureLogger := logutil.NewCaptureLogger(nil)
-	handler := proxyhttp.WebSocketUpgrader(
+	handler := proxyhttp.WebSocketHandler(
 		log.NewLogger(captureLogger),
 		FakeWebSocketUpgrader(
 			behaviorCloseErr,
@@ -252,7 +252,7 @@ func TestWebSocketBridgeCloseErrorAlreadyClosed(t *testing.T) {
 	require := require.New(t)
 	recorder := httptest.NewRecorder()
 	captureLogger := logutil.NewCaptureLogger(nil)
-	handler := proxyhttp.WebSocketUpgrader(
+	handler := proxyhttp.WebSocketHandler(
 		log.NewLogger(captureLogger),
 		FakeWebSocketUpgrader(
 			behaviorCloseErrClosed,

@@ -211,7 +211,7 @@ func createWsServer(logger log.Logger, cfg *Config, interceptor adapters.Interce
 
 	return &http.Server{
 		Addr: cfg.WsListenAddr,
-		Handler: proxyhttp.WebSocketUpgrader(
+		Handler: proxyhttp.WebSocketHandler(
 			logger,
 			reverseProxy,
 		),
