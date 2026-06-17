@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"testing"
 
@@ -116,5 +117,43 @@ func TestInterceptor(t *testing.T) {
 		result, err := interceptor.InterceptBatchRequests(requests)
 		require.Error(t, err)
 		require.Nil(t, result)
+	})
+}
+
+// FuzzReplaceTagInParams verifies that replaceTagInParams does not panic or
+// crash on arbitrary JSON-shaped inputs. The function processes untrusted
+// request params and must handle any valid (or structurally unexpected) JSON
+// value without panicking or exceeding the stack.
+func FuzzReplaceTagInParams(f *testing.F) {
+	// Seed corpus: representative params shapes seen in production
+	f.Add(`["espresso", false]`)
+	f.Add(`{"blockTag": "espresso"}`)
+	f.Add(`"espresso"`)
+	f.Add(`null`)
+	f.Add(`42`)
+	f.Add(`[{"nested": ["espresso"]}]`)
+	f.Add(`[{"a":{"b":{"c":{"d":"espresso"}}}}]`)
+	f.Add(`""`)
+	f.Add(`[]`)
+	f.Add(`{}`)
+
+	i := &interceptor{espressoTag: "espresso"}
+
+	f.Fuzz(func(t *testing.T, raw string) {
+		var params any
+		if err := json.Unmarshal([]byte(raw), &params); err != nil {
+			return // skip structurally invalid JSON
+		}
+
+		result, _, err := i.replaceTagInParams(params, 42, 0)
+		if err != nil {
+			return // error paths are expected and acceptable
+		}
+
+		// Verify the result is still marshallable — an un-marshallable result
+		// would indicate the function introduced an invalid value.
+		if _, err := json.Marshal(result); err != nil {
+			t.Fatalf("replaceTagInParams returned un-marshallable result: %v", err)
+		}
 	})
 }
