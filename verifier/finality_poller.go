@@ -102,6 +102,7 @@ func (p *FinalityPoller[T]) poll(ctx context.Context) {
 
 func (p *FinalityPoller[T]) run(ctx context.Context) {
 	defer p.wg.Done()
+	p.poll(ctx)
 	ticker := time.NewTicker(p.interval)
 	defer ticker.Stop()
 	for {
