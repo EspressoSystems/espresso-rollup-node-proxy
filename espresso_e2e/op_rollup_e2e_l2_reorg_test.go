@@ -61,7 +61,10 @@ func TestOPE2EL2Reorg(t *testing.T) {
 	stopLoad := startLoadGen(ctx, t, opGethSeqURL)
 	defer stopLoad()
 
-	time.Sleep(5 * time.Second)
+	blockAfterRewind := getBlockByTag(t, opGethSeqURL, "latest")
+	pollUntil(t, 30*time.Second, "node did not start advancing after reorg", func() bool {
+		return getBlockByTag(t, opGethSeqURL, "latest") > blockAfterRewind
+	})
 
 	// bring back up
 	t.Log("Restarting op-node-sequencer")
