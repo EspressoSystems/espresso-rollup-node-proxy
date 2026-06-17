@@ -130,6 +130,30 @@ func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "OK", http.StatusOK)
 }
 
+// newReadinessHandler returns a /ready handler. It returns 503 until the
+// store has at least one verified block, then swaps itself to a permanent 200
+// handler. Once ready, subsequent requests incur no store access.
+func newReadinessHandler(espressoStore *store.EspressoStore) http.Handler {
+	var current http.HandlerFunc
+
+	readyFn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "OK", http.StatusOK)
+	})
+
+	current = func(w http.ResponseWriter, r *http.Request) {
+		if espressoStore.GetState().L2BlockNumber == 0 {
+			http.Error(w, "not ready", http.StatusServiceUnavailable)
+			return
+		}
+		current = readyFn
+		readyFn(w, r)
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		current(w, r)
+	})
+}
+
 func NewSingleHostWSReverseProxy(target *url.URL, upgrader websocket.Upgrader) *websocketutil.ReverseProxy {
 	return websocketutil.NewReverseProxy(
 		target,
@@ -155,7 +179,7 @@ func NewSingleHostReverseProxy(target *url.URL) *httputil.ReverseProxy {
 // requests. It sets up the necessary middleware for request logging, body
 // size limits, and the JSON-RPC bridge to the full node proxy. It also
 // includes a health check endpoint at "/health".
-func createHttpServer(logger log.Logger, cfg *Config, interceptor adapters.Interceptor) *http.Server {
+func createHttpServer(logger log.Logger, cfg *Config, espressoStore *store.EspressoStore, interceptor adapters.Interceptor) *http.Server {
 	fullNodeExecutionRPCURL, err := url.Parse(cfg.FullNodeExecutionRPC)
 	if err != nil {
 		logger.Crit("failed to parse full node execution RPC URL", "error", err)
@@ -166,6 +190,7 @@ func createHttpServer(logger log.Logger, cfg *Config, interceptor adapters.Inter
 	reverseProxy := NewSingleHostReverseProxy(fullNodeExecutionRPCURL)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthCheckHandler)
+	mux.Handle("/ready", newReadinessHandler(espressoStore))
 	mux.Handle(
 		"/",
 		proxyhttp.HTTPRPCMiddlewares(
@@ -305,7 +330,7 @@ func main() {
 		cfg.MaxBatchSize,
 	)
 
-	httpServer := createHttpServer(logger, cfg, interceptor)
+	httpServer := createHttpServer(logger, cfg, espressoStore, interceptor)
 	webSocketServer := createWsServer(logger, cfg, interceptor)
 
 	var serverWaitGroup sync.WaitGroup
