@@ -131,7 +131,7 @@ func (i *interceptor) InterceptBatchRequests(requests []jsonrpcv2.Request) ([]js
 	for j, req := range requests {
 		r, err := i.interceptRequest(req, finalizedEspressoBlockNumber)
 		if err != nil {
-			return requests, err
+			return nil, err
 		}
 
 		next[j] = r
