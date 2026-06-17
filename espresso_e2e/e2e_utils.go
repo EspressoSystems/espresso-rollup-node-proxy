@@ -471,7 +471,11 @@ func startTestProxy(ctx context.Context, t *testing.T, backendURLString string, 
 		adapters.NewHTTPJSONRPCInterceptor(reverseProxy, interceptor),
 	)
 	server := &http.Server{Handler: handler}
-	go func() { _ = server.Serve(listener) }()
+	go func() {
+		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+			t.Errorf("proxy server error: %v", err)
+		}
+	}()
 	t.Logf("proxy listening on %s", proxyURL)
 	return proxyURL.String(), func() { _ = server.Shutdown(ctx) }
 }
