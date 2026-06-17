@@ -182,54 +182,53 @@ func (i *interceptor) replaceTagInParams(params any, espressoFinalizedBlockNumbe
 	// Case 2: params is a JSON object — recurse into each value
 	// 	`{"jsonrpc":"2.0","id":1,"method":"eth_call","params":{"to":"0xabc","data":"0x123","blockTag":"espresso"}}`
 	if cast, castOK := params.(map[string]any); castOK {
-		nextParams := map[string]any{}
-		var changed bool
+		var nextParams map[string]any
 		for key, value := range cast {
 			next, c, err := i.replaceTagInParams(value, espressoFinalizedBlockNumber, depth+1)
 			if err != nil {
 				return nil, false, fmt.Errorf("failed to replace espresso tag in object: %w", err)
 			}
-
 			if !c {
-				nextParams[key] = value
 				continue
 			}
-
+			if nextParams == nil {
+				nextParams = make(map[string]any, len(cast))
+				for k, v := range cast {
+					nextParams[k] = v
+				}
+			}
 			nextParams[key] = next
-			changed = true
 		}
-
-		if changed {
+		if nextParams != nil {
 			return nextParams, true, nil
 		}
-
 		return cast, false, nil
 	}
 
 	// Case 3: params is a JSON array — recurse into each element
 	// {"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["espresso",false]}
 	if cast, castOK := params.([]any); castOK {
-		var changed bool
-		nextParams := make([]any, len(cast))
+		var nextParams []any
 		for j, value := range cast {
 			next, c, err := i.replaceTagInParams(value, espressoFinalizedBlockNumber, depth+1)
 			if err != nil {
 				return nil, false, fmt.Errorf("failed to replace espresso tag in array: %w", err)
 			}
-
 			if !c {
-				nextParams[j] = value
+				if nextParams != nil {
+					nextParams[j] = value
+				}
 				continue
 			}
-
+			if nextParams == nil {
+				nextParams = make([]any, len(cast))
+				copy(nextParams, cast[:j])
+			}
 			nextParams[j] = next
-			changed = true
 		}
-
-		if changed {
+		if nextParams != nil {
 			return nextParams, true, nil
 		}
-
 		return cast, false, nil
 	}
 
