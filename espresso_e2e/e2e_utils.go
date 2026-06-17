@@ -52,8 +52,12 @@ type mockLightClient struct {
 	last   uint64
 }
 
-func (m *mockLightClient) FinalizedState(_ *bind.CallOpts) (opStreamer.FinalizedState, error) {
-	current, err := m.client.FetchLatestBlockHeight(context.Background())
+func (m *mockLightClient) FinalizedState(opts *bind.CallOpts) (opStreamer.FinalizedState, error) {
+	ctx := context.Background()
+	if opts != nil && opts.Context != nil {
+		ctx = opts.Context
+	}
+	current, err := m.client.FetchLatestBlockHeight(ctx)
 	result := m.last
 	if err == nil {
 		// Make sure finalized state is back enough blocks
