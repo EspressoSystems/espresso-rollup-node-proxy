@@ -156,6 +156,17 @@ func parseConfig() *Config {
 	return cfg
 }
 
+func validateWebSocketURL(field, s string) error {
+	if err := validateURL(field, s); err != nil {
+		return err
+	}
+	u, _ := url.Parse(s)
+	if u.Scheme != "ws" && u.Scheme != "wss" {
+		return fmt.Errorf("%s: URL scheme must be ws or wss, got %q", field, u.Scheme)
+	}
+	return nil
+}
+
 func validateURL(field, s string) error {
 	if s == "" {
 		return fmt.Errorf("%s: must not be empty", field)
@@ -226,6 +237,10 @@ func (c *Config) validate() error {
 		for i, a := range c.NitroConfig.ValidBatcherAddresses {
 			errs = append(errs, validateAddressString(fmt.Sprintf("nitro.valid-batcher-addresses[%d].address", i), a.Address))
 		}
+	}
+
+	if c.WsListenAddr != "" {
+		errs = append(errs, validateWebSocketURL("ws.full-node-execution-rpc", c.WsFullNodeExecutionRPC))
 	}
 
 	if c.ListenAddr == "" {
