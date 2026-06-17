@@ -11,6 +11,7 @@ import (
 
 	"github.com/EspressoSystems/espresso-rollup-node-proxy/adapters"
 	"github.com/EspressoSystems/espresso-rollup-node-proxy/jsonrpcv2"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/require"
 )
 
@@ -35,6 +36,7 @@ func TestHTTPInterceptor_JSONRPCErrorExtractedFromJoinedChain(t *testing.T) {
 	joined := fmt.Errorf("wrapped: %w", errors.Join(sentinel, rpcErr))
 
 	handler := adapters.NewHTTPJSONRPCInterceptor(
+		log.Root(),
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			t.Error("upstream handler should not be called on interceptor error")
 		}),

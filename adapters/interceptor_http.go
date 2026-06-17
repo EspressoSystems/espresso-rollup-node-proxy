@@ -3,24 +3,27 @@ package adapters
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 
 	"github.com/EspressoSystems/espresso-rollup-node-proxy/jsonrpcv2"
+
+	"github.com/ethereum/go-ethereum/log"
 )
 
 type httpJSONRPCInterceptor struct {
 	handler     http.Handler
 	interceptor Interceptor
+	logger      log.Logger
 }
 
 // NewHTTPJSONRPCInterceptor creates a [http.Handler] that will perform
 // request intercept.
-func NewHTTPJSONRPCInterceptor(handler http.Handler, interceptor Interceptor) http.Handler {
+func NewHTTPJSONRPCInterceptor(logger log.Logger, handler http.Handler, interceptor Interceptor) http.Handler {
 	return &httpJSONRPCInterceptor{
 		handler:     handler,
 		interceptor: interceptor,
+		logger:      logger,
 	}
 }
 
@@ -37,7 +40,8 @@ func (i *httpJSONRPCInterceptor) ServeHTTP(w http.ResponseWriter, r *http.Reques
 	originalBody := r.Body
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
-		WriteJSONRPCErrorToHTTPResponseWriter(w, nil, jsonrpcv2.CodeParseError, fmt.Sprintf("failed to parse request: %s", err))
+		i.logger.Error("failed to read JSON-RPC request body", "error", err)
+		WriteJSONRPCErrorToHTTPResponseWriter(w, nil, jsonrpcv2.CodeParseError, "failed to parse request")
 		return
 	}
 
@@ -53,7 +57,8 @@ func (i *httpJSONRPCInterceptor) ServeHTTP(w http.ResponseWriter, r *http.Reques
 			return
 		}
 
-		WriteJSONRPCErrorToHTTPResponseWriter(w, nil, jsonrpcv2.CodeInternalError, fmt.Sprintf("failed to intercept request: %s", err))
+		i.logger.Error("failed to intercept JSON-RPC request", "error", err)
+		WriteJSONRPCErrorToHTTPResponseWriter(w, nil, jsonrpcv2.CodeInternalError, "failed to intercept request")
 		return
 	}
 

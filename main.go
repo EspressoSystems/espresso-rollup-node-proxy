@@ -196,7 +196,7 @@ func createHttpServer(logger log.Logger, cfg *Config, espressoStore *store.Espre
 		proxyhttp.HTTPRPCMiddlewares(
 			logger,
 			int64(cfg.MaxRequestBodySize),
-			adapters.NewHTTPJSONRPCInterceptor(reverseProxy, interceptor),
+			adapters.NewHTTPJSONRPCInterceptor(logger, reverseProxy, interceptor),
 		),
 	)
 

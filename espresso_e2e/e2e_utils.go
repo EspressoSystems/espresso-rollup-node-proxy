@@ -472,7 +472,7 @@ func startTestProxy(ctx context.Context, t *testing.T, backendURLString string, 
 	handler := proxyhttp.HTTPRPCMiddlewares(
 		log.Root(),
 		proxy.DefaultMaxRequestBodySize,
-		adapters.NewHTTPJSONRPCInterceptor(reverseProxy, interceptor),
+		adapters.NewHTTPJSONRPCInterceptor(log.Root(), reverseProxy, interceptor),
 	)
 	server := &http.Server{Handler: handler}
 	go func() {

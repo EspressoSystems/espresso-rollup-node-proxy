@@ -36,7 +36,7 @@ func newTestReverseProxyHandler(t *testing.T, upstreamURL *url.URL, l2BlockNumbe
 	require.NoError(t, err)
 	reverseProxy := httputil.NewSingleHostReverseProxy(upstreamURL)
 	interceptor := proxy.NewInterceptor(nil, store, espressoTag, maxBatchSize)
-	return adapters.NewHTTPJSONRPCInterceptor(reverseProxy, interceptor)
+	return adapters.NewHTTPJSONRPCInterceptor(log.Root(), reverseProxy, interceptor)
 }
 
 type errReader struct{}
