@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httputil"
@@ -248,17 +249,17 @@ func createWsServer(logger log.Logger, cfg *Config, interceptor adapters.Interce
 	}
 }
 
-// startHTTPServers starts the provided HTTP servers in separate goroutines,
-// and logs any critical errors that occur during startup.
+// startHTTPServers starts the provided HTTP servers in separate goroutines.
+// Any fatal listen error is sent to errCh so main() can trigger a graceful shutdown.
+// Nil servers are skipped, allowing callers to conditionally start servers based on configuration.
 func startHTTPServers(
 	logger log.Logger,
 	wg *sync.WaitGroup,
+	errCh chan<- error,
 	servers ...*http.Server,
 ) {
 	for _, server := range servers {
 		if server == nil {
-			// Skip any non-existent serveres, this allows us to conditionally
-			// start servers based on configuration.
 			continue
 		}
 
@@ -267,10 +268,7 @@ func startHTTPServers(
 			defer wg.Done()
 			logger.Info("server listening", "addr", server.Addr)
 			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				// TODO: Re-evalute this logger.Crit usage. Invoking this function
-				// will also call os.Exit, forcing the program to exit without
-				// cleaning up.
-				logger.Crit("server failed to listen and serve", "error", err)
+				errCh <- fmt.Errorf("server %s: %w", server.Addr, err)
 			}
 		}(wg, server)
 	}
@@ -334,7 +332,8 @@ func main() {
 	webSocketServer := createWsServer(logger, cfg, interceptor)
 
 	var serverWaitGroup sync.WaitGroup
-	startHTTPServers(logger, &serverWaitGroup, httpServer, webSocketServer)
+	serverErrCh := make(chan error, 2)
+	startHTTPServers(logger, &serverWaitGroup, serverErrCh, httpServer, webSocketServer)
 
 	sigCh := make(chan os.Signal, 1)
 	// Listen for termination signals to gracefully shut down the server
@@ -345,6 +344,9 @@ func main() {
 
 	case <-ctx.Done():
 		logger.Info("program context canceled, shutting down server", "err", ctx.Err())
+
+	case err := <-serverErrCh:
+		logger.Error("server error, initiating shutdown", "error", err)
 	}
 
 	// Cancel the application context
