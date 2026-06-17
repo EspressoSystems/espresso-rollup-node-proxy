@@ -143,7 +143,7 @@ func parseConfig() *Config {
 
 	for _, addr := range batcherAddressFlags {
 		cfg.NitroConfig.ValidBatcherAddresses = append(cfg.NitroConfig.ValidBatcherAddresses, nitroVerifier.BatcherAddressConfig{
-			Address: addr,
+			Address: common.HexToAddress(addr),
 			From:    0,
 			To:      math.MaxUint64,
 		})
@@ -235,7 +235,7 @@ func (c *Config) validate() error {
 			errs = append(errs, fmt.Errorf("nitro.valid-batcher-addresses: at least one address required"))
 		}
 		for i, a := range c.NitroConfig.ValidBatcherAddresses {
-			errs = append(errs, validateAddressString(fmt.Sprintf("nitro.valid-batcher-addresses[%d].address", i), a.Address))
+			errs = append(errs, validateAddress(fmt.Sprintf("nitro.valid-batcher-addresses[%d].address", i), a.Address))
 		}
 	}
 

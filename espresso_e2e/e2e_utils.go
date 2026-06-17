@@ -143,7 +143,7 @@ func startNitroVerifierWithLogger(ctx context.Context, t *testing.T, logger log.
 			Namespace:            nitroNamespace,
 			BridgeAddress:        common.HexToAddress(nitroBridgeAddress),
 			ValidBatcherAddresses: []nitroVerifier.BatcherAddressConfig{
-				{Address: nitroBatchPoster, From: 0, To: math.MaxUint64},
+				{Address: common.HexToAddress(nitroBatchPoster), From: 0, To: math.MaxUint64},
 			},
 		})
 	require.NotNil(t, v, "failed to create Nitro verifier")
