@@ -147,7 +147,7 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 		t.Log("Proxy espresso tag response matches direct OP geth full node response after full node reorg")
 
 		requireLogStringAttrs(t, defaultCapturer, "batch verification failed", map[string]string{
-			"error": fmt.Sprintf("batch verification failed for batch number %d: espresso batch does not match full node batch", maliciousBlockNum),
+			"error": fmt.Sprintf("batch verification failed for batch number %d: block hash mismatch", maliciousBlockNum),
 		})
 		t.Logf("Succesfully discarded verification of bad block hash")
 		// Make sure hashes are now correct at the malicious block as well

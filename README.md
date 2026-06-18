@@ -40,7 +40,9 @@ The proxy is configured via CLI flags or a JSON config file (or both — flags o
 {
   "full_node_execution_rpc": "<op-geth-rpc>",
   "ws_full_node_execution_rpc": "<op-geth-ws-rpc>",
+  "l1_rpc": "<l1-rpc>",
   "mode": "op",
+  "namespace": <l2-chain-id>,
   "listen_addr": ":8080",
   "ws_listen_addr": ":8081",
   "espresso_tag": "espresso",
@@ -49,8 +51,6 @@ The proxy is configured via CLI flags or a JSON config file (or both — flags o
   "verification_interval": "250ms",
   "initial_hotshot_height": 0,
   "op": {
-    "l1_rpc": "<l1-rpc>",
-    "full_node_consensus_rpc": "<op-node-rpc>",
     "light_client_address": "<light-client-contract-address>",
     "batcher_address": "<batcher-address>",
     "batch_authenticator_address": "<batch-authenticator-contract-address>"
@@ -64,7 +64,9 @@ The proxy is configured via CLI flags or a JSON config file (or both — flags o
 {
   "full_node_execution_rpc": "<nitro-rpc>",
   "ws_full_node_execution_rpc": "<nitro-ws-rpc>",
+  "l1_rpc": "<l1-rpc>",
   "mode": "nitro",
+  "namespace": <l2-chain-id>,
   "listen_addr": ":8080",
   "ws_listen_addr": ":8081",
   "espresso_tag": "espresso",
@@ -73,7 +75,6 @@ The proxy is configured via CLI flags or a JSON config file (or both — flags o
   "verification_interval": "250ms",
   "nitro": {
     "feed_url": "<nitro-sequencer-feed-ws-url>",
-    "namespace": 0,
     "valid_batcher_addresses": [
       { "address": "<batcher-address>", "from": 0, "to": 18446744073709551615 }
     ]
@@ -94,13 +95,13 @@ The proxy is configured via CLI flags or a JSON config file (or both — flags o
   --full-node-execution-rpc <op-geth-rpc> \
   --ws.full-node-execution-rpc <op-geth-ws-rpc> \
   --mode op \
+  --namespace <l2-chain-id> \
   --listen-addr :8080 \
   --ws.listen-addr :8081 \
   --espresso-tag espresso \
   --store-file-path /data/espresso_store.json \
   --query-service-url <espresso-query-service-url> \
   --l1-rpc <l1-rpc> \
-  --op.full-node-consensus-rpc <op-node-rpc> \
   --op.light-client-address <light-client-contract-address> \
   --op.batcher-address <batcher-address> \
   --op.batch-authenticator-address <batch-authenticator-contract-address>
@@ -113,6 +114,7 @@ The proxy is configured via CLI flags or a JSON config file (or both — flags o
   --full-node-execution-rpc <nitro-rpc> \
   --ws.full-node-execution-rpc <nitro-ws-rpc> \
   --mode nitro \
+  --namespace <l2-chain-id> \
   --listen-addr :8080 \
   --ws.listen-addr :8081 \
   --espresso-tag espresso \
@@ -121,7 +123,6 @@ The proxy is configured via CLI flags or a JSON config file (or both — flags o
   --l1-rpc <l1-rpc> \
   --nitro.feed-url <nitro-sequencer-feed-ws-url> \
   --nitro.bridge-address <bridge-contract-address> \
-  --nitro.namespace <namespace> \
   --nitro.valid-batcher-addresses <batcher-address>
 ```
 
@@ -150,10 +151,10 @@ docker run --rm \
   --ws.full-node-execution-rpc <op-geth-ws-rpc> \
   --ws.listen-addr :8081 \
   --mode op \
+  --namespace <l2-chain-id> \
   --store-file-path /data/espresso_store.json \
   --query-service-url <espresso-query-service-url> \
   --l1-rpc <l1-rpc> \
-  --op.full-node-consensus-rpc <op-node-rpc> \
   --op.light-client-address <light-client-contract-address> \
   --op.batcher-address <batcher-address> \
   --op.batch-authenticator-address <batch-authenticator-contract-address>
@@ -177,28 +178,22 @@ services:
       - --full-node-execution-rpc=http://op-geth:8545
       - --ws.full-node-execution-rpc=http://op-geth:8546
       - --mode=op
+      - --namespace=<l2-chain-id>
       - --listen-addr=:8080
       - --ws.listen-addr=:8081
       - --store-file-path=/data/espresso_store.json
       - --query-service-url=<espresso-query-service-url>
       - --l1-rpc=<l1-rpc>
-      - --op.full-node-consensus-rpc=http://op-node:9545
       - --op.light-client-address=<light-client-contract-address>
       - --op.batcher-address=<batcher-address>
       - --op.batch-authenticator-address=<batch-authenticator-contract-address>
     depends_on:
       op-geth:
         condition: service_healthy
-      op-node:
-        condition: service_healthy
 
   op-geth:
     image: <op-geth-image>
     # ... your op-geth configuration
-
-  op-node:
-    image: <op-node-image>
-    # ... your op-node configuration
 
 volumes:
   proxy-data:
@@ -213,6 +208,7 @@ Clients should point at the proxy (`http://localhost:8080`) rather than directly
 | `--full-node-execution-rpc`        | `full_node_execution_rpc`        | —                     | Rollup execution layer RPC URL (required)                                                           |
 | `--ws.full-node-execution-rpc`     | `ws_full_node_execution_rpc`     | —                     | Rollup execution layer WebSocket RPC URL (optional)                                                 |
 | `--mode`                           | `mode`                           | —                     | Verifier mode: `op` or `nitro` (required)                                                           |
+| `--namespace`                      | `namespace`                      | —                     | Espresso namespace; the L2 chain id (required, both modes)                                          |
 | `--listen-addr`                    | `listen_addr`                    | `:8080`               | Address the proxy listens on                                                                        |
 | `--ws.listen-addr`                 | `ws_listen_addr`                 | —                     | WebSocket Address the proxy listens on (optional)                                                   |
 | `--espresso-tag`                   | `espresso_tag`                   | `espresso`            | JSON-RPC block tag to intercept; set to `finalized` to back the standard finality tag with Espresso |
@@ -227,13 +223,11 @@ Clients should point at the proxy (`http://localhost:8080`) rather than directly
 | `--log-format`                     | `log_format`                     | `json`                | Log output format (`text` or `json`)                                                                |
 | `--track-batch-latency`            | `track_batch_latency`            | `false`               | Log per-batch and average latency from HotShot finalization to verification                         |
 | `--l1-rpc`                         | `l1_rpc`                         | —                     | L1 RPC URL (required)                                                                               |
-| `--op.full-node-consensus-rpc`     | `op.full_node_consensus_rpc`     | —                     | OP consensus layer (op-node) RPC URL                                                                |
 | `--op.light-client-address`        | `op.light_client_address`        | —                     | Espresso light client contract address on L1                                                        |
 | `--op.batcher-address`             | `op.batcher_address`             | —                     | OP batcher address                                                                                  |
 | `--op.batch-authenticator-address` | `op.batch_authenticator_address` | —                     | Batch Authenticator contract address on L1                                                          |
 | `--nitro.feed-url`                 | `nitro.feed_url`                 | —                     | Nitro full node feed WebSocket URL (Nitro mode, required)                                           |
 | `--nitro.bridge-address`           | `nitro.bridge_address`           | —                     | Nitro Bridge contract address on L1 (Nitro mode, required)                                          |
-| `--nitro.namespace`                | `nitro.namespace`                | —                     | Nitro Chain Id (Nitro mode, required)                                                               |
 | `--nitro.valid-batcher-addresses`  | `nitro.valid_batcher_addresses`  | —                     | Valid batcher addresses (Nitro mode, at least one required)                                         |
 | `--nitro.wait-for-l1-finalization` | `nitro.wait_for_l1_finalization` | `false`               | Wait for L1 block finalization before fetching delayed messages                                     |
 
