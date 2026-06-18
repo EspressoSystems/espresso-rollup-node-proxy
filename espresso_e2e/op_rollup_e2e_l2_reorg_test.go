@@ -62,8 +62,8 @@ func TestOPE2EL2Reorg(t *testing.T) {
 	defer stopLoad()
 
 	blockAfterRewind := getBlockByTag(t, opGethSeqURL, "latest")
-	pollUntil(t, 30*time.Second, "node did not start advancing after reorg", func() bool {
-		return getBlockByTag(t, opGethSeqURL, "latest") > blockAfterRewind
+	pollUntil(t, 5*time.Second, "node started advancing after reorg", func() bool {
+		return getBlockByTag(t, opGethSeqURL, "latest") == blockAfterRewind
 	})
 
 	// bring back up
