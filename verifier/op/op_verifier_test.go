@@ -30,7 +30,6 @@ import (
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -221,17 +220,7 @@ func TestVerify(t *testing.T) {
 	h := newTestHarness(t, log.NewLogger(capturer))
 	ctx := context.Background()
 
-	l1InfoData := make([]byte, 4+32*8)
-	selector := crypto.Keccak256([]byte("setL1BlockValues(uint64,uint64,uint256,bytes32,uint64,bytes32,uint256,uint256)"))[:4]
-	copy(l1InfoData[:4], selector)
-
-	depositTx := types.NewTx(&types.DepositTx{
-		Data: l1InfoData,
-	})
-	blockHeader := &types.Header{Number: big.NewInt(100)}
-	block := types.NewBlockWithHeader(blockHeader).WithBody(types.Body{
-		Transactions: []*types.Transaction{depositTx},
-	})
+	block := createOpBlock(100, eth.BlockID{Number: 5, Hash: common.Hash{0xaa}})
 
 	// Derive the expected EspressoBatch from the block so its BatchHeader matches
 	// the full node block hash in VerifyNextBatch.
@@ -262,28 +251,25 @@ func TestVerify(t *testing.T) {
 }
 
 // TestVerifyRejectsMismatchedBlock ensures that when the full node returns a
-// block whose hash differs from the header Espresso finalized, verification
-// fails and the store is not advanced.
+// block of the same form as the one Espresso finalized but differing in its body
+// (here, the L1 origin in the L1-info deposit), verification fails and the store
+// is not advanced.
 func TestVerifyRejectsMismatchedBlock(t *testing.T) {
 	capturer := &logCapturer{}
 	h := newTestHarness(t, log.NewLogger(capturer))
 	ctx := context.Background()
 
-	l1InfoData := make([]byte, 4+32*8)
-	selector := crypto.Keccak256([]byte("setL1BlockValues(uint64,uint64,uint256,bytes32,uint64,bytes32,uint256,uint256)"))[:4]
-	copy(l1InfoData[:4], selector)
-	depositTx := types.NewTx(&types.DepositTx{Data: l1InfoData})
-
-	block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(100)}).WithBody(types.Body{
-		Transactions: []*types.Transaction{depositTx},
-	})
-	// Espresso batch carries the header for `block`...
+	// Espresso finalized a block carrying L1 origin A...
+	block := createOpBlock(100, eth.BlockID{Number: 5, Hash: common.Hash{0xaa}})
 	batch, err := derivation.BlockToEspressoBatch(&rollup.Config{}, block)
 	require.NoError(t, err)
 
-	// ...but the full node returns a different block (different header => different hash).
-	mismatchedBlock := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(100), GasLimit: 1})
-	require.NotEqual(t, block.Hash(), mismatchedBlock.Hash())
+	// ...but the full node returns one differing only in its L1 origin (B). The
+	// headers are identical, so the hashes match and only the RLP body comparison
+	// catches the difference.
+	mismatchedBlock := createOpBlock(100, eth.BlockID{Number: 6, Hash: common.Hash{0xbb}})
+	require.Equal(t, block.Hash(), mismatchedBlock.Hash(), "headers are identical, only the body differs")
+	require.NotEqual(t, block, mismatchedBlock, "blocks must differ in their L1-info deposit body")
 
 	snapshot := opFinalitySnapshot{
 		finalizedL1: eth.L1BlockRef{Number: 10, Hash: common.Hash{1}},

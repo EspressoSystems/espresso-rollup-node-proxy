@@ -1,6 +1,7 @@
 package verifier
 
 import (
+	"encoding/binary"
 	"math/big"
 	"testing"
 
@@ -135,6 +136,23 @@ func TestEspressoBatchToBlock_BadTx(t *testing.T) {
 
 	_, err := espressoBatchToBlock(fullNodeBlock, batch)
 	require.ErrorContains(t, err, "could not decode tx 0")
+}
+
+// createOpBlock builds an L2 block whose first tx is a Bedrock L1-info
+// deposit encoding l1Origin at the offsets l1OriginFromL2Block reads. Call it
+// twice with the same blockNum but different l1Origin for two blocks differing
+// only in their L1 origin. See TestL1OriginFromL2Block_AgainstOPEncoders for the
+// offsets cross-checked against the real OP encoders.
+func createOpBlock(blockNum uint64, l1Origin eth.BlockID) *types.Block {
+	const bedrockL1InfoLen = functionSelectorLength + 32*8
+	data := make([]byte, bedrockL1InfoLen)
+	copy(data[:functionSelectorLength], derive.L1InfoFuncBedrockBytes4)
+	binary.BigEndian.PutUint64(data[l1OriginNumberOffset:l1OriginNumberOffsetEnd], l1Origin.Number)
+	copy(data[l1OriginHashOffset:l1OriginHashOffsetEnd], l1Origin.Hash.Bytes())
+
+	deposit := types.NewTx(&types.DepositTx{Data: data})
+	return types.NewBlockWithHeader(&types.Header{Number: new(big.Int).SetUint64(blockNum)}).
+		WithBody(types.Body{Transactions: types.Transactions{deposit}})
 }
 
 func createBlockWithTxn(tx *types.Transaction) *types.Block {
