@@ -111,7 +111,7 @@ func (r *Request) UnmarshalJSON(data []byte) error {
 func (r Request) MarshalJSON() ([]byte, error) {
 	toEncode := map[string]any{}
 	for k, v := range r.ExtraFields {
-		if k == "id" || k == "params" {
+		if k == "id" || k == "params" || k == "jsonrpc" || k == "method" {
 			continue
 		}
 

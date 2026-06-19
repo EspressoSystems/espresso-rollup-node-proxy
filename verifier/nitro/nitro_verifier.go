@@ -29,9 +29,9 @@ import (
 const l1FinalityWaitLogInterval = 5 * time.Second
 
 type BatcherAddressConfig struct {
-	Address string `json:"address"`
-	From    uint64 `json:"from"`
-	To      uint64 `json:"to"`
+	Address common.Address `json:"address"`
+	From    uint64         `json:"from"`
+	To      uint64         `json:"to"`
 }
 
 type NitroEspressoBatchVerifierConfig struct {
@@ -112,7 +112,7 @@ func NewNitroEspressoBatchVerifier(
 	addrRanges := make([]nitroStreamer.AddressValidRangeConfig, 0, len(config.ValidBatcherAddresses))
 	for _, a := range config.ValidBatcherAddresses {
 		addrRanges = append(addrRanges, nitroStreamer.AddressValidRangeConfig{
-			Address: a.Address,
+			Address: a.Address.Hex(),
 			From:    a.From,
 			To:      a.To,
 		})

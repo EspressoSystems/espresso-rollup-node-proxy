@@ -13,7 +13,7 @@ type httpAutoBodyCloserMiddleware struct {
 	logger  log.Logger
 }
 
-// ServeHttp implements http.Handler
+// ServeHTTP implements http.Handler
 //
 // This method automatically closes the Body after the handler has completed
 // the request.

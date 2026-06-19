@@ -2,9 +2,6 @@ package http
 
 import (
 	"net/http"
-	"strconv"
-
-	"github.com/ethereum/go-ethereum/log"
 )
 
 // httpBodySizeLimiterMiddleware is a middleware that limits the size of the
@@ -13,11 +10,10 @@ import (
 // should be found to be too large.
 type httpBodySizeLimiterMiddleware struct {
 	handler            http.Handler
-	logger             log.Logger
 	maxRequestBodySize int64
 }
 
-// ServeHttp implements http.Handler
+// ServeHTTP implements http.Handler
 //
 // This middleware replaces the Request body's io.ReaderCloser with a different
 // ReadCloser that limits the size of the content body.
@@ -35,19 +31,6 @@ func (m *httpBodySizeLimiterMiddleware) ServeHTTP(w http.ResponseWriter, r *http
 		return
 	}
 
-	if contentLengthString := r.Header.Get("Content-Length"); contentLengthString != "" {
-		contentLength, err := strconv.ParseInt(contentLengthString, 10, 64)
-		if err != nil {
-			http.Error(w, "unable to determine length", http.StatusLengthRequired)
-			return
-		}
-
-		if contentLength > m.maxRequestBodySize {
-			http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
-			return
-		}
-	}
-
 	m.handler.ServeHTTP(w, r)
 }
 
@@ -55,10 +38,9 @@ func (m *httpBodySizeLimiterMiddleware) ServeHTTP(w http.ResponseWriter, r *http
 // the request body to a specified maximum size. It also checks the
 // Content-Length header of the request and will return an error if the
 // request should be larger than the maximum size.
-func RequestBodySizeLimiterMiddleware(next http.Handler, logger log.Logger, maxRequestBodySize int64) http.Handler {
+func RequestBodySizeLimiterMiddleware(next http.Handler, maxRequestBodySize int64) http.Handler {
 	return &httpBodySizeLimiterMiddleware{
 		handler:            next,
-		logger:             logger,
 		maxRequestBodySize: maxRequestBodySize,
 	}
 }

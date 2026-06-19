@@ -44,7 +44,7 @@ func mustNewOPVerifier(ctx context.Context, logger log.Logger, cfg *Config, espr
 	}
 	lc, err := espressoLightClient.NewLightclientCaller(cfg.OPConfig.LightClientAddress, l1Client)
 	if err != nil || lc == nil {
-		logger.Crit("failed to create light client")
+		logger.Crit("failed to create light client", "error", err)
 		os.Exit(1)
 	}
 	v := opVerifier.NewOPEspressoBatchVerifier(ctx, logger, espressoStore, l1Client, lc, cfg.toOPVerifierConfig())
@@ -131,6 +131,30 @@ func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "OK", http.StatusOK)
 }
 
+// newReadinessHandler returns a /ready handler. It returns 503 until the
+// store has at least one verified block, then swaps itself to a permanent 200
+// handler. Once ready, subsequent requests incur no store access.
+func newReadinessHandler(espressoStore *store.EspressoStore) http.Handler {
+	var current http.HandlerFunc
+
+	readyFn := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "OK", http.StatusOK)
+	})
+
+	current = func(w http.ResponseWriter, r *http.Request) {
+		if espressoStore.GetState().L2BlockNumber == 0 {
+			http.Error(w, "not ready", http.StatusServiceUnavailable)
+			return
+		}
+		current = readyFn
+		readyFn(w, r)
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		current(w, r)
+	})
+}
+
 func NewSingleHostWSReverseProxy(target *url.URL, upgrader websocket.Upgrader) *websocketutil.ReverseProxy {
 	return websocketutil.NewReverseProxy(
 		target,
@@ -156,22 +180,24 @@ func NewSingleHostReverseProxy(target *url.URL) *httputil.ReverseProxy {
 // requests. It sets up the necessary middleware for request logging, body
 // size limits, and the JSON-RPC bridge to the full node proxy. It also
 // includes a health check endpoint at "/health".
-func createHttpServer(logger log.Logger, cfg *Config, interceptor adapters.Interceptor) *http.Server {
+func createHttpServer(logger log.Logger, cfg *Config, espressoStore *store.EspressoStore, interceptor adapters.Interceptor) *http.Server {
 	fullNodeExecutionRPCURL, err := url.Parse(cfg.FullNodeExecutionRPC)
 	if err != nil {
-		panic(fmt.Sprintf("failed to parse full node execution RPC URL: %v", err))
+		logger.Crit("failed to parse full node execution RPC URL", "error", err)
+		os.Exit(1)
 	}
 
 	// Create the Reverse Proxy
 	reverseProxy := NewSingleHostReverseProxy(fullNodeExecutionRPCURL)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthCheckHandler)
+	mux.Handle("/ready", newReadinessHandler(espressoStore))
 	mux.Handle(
 		"/",
 		proxyhttp.HTTPRPCMiddlewares(
 			logger,
 			int64(cfg.MaxRequestBodySize),
-			adapters.NewHTTPJSONRPCInterceptor(reverseProxy, interceptor),
+			adapters.NewHTTPJSONRPCInterceptor(logger, reverseProxy, interceptor),
 		),
 	)
 
@@ -211,7 +237,7 @@ func createWsServer(logger log.Logger, cfg *Config, interceptor adapters.Interce
 
 	return &http.Server{
 		Addr: cfg.WsListenAddr,
-		Handler: proxyhttp.WebSocketUpgrader(
+		Handler: proxyhttp.WebSocketHandler(
 			logger,
 			reverseProxy,
 		),
@@ -223,17 +249,17 @@ func createWsServer(logger log.Logger, cfg *Config, interceptor adapters.Interce
 	}
 }
 
-// startHTTPServers starts the provided HTTP servers in separate goroutines,
-// and logs any critical errors that occur during startup.
+// startHTTPServers starts the provided HTTP servers in separate goroutines.
+// Any fatal listen error is sent to errCh so main() can trigger a graceful shutdown.
+// Nil servers are skipped, allowing callers to conditionally start servers based on configuration.
 func startHTTPServers(
 	logger log.Logger,
 	wg *sync.WaitGroup,
+	errCh chan<- error,
 	servers ...*http.Server,
 ) {
 	for _, server := range servers {
 		if server == nil {
-			// Skip any non-existent serveres, this allows us to conditionally
-			// start servers based on configuration.
 			continue
 		}
 
@@ -242,10 +268,7 @@ func startHTTPServers(
 			defer wg.Done()
 			logger.Info("server listening", "addr", server.Addr)
 			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				// TODO: Re-evalute this logger.Crit usage. Invoking this function
-				// will also call os.Exit, forcing the program to exit without
-				// cleaning up.
-				logger.Crit("server failed to listen and serve", "error", err)
+				errCh <- fmt.Errorf("server %s: %w", server.Addr, err)
 			}
 		}(wg, server)
 	}
@@ -299,16 +322,18 @@ func main() {
 	fullNodeVerifier.Start(ctx)
 	logger.Info("Verifier started")
 	interceptor := proxy.NewInterceptor(
+		logger,
 		espressoStore,
 		cfg.EspressoTag,
 		cfg.MaxBatchSize,
 	)
 
-	httpServer := createHttpServer(logger, cfg, interceptor)
+	httpServer := createHttpServer(logger, cfg, espressoStore, interceptor)
 	webSocketServer := createWsServer(logger, cfg, interceptor)
 
 	var serverWaitGroup sync.WaitGroup
-	startHTTPServers(logger, &serverWaitGroup, httpServer, webSocketServer)
+	serverErrCh := make(chan error, 2)
+	startHTTPServers(logger, &serverWaitGroup, serverErrCh, httpServer, webSocketServer)
 
 	sigCh := make(chan os.Signal, 1)
 	// Listen for termination signals to gracefully shut down the server
@@ -319,6 +344,9 @@ func main() {
 
 	case <-ctx.Done():
 		logger.Info("program context canceled, shutting down server", "err", ctx.Err())
+
+	case err := <-serverErrCh:
+		logger.Error("server error, initiating shutdown", "error", err)
 	}
 
 	// Cancel the application context

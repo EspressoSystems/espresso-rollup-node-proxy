@@ -29,11 +29,27 @@ var ErrMaxJSONDepthExceeded = errors.New("JSON nesting depth exceeds limit")
 // limit of the maximum number of requests we'll perform in a single batch.
 var ErrMaxBatchSizeExceeded = errors.New("maximum number of json requests in a single batch exceeded")
 
-type Interceptor struct {
+// Interceptor is an interface that defines the methods for intercepting
+// JSON-RPC.
+type Interceptor interface {
+	// InterceptRequest takes a JSON-RPC request, and attempts to perform an
+	// intercept on it.  This means that the request may be rewritten and
+	// modified to be different.
+	InterceptRequest(jsonrpcv2.Request) (jsonrpcv2.Request, error)
+
+	// InterceptBatchRequests takes in a batch of JSON-RPC requests, and
+	// attempts to perform an intercept on each request in the batch.
+	InterceptBatchRequests([]jsonrpcv2.Request) ([]jsonrpcv2.Request, error)
+}
+
+type interceptor struct {
+	logger       log.Logger
 	store        *espressoStore.EspressoStore
 	espressoTag  string
 	maxBatchSize int
 }
+
+var _ Interceptor = (*interceptor)(nil)
 
 type BatchTooLargeError struct {
 	Count int
@@ -44,8 +60,12 @@ func (e *BatchTooLargeError) Error() string {
 	return fmt.Sprintf("batch too large (count %d exceeds limit %d)", e.Count, e.Limit)
 }
 
-func NewInterceptor(store *espressoStore.EspressoStore, espressoTag string, maxBatchSize int) *Interceptor {
-	return &Interceptor{
+func NewInterceptor(logger log.Logger, store *espressoStore.EspressoStore, espressoTag string, maxBatchSize int) Interceptor {
+	if logger == nil {
+		logger = log.Root()
+	}
+	return &interceptor{
+		logger:       logger,
 		store:        store,
 		espressoTag:  espressoTag,
 		maxBatchSize: maxBatchSize,
@@ -59,7 +79,7 @@ var ErrUnknownEspressoFinalizedBlockNumber = errors.New("espresso state is empty
 
 // getCurrentEspressoFinalizedBlockNumber is a helper function that retrieves
 // the current finalized block number from the store.
-func (i *Interceptor) getCurrentEspressoFinalizedBlockNumber() (uint64, error) {
+func (i *interceptor) getCurrentEspressoFinalizedBlockNumber() (uint64, error) {
 	state := i.store.GetState()
 
 	// Check the current Espresso State for validity
@@ -77,10 +97,10 @@ func (i *Interceptor) getCurrentEspressoFinalizedBlockNumber() (uint64, error) {
 //
 // NOTE: This is a pure function, and if the parameters are modified, a new
 // object will be returned instead of modifying the existing object.
-func (i *Interceptor) InterceptRequest(request jsonrpcv2.Request) (jsonrpcv2.Request, error) {
+func (i *interceptor) InterceptRequest(request jsonrpcv2.Request) (jsonrpcv2.Request, error) {
 	finalizedEspressoBlockNumber, err := i.getCurrentEspressoFinalizedBlockNumber()
 	if err != nil {
-		log.Warn("espresso state is empty, sending rawRequest to the full node", "err", err)
+		i.logger.Warn("espresso state is empty, sending rawRequest to the full node", "err", err)
 		return request, nil
 	}
 
@@ -89,7 +109,7 @@ func (i *Interceptor) InterceptRequest(request jsonrpcv2.Request) (jsonrpcv2.Req
 
 // InterceptBatchRequests takes in a batch of JSON-RPC requests, and performs
 // any espresso tag expansion on the requests before returning them.
-func (i *Interceptor) InterceptBatchRequests(requests []jsonrpcv2.Request) ([]jsonrpcv2.Request, error) {
+func (i *interceptor) InterceptBatchRequests(requests []jsonrpcv2.Request) ([]jsonrpcv2.Request, error) {
 	if len(requests) > i.maxBatchSize {
 		// We're over our limit of maximum batches to process.
 		return nil, errors.Join(
@@ -103,7 +123,7 @@ func (i *Interceptor) InterceptBatchRequests(requests []jsonrpcv2.Request) ([]js
 
 	finalizedEspressoBlockNumber, err := i.getCurrentEspressoFinalizedBlockNumber()
 	if err != nil {
-		log.Warn("espresso state is empty, sending rawRequest to the full node", "err", err)
+		i.logger.Warn("espresso state is empty, sending rawRequest to the full node", "err", err)
 		return requests, nil
 	}
 
@@ -111,7 +131,7 @@ func (i *Interceptor) InterceptBatchRequests(requests []jsonrpcv2.Request) ([]js
 	for j, req := range requests {
 		r, err := i.interceptRequest(req, finalizedEspressoBlockNumber)
 		if err != nil {
-			return requests, err
+			return nil, err
 		}
 
 		next[j] = r
@@ -120,7 +140,7 @@ func (i *Interceptor) InterceptBatchRequests(requests []jsonrpcv2.Request) ([]js
 	return next, nil
 }
 
-func (i *Interceptor) interceptRequest(request jsonrpcv2.Request, espressoFinalizedBlockNumber uint64) (jsonrpcv2.Request, error) {
+func (i *interceptor) interceptRequest(request jsonrpcv2.Request, espressoFinalizedBlockNumber uint64) (jsonrpcv2.Request, error) {
 	nextParams, changed, err := i.replaceTagInParams(request.Params, espressoFinalizedBlockNumber, 0)
 	if err != nil {
 		return request, err
@@ -140,7 +160,7 @@ func (i *Interceptor) interceptRequest(request jsonrpcv2.Request, espressoFinali
 
 // replaceTagInParams recursively walks JSON params and replaces
 // exact matches of the espresso tag with a hex block number.
-func (i *Interceptor) replaceTagInParams(params any, espressoFinalizedBlockNumber uint64, depth int) (any, bool, error) {
+func (i *interceptor) replaceTagInParams(params any, espressoFinalizedBlockNumber uint64, depth int) (any, bool, error) {
 	if depth > maxJSONDepth {
 		return nil, false, errors.Join(
 			ErrMaxJSONDepthExceeded,
@@ -162,54 +182,53 @@ func (i *Interceptor) replaceTagInParams(params any, espressoFinalizedBlockNumbe
 	// Case 2: params is a JSON object — recurse into each value
 	// 	`{"jsonrpc":"2.0","id":1,"method":"eth_call","params":{"to":"0xabc","data":"0x123","blockTag":"espresso"}}`
 	if cast, castOK := params.(map[string]any); castOK {
-		nextParams := map[string]any{}
-		var changed bool
+		var nextParams map[string]any
 		for key, value := range cast {
 			next, c, err := i.replaceTagInParams(value, espressoFinalizedBlockNumber, depth+1)
 			if err != nil {
 				return nil, false, fmt.Errorf("failed to replace espresso tag in object: %w", err)
 			}
-
 			if !c {
-				nextParams[key] = value
 				continue
 			}
-
+			if nextParams == nil {
+				nextParams = make(map[string]any, len(cast))
+				for k, v := range cast {
+					nextParams[k] = v
+				}
+			}
 			nextParams[key] = next
-			changed = true
 		}
-
-		if changed {
+		if nextParams != nil {
 			return nextParams, true, nil
 		}
-
 		return cast, false, nil
 	}
 
 	// Case 3: params is a JSON array — recurse into each element
 	// {"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["espresso",false]}
 	if cast, castOK := params.([]any); castOK {
-		var changed bool
-		nextParams := make([]any, len(cast))
+		var nextParams []any
 		for j, value := range cast {
 			next, c, err := i.replaceTagInParams(value, espressoFinalizedBlockNumber, depth+1)
 			if err != nil {
 				return nil, false, fmt.Errorf("failed to replace espresso tag in array: %w", err)
 			}
-
 			if !c {
-				nextParams[j] = value
+				if nextParams != nil {
+					nextParams[j] = value
+				}
 				continue
 			}
-
+			if nextParams == nil {
+				nextParams = make([]any, len(cast))
+				copy(nextParams, cast[:j])
+			}
 			nextParams[j] = next
-			changed = true
 		}
-
-		if changed {
+		if nextParams != nil {
 			return nextParams, true, nil
 		}
-
 		return cast, false, nil
 	}
 

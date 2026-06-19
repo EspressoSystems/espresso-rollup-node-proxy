@@ -31,7 +31,7 @@ type FinalityPoller[T any] struct {
 	interval         time.Duration
 	finalitySnapshot atomic.Pointer[T]
 	running          atomic.Bool
-	cancel           context.CancelFunc
+	cancel           atomic.Pointer[context.CancelFunc]
 	wg               sync.WaitGroup
 }
 
@@ -70,7 +70,8 @@ func (p *FinalityPoller[T]) Start(ctx context.Context) {
 		p.logger.Warn("Finality poller is already running or starting")
 		return
 	}
-	ctx, p.cancel = context.WithCancel(ctx)
+	ctx, cancelFn := context.WithCancel(ctx)
+	p.cancel.Store(&cancelFn)
 	p.wg.Add(1)
 	go p.run(ctx)
 }
@@ -81,8 +82,8 @@ func (p *FinalityPoller[T]) Stop() {
 		return
 	}
 	p.logger.Info("Stopping Finality Poller")
-	if p.cancel != nil {
-		p.cancel()
+	if fn := p.cancel.Load(); fn != nil {
+		(*fn)()
 	}
 	p.wg.Wait()
 }
@@ -102,6 +103,7 @@ func (p *FinalityPoller[T]) poll(ctx context.Context) {
 
 func (p *FinalityPoller[T]) run(ctx context.Context) {
 	defer p.wg.Done()
+	p.poll(ctx)
 	ticker := time.NewTicker(p.interval)
 	defer ticker.Stop()
 	for {

@@ -54,11 +54,11 @@ func (u *websocketUpgrader) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// WebSocketUpgrader is a helper function for creating a new
+// WebSocketHandler is a helper function for creating a new
 // [websocket.Upgrader] that will automatically attempt to upgrade any
 // incoming request into websocket connection, and consume every message by
 // reading until the connection errors, or closes.
-func WebSocketUpgrader(logger log.Logger, upgrader websocket.Upgrader, options ...websocket.UpgradeOption) http.Handler {
+func WebSocketHandler(logger log.Logger, upgrader websocket.Upgrader, options ...websocket.UpgradeOption) http.Handler {
 	return &websocketUpgrader{
 		logger:   logger,
 		upgrader: upgrader,

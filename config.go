@@ -141,7 +141,7 @@ func parseConfig() *Config {
 
 	for _, addr := range batcherAddressFlags {
 		cfg.NitroConfig.ValidBatcherAddresses = append(cfg.NitroConfig.ValidBatcherAddresses, nitroVerifier.BatcherAddressConfig{
-			Address: addr,
+			Address: common.HexToAddress(addr),
 			From:    0,
 			To:      math.MaxUint64,
 		})
@@ -152,6 +152,17 @@ func parseConfig() *Config {
 	}
 
 	return cfg
+}
+
+func validateWebSocketURL(field, s string) error {
+	if err := validateURL(field, s); err != nil {
+		return err
+	}
+	u, _ := url.Parse(s)
+	if u.Scheme != "ws" && u.Scheme != "wss" {
+		return fmt.Errorf("%s: URL scheme must be ws or wss, got %q", field, u.Scheme)
+	}
+	return nil
 }
 
 func validateURL(field, s string) error {
@@ -167,16 +178,6 @@ func validateURL(field, s string) error {
 	}
 	if u.Host == "" {
 		return fmt.Errorf("%s: missing host in URL %q", field, s)
-	}
-	return nil
-}
-
-func validateAddressString(field, s string) error {
-	if s == "" {
-		return fmt.Errorf("%s: must not be empty", field)
-	}
-	if !common.IsHexAddress(s) {
-		return fmt.Errorf("%s: invalid Ethereum address %q", field, s)
 	}
 	return nil
 }
@@ -218,8 +219,12 @@ func (c *Config) validate() error {
 			errs = append(errs, fmt.Errorf("nitro.valid-batcher-addresses: at least one address required"))
 		}
 		for i, a := range c.NitroConfig.ValidBatcherAddresses {
-			errs = append(errs, validateAddressString(fmt.Sprintf("nitro.valid-batcher-addresses[%d].address", i), a.Address))
+			errs = append(errs, validateAddress(fmt.Sprintf("nitro.valid-batcher-addresses[%d].address", i), a.Address))
 		}
+	}
+
+	if c.WsListenAddr != "" {
+		errs = append(errs, validateWebSocketURL("ws.full-node-execution-rpc", c.WsFullNodeExecutionRPC))
 	}
 
 	if c.ListenAddr == "" {

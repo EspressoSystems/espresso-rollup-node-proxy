@@ -52,8 +52,12 @@ type mockLightClient struct {
 	last   uint64
 }
 
-func (m *mockLightClient) FinalizedState(_ *bind.CallOpts) (opStreamer.FinalizedState, error) {
-	current, err := m.client.FetchLatestBlockHeight(context.Background())
+func (m *mockLightClient) FinalizedState(opts *bind.CallOpts) (opStreamer.FinalizedState, error) {
+	ctx := context.Background()
+	if opts != nil && opts.Context != nil {
+		ctx = opts.Context
+	}
+	current, err := m.client.FetchLatestBlockHeight(ctx)
 	result := m.last
 	if err == nil {
 		// Make sure finalized state is back enough blocks
@@ -139,7 +143,7 @@ func startNitroVerifierWithLogger(ctx context.Context, t *testing.T, logger log.
 			Namespace:            nitroNamespace,
 			BridgeAddress:        common.HexToAddress(nitroBridgeAddress),
 			ValidBatcherAddresses: []nitroVerifier.BatcherAddressConfig{
-				{Address: nitroBatchPoster, From: 0, To: math.MaxUint64},
+				{Address: common.HexToAddress(nitroBatchPoster), From: 0, To: math.MaxUint64},
 			},
 		})
 	require.NotNil(t, v, "failed to create Nitro verifier")
@@ -461,17 +465,21 @@ func startTestProxy(ctx context.Context, t *testing.T, backendURLString string, 
 	require.NoError(t, err)
 	backendURL, err := url.Parse(backendURLString)
 	require.NoError(t, err)
-	interceptor := proxy.NewInterceptor(store, tag, proxy.DefaultMaxBatchSize)
+	interceptor := proxy.NewInterceptor(log.Root(), store, tag, proxy.DefaultMaxBatchSize)
 	reverseProxy := httputil.NewSingleHostReverseProxy(backendURL)
 	reverseProxy.ErrorLog = stdlog.New(devNull, "reverse proxy", 0)
 	require.NoError(t, err)
 	handler := proxyhttp.HTTPRPCMiddlewares(
 		log.Root(),
 		proxy.DefaultMaxRequestBodySize,
-		adapters.NewHTTPJSONRPCInterceptor(reverseProxy, interceptor),
+		adapters.NewHTTPJSONRPCInterceptor(log.Root(), reverseProxy, interceptor),
 	)
 	server := &http.Server{Handler: handler}
-	go func() { _ = server.Serve(listener) }()
+	go func() {
+		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+			t.Errorf("proxy server error: %v", err)
+		}
+	}()
 	t.Logf("proxy listening on %s", proxyURL)
 	return proxyURL.String(), func() { _ = server.Shutdown(ctx) }
 }
@@ -677,6 +685,9 @@ func matchLogAttrs(capturer *logutil.CaptureLogger, msg string, expected map[str
 
 func startLoadGen(ctx context.Context, t *testing.T, rpcURL string) func() {
 	t.Helper()
+
+	// "well-known Hardhat/Anvil test key, never use in production
+	// nolint:gosec
 	const loadGenKey = "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
 	privateKey, err := crypto.HexToECDSA(loadGenKey)
 	require.NoError(t, err)

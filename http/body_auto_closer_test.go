@@ -1,7 +1,6 @@
 package http_test
 
 import (
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -88,22 +87,6 @@ func TestBodyAutoCloserClosesWhenHandlerPanics(t *testing.T) {
 
 	require.True(closer.closed, "expected body to be closed after request is processed")
 	require.Empty(captureLogger.Entries, "expected no log entries since there should be no error when closing the body")
-}
-
-// closeError is a utility type that implements [io.ReadCloser] and returns an
-// an error when the [Close] method is invoked.
-type closeError struct{}
-
-// Read implements [io.Reader]
-func (closeError) Read(p []byte) (n int, err error) {
-	return len(p), nil
-}
-
-var ErrCloseFailed = errors.New("close failed")
-
-// Close implements [io.Coloser]
-func (closeError) Close() error {
-	return ErrCloseFailed
 }
 
 // TestBodyAutoCloserLogsCloseErrors tests that the AutoBodyCloserMiddleware

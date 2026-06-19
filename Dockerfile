@@ -13,6 +13,8 @@ RUN apk add --no-cache ca-certificates curl jq && adduser -D -u 1000 proxyuser
 WORKDIR /home/proxyuser
 COPY --from=builder /app/espresso-rollup-node-proxy /usr/local/bin/
 USER proxyuser
+# LISTEN_PORT must match the port in --listen-addr (default :8080)
+ENV LISTEN_PORT=8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget -qO- http://localhost:8080/health || exit 1
+  CMD wget -qO- http://localhost:${LISTEN_PORT}/health || exit 1
 ENTRYPOINT ["espresso-rollup-node-proxy"]

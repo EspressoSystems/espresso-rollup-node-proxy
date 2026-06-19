@@ -62,7 +62,7 @@ func requestInterceptorGlue[R any](payload []byte, intercept func(R) (R, error))
 	if err := json.Unmarshal(payload, &request); err != nil {
 		return nil, WrapErr("failed to decode json rpc request", jsonrpcv2.Error{
 			Code:    jsonrpcv2.CodeParseError,
-			Message: fmt.Sprintf("failed to decode json rpc request: %s", err),
+			Message: "failed to decode JSON-RPC request",
 		})
 	}
 
