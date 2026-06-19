@@ -74,7 +74,7 @@ type OPEspressoBatchVerifier struct {
 	l2Client          ExecutionClient
 	logger            log.Logger
 	l1Client          *ethclient.Client
-	finalityPoller    sharedVerifier.FinalityPollerInterface[opFinalitySnapshot]
+	finalityPoller    sharedVerifier.FinalityPollerEager[opFinalitySnapshot]
 	cancel            context.CancelFunc
 	runWg             sync.WaitGroup
 	running           atomic.Bool
@@ -115,7 +115,7 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 		l1Client:      l1Client,
 	}
 
-	v.finalityPoller = sharedVerifier.NewFinalityPoller(
+	v.finalityPoller = sharedVerifier.NewFinalityPollerLegacy(
 		v.fetchFinalitySnapshot,
 		logger,
 		opVerifierConfig.FinalityPollInterval,

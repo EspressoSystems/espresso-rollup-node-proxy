@@ -2,8 +2,7 @@ package verifier
 
 import (
 	"context"
-	"sync"
-	"sync/atomic"
+	"errors"
 	"time"
 
 	"github.com/ethereum/go-ethereum/log"
@@ -15,103 +14,62 @@ const (
 	finalityPollTimeout = 5 * time.Second
 )
 
-// FinalityPollerInterface is the finality poller as consumed by a verifier. T is
-// the verifier-specific snapshot type: the OP verifier uses a struct carrying the
-// finalized L2 and L1 blocks, while the Nitro verifier uses a plain uint64 block
-// number.
-type FinalityPollerInterface[T any] interface {
-	LastSnapshot() (T, bool)
+// FinalityPoller is the finality poller as consumed by a verifier. T is the
+// verifier-specific snapshot type: the OP verifier uses a struct carrying
+// the finalized L2 and L1 blocks, while the Nitro verifier uses a plain
+// uint64 block number.
+type FinalityPoller[T any] interface {
+	// LastSnapshot returns the most recently polled snapshot. The bool is false if
+	// the poller has not successfully fetched any snapshot yet.
+	LastSnapshot() (snapshot T, isValid bool)
+}
+
+// FinalityPollerEager is a FinalityPoller that actively polls for finality
+// updates at a regular interval via a background goroutine. The
+// [FinalityPollerEager.Start] and [FinalityPollerEager.Stop] methods control
+// the lifecycle of the background goroutine.
+type FinalityPollerEager[T any] interface {
+	FinalityPoller[T]
 	Start(ctx context.Context)
 	Stop()
 }
 
-type FinalityPoller[T any] struct {
+type FinalityPollerConfig[T any] struct {
 	finalityPollFunc func(ctx context.Context) (T, error)
 	logger           log.Logger
 	interval         time.Duration
-	finalitySnapshot atomic.Pointer[T]
-	running          atomic.Bool
-	cancel           atomic.Pointer[context.CancelFunc]
-	wg               sync.WaitGroup
 }
 
-// Compile-time assertion that *FinalityPoller[T] implements
-// FinalityPollerInterface[T].
-var _ FinalityPollerInterface[any] = (*FinalityPoller[any])(nil)
+type FinalityPollerOption[T any] func(c *FinalityPollerConfig[T])
 
-func NewFinalityPoller[T any](
-	finalityPollFunc func(ctx context.Context) (T, error),
-	logger log.Logger,
-	interval time.Duration,
-) *FinalityPoller[T] {
-	if interval == 0 {
-		interval = defaultFinalityPollInterval
-	}
-	return &FinalityPoller[T]{
-		finalityPollFunc: finalityPollFunc,
-		logger:           logger,
-		interval:         interval,
+func WithFinalityPollFunc[T any](f func(ctx context.Context) (T, error)) FinalityPollerOption[T] {
+	return func(c *FinalityPollerConfig[T]) {
+		c.finalityPollFunc = f
 	}
 }
 
-// LastSnapshot returns the most recently polled snapshot. The bool is false if
-// no snapshot has been fetched yet.
-func (p *FinalityPoller[T]) LastSnapshot() (T, bool) {
-	snapshot := p.finalitySnapshot.Load()
-	if snapshot == nil {
-		var empty T
-		return empty, false
+func WithLogger[T any](logger log.Logger) FinalityPollerOption[T] {
+	return func(c *FinalityPollerConfig[T]) {
+		c.logger = logger
 	}
-	return *snapshot, true
 }
 
-func (p *FinalityPoller[T]) Start(ctx context.Context) {
-	if !p.running.CompareAndSwap(false, true) {
-		p.logger.Warn("Finality poller is already running or starting")
-		return
+func WithInterval[T any](interval time.Duration) FinalityPollerOption[T] {
+	return func(c *FinalityPollerConfig[T]) {
+		c.interval = interval
 	}
-	ctx, cancelFn := context.WithCancel(ctx)
-	p.cancel.Store(&cancelFn)
-	p.wg.Add(1)
-	go p.run(ctx)
 }
 
-func (p *FinalityPoller[T]) Stop() {
-	if !p.running.CompareAndSwap(true, false) {
-		p.logger.Warn("Finality poller is not running or is already stopping")
-		return
+func configValidation[T any](config *FinalityPollerConfig[T]) error {
+	if config.interval == 0 {
+		config.interval = defaultFinalityPollInterval
 	}
-	p.logger.Info("Stopping Finality Poller")
-	if fn := p.cancel.Load(); fn != nil {
-		(*fn)()
+	if config.logger == nil {
+		config.logger = log.Root()
 	}
-	p.wg.Wait()
-}
+	if config.finalityPollFunc == nil {
+		return errors.New("we need a finality poll function to create a FinalityPoller")
+	}
 
-func (p *FinalityPoller[T]) poll(ctx context.Context) {
-	fetchCtx, cancel := context.WithTimeout(ctx, finalityPollTimeout)
-	defer cancel()
-
-	snapshot, err := p.finalityPollFunc(fetchCtx)
-	if err != nil {
-		p.logger.Error("failed to fetch finalized block", "error", err)
-		return
-	}
-	p.logger.Debug("finality poller updating", "snapshot", snapshot)
-	p.finalitySnapshot.Store(&snapshot)
-}
-
-func (p *FinalityPoller[T]) run(ctx context.Context) {
-	defer p.wg.Done()
-	p.poll(ctx)
-	ticker := time.NewTicker(p.interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			p.poll(ctx)
-		}
-	}
+	return nil
 }

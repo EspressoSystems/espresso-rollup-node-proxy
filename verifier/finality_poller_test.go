@@ -14,7 +14,7 @@ import (
 // FinalityPoller reports no snapshot available until Start has been called and
 // the first poll has completed.
 func TestFinalityPoller_LastSnapshotBeforeStart(t *testing.T) {
-	poller := NewFinalityPoller(
+	poller := NewFinalityPollerEagerLegacy(
 		func(_ context.Context) (uint64, error) { return 42, nil },
 		log.New(),
 		time.Hour,
@@ -30,7 +30,7 @@ func TestFinalityPoller_LastSnapshotBeforeStart(t *testing.T) {
 // become available well within a short deadline.
 func TestFinalityPoller_PollsImmediatelyOnStart(t *testing.T) {
 	ready := make(chan struct{})
-	poller := NewFinalityPoller(
+	poller := NewFinalityPollerEagerLegacy(
 		func(_ context.Context) (uint64, error) {
 			select {
 			case <-ready:
@@ -43,7 +43,7 @@ func TestFinalityPoller_PollsImmediatelyOnStart(t *testing.T) {
 		time.Hour, // long interval — only the immediate poll should fire during this test
 	)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	poller.Start(ctx)
 	defer poller.Stop()
@@ -64,7 +64,7 @@ func TestFinalityPoller_PollsImmediatelyOnStart(t *testing.T) {
 // it cleanly without blocking. Calling Stop on a poller that was never started
 // must also be a no-op (no panic, no block).
 func TestFinalityPoller_StartStop(t *testing.T) {
-	poller := NewFinalityPoller(
+	poller := NewFinalityPollerEagerLegacy(
 		func(_ context.Context) (uint64, error) { return 1, nil },
 		log.New(),
 		time.Millisecond,
@@ -96,7 +96,7 @@ func TestFinalityPoller_StartStop(t *testing.T) {
 // subsequent Stop call returns promptly without deadlocking on an over-incremented
 // WaitGroup.
 func TestFinalityPoller_DoubleStartIsNoOp(t *testing.T) {
-	poller := NewFinalityPoller(
+	poller := NewFinalityPollerEagerLegacy(
 		func(_ context.Context) (uint64, error) { return 42, nil },
 		log.New(),
 		time.Hour,
@@ -130,7 +130,7 @@ func TestFinalityPoller_SnapshotUpdatesOnTick(t *testing.T) {
 	var val atomic.Uint64
 	val.Store(1)
 
-	poller := NewFinalityPoller(
+	poller := NewFinalityPollerEagerLegacy(
 		func(_ context.Context) (uint64, error) { return val.Load(), nil },
 		log.New(),
 		5*time.Millisecond,

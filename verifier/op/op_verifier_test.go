@@ -63,7 +63,7 @@ func (m *mockFinalityPoller) LastSnapshot() (opFinalitySnapshot, bool) {
 func (m *mockFinalityPoller) Start(_ context.Context) {}
 func (m *mockFinalityPoller) Stop()                   {}
 
-var _ sharedVerifier.FinalityPollerInterface[opFinalitySnapshot] = (*mockFinalityPoller)(nil)
+var _ sharedVerifier.FinalityPollerEager[opFinalitySnapshot] = (*mockFinalityPoller)(nil)
 
 type mockStreamer struct {
 	mock.Mock

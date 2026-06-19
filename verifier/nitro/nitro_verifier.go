@@ -60,7 +60,7 @@ type NitroEspressoBatchVerifier struct {
 	l1Client            *ethclient.Client
 	espressoStore       *espressoStore.EspressoStore
 	config              *NitroEspressoBatchVerifierConfig
-	finalityPoller      sharedVerifier.FinalityPollerInterface[uint64]
+	finalityPoller      sharedVerifier.FinalityPollerEager[uint64]
 	delayedMsgFetcher   *delayedmessagefetcher.DelayedMessageFetcher
 	logger              log.Logger
 	cancel              context.CancelFunc
@@ -133,7 +133,7 @@ func NewNitroEspressoBatchVerifier(
 		),
 	}
 
-	v.finalityPoller = sharedVerifier.NewFinalityPoller(
+	v.finalityPoller = sharedVerifier.NewFinalityPollerLegacy(
 		v.fetchFinalitySnapshot,
 		logger,
 		config.FinalityPollInterval,
