@@ -206,9 +206,48 @@ func (v *OPEspressoBatchVerifier) Start(ctx context.Context) {
 
 	ctx, cancel := context.WithCancel(ctx)
 	v.cancel = cancel
+	v.restoreTipFromStore(ctx)
 	v.finalityPoller.Start(ctx)
 	v.runWg.Add(1)
 	go v.run(ctx)
+}
+
+// restoreTipFromStore primes the verifier's tip (and L1 origin) from the last
+// verified L2 block recorded in the store, so the parent-hash fork check in
+// peekNextBatch is active immediately after a restart instead of blindly
+// accepting the first batch.
+//
+// The streamer resumes one past the last safe batch (fallbackBatchPos), so the
+// next batch is N+1 and must chain onto block N's own hash. The store persists
+// only the block number, so the hash is fetched from the full node; block N is
+// finalized, so it is expected to be present and to match what Espresso verified.
+//
+// On any error we log and leave the tip unset, falling back to accepting the
+// first batch as-is (it is still fully verified against the full node block).
+func (v *OPEspressoBatchVerifier) restoreTipFromStore(ctx context.Context) {
+	blockNumber := v.espressoStore.GetState().L2BlockNumber
+	if blockNumber == 0 {
+		// Nothing verified yet (or starting from genesis): no tip to chain against.
+		return
+	}
+
+	block, err := v.l2Client.BlockByNumber(ctx, new(big.Int).SetUint64(blockNumber))
+	if err != nil || block == nil {
+		v.logger.Warn("could not restore tip from store; first batch after restart will be accepted without a chain check",
+			"l2_block_number", blockNumber, "error", err)
+		return
+	}
+
+	l1Origin, err := l1OriginFromL2Block(block)
+	if err != nil {
+		v.logger.Warn("could not derive L1 origin while restoring tip from store",
+			"l2_block_number", blockNumber, "error", err)
+		return
+	}
+
+	v.tip = block.Hash()
+	v.l1Origin = l1Origin
+	v.logger.Info("restored verifier tip from store", "l2_block_number", blockNumber, "tip", v.tip.Hex())
 }
 
 func (v *OPEspressoBatchVerifier) run(ctx context.Context) {

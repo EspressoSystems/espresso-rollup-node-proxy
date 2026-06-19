@@ -1,0 +1,22 @@
+{
+  "mode": "op",
+  "listen_addr": ":8081",
+  "log_level": "info",
+  "log_format": "text",
+
+  "full_node_execution_rpc": "http://localhost:8555",
+  "l1_rpc": "http://localhost:8545",
+  "query_service_url": "http://localhost:24000",
+
+  "espresso_tag": "espresso",
+  "store_file_path": "./espresso_store_op.json",
+  "verification_interval": "250ms",
+  "finality_poll_interval": "30s",
+
+  "op": {
+    "full_node_consensus_rpc": "http://localhost:9548",
+    "light_client_address": "0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0",
+    "batcher_address": "0x976EA74026E726554dB657fA54763abd0C3a0aa9",
+    "batch_authenticator_address": "0x4826533b4897376654bb4d4ad88b7fafd0c98528"
+  }
+}

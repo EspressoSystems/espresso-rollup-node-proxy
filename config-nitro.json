@@ -1,0 +1,26 @@
+{
+    "mode": "nitro",
+    "listen_addr": ":8080",
+    "ws_listen_addr": ":8081",
+    "log_level": "info",
+    "log_format": "text",
+    "full_node_execution_rpc": "http://localhost:8549",
+    "ws_full_node_execution_rpc": "ws://localhost:8550",
+    "l1_rpc": "http://localhost:8545",
+    "query_service_url": "http://localhost:24000",
+    "espresso_tag": "espresso",
+    "store_file_path": "./espresso_store.json",
+    "verification_interval": "50ms",
+    "finality_poll_interval": "30s",
+    "ws_idle_timeout": "30s",
+    "nitro": {
+      "feed_url": "ws://localhost:9643/feed",
+      "namespace": 412346,
+      "initial_hotshot_block": 0,
+      "wait_for_l1_finalization": false,
+      "bridge_address": "0xcfe53426950562347a6D2B90bE99D98167eac32d",
+      "valid_batcher_addresses": [
+        { "address": "0x3f1Eae7D46d88F08fc2F8ed27FCb2AB183EB2d0E", "from": 0, "to": 18446744073709551615 }
+      ]
+    }
+}

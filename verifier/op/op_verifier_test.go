@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"math/big"
@@ -213,6 +214,35 @@ func TestPeekNextBatch(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, result)
 	h.streamer.AssertCalled(t, "Update", mock.Anything)
+}
+
+func TestRestoreTipFromStore(t *testing.T) {
+	t.Run("restores tip and L1 origin from the stored block", func(t *testing.T) {
+		h := newTestHarness(t, nil)
+		ctx := context.Background()
+
+		// The harness store sits at L2 block 1; the streamer will resume at block 2,
+		// which must chain onto block 1's own hash.
+		origin := eth.BlockID{Number: 7, Hash: common.Hash{0xcc}}
+		block := createOpBlock(1, origin)
+		h.ethClient.On("BlockByNumber", mock.Anything, new(big.Int).SetUint64(1)).Return(block, nil)
+
+		h.verifier.restoreTipFromStore(ctx)
+
+		require.Equal(t, block.Hash(), h.verifier.tip, "tip should be the stored block's own hash")
+		require.Equal(t, origin, h.verifier.l1Origin)
+	})
+
+	t.Run("leaves tip unset when the block cannot be fetched", func(t *testing.T) {
+		h := newTestHarness(t, nil)
+		ctx := context.Background()
+		h.ethClient.On("BlockByNumber", mock.Anything, new(big.Int).SetUint64(1)).Return(nil, errors.New("boom"))
+
+		h.verifier.restoreTipFromStore(ctx)
+
+		require.Equal(t, common.Hash{}, h.verifier.tip)
+		require.Equal(t, eth.BlockID{}, h.verifier.l1Origin)
+	})
 }
 
 func TestVerify(t *testing.T) {

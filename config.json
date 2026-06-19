@@ -1,0 +1,25 @@
+{
+    "mode": "nitro",
+    "listen_addr": ":8080",
+    "ws_listen_addr": ":8081",
+    "log_level": "info",
+    "log_format": "text",
+    "full_node_execution_rpc": "https://rpc.apechain.com/http",
+    "ws_full_node_execution_rpc": "wss://rpc.apechain.com/ws",
+    "l1_rpc": "https://arb-mainnet.g.alchemy.com/v2/fPbE6uMeRsz0XwiNLEmQ8XeT30VCV_Ks",
+    "query_service_url": "https://cache.main.net.espresso.network/",
+    "espresso_tag": "espresso",
+    "store_file_path": "./espresso_store.json",
+    "verification_interval": "50ms",
+    "finality_poll_interval": "30s",
+    "nitro": {
+      "feed_url": "wss://apechain.calderachain.xyz/feed",
+      "namespace": 33139,
+      "initial_hotshot_block": 16176000,
+      "wait_for_l1_finalization": false,
+      "bridge_address": "0x6B71AFb4b7725227ab944c96FE018AB9dc0434b8",
+      "valid_batcher_addresses": [
+        { "address": "0x3918b6ecc471211a942B0A904fbFb36302348f6B", "from": 0, "to": 18446744073709551615 }
+      ]
+    }
+}
