@@ -37,7 +37,7 @@ type batchVerifier interface {
 // includes failures to create the necessary L1 client and light client
 // instances required dependency for the OP batch verifier.
 func mustNewOPVerifier(ctx context.Context, logger log.Logger, cfg *Config, espressoStore *store.EspressoStore) batchVerifier {
-	l1Client, err := ethclient.DialContext(ctx, cfg.ParentChainRPC)
+	l1Client, err := ethclient.DialContext(ctx, cfg.EthRPC)
 	if err != nil {
 		logger.Crit("failed to create L1 client", "error", err)
 		os.Exit(1)

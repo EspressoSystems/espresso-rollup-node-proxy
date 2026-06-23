@@ -67,7 +67,7 @@ func TestDurationUnmarshalJSON(t *testing.T) {
 func TestConfigValidate(t *testing.T) {
 	valid := Config{
 		FullNodeExecutionRPC: "http://localhost:8545",
-		ParentChainRPC:       "ws://localhost:8546",
+		EthRPC:               "ws://localhost:8546",
 		Mode:                 ModeOP,
 		Namespace:            22266222,
 		ListenAddr:           ":8080",
@@ -88,7 +88,7 @@ func TestConfigValidate(t *testing.T) {
 	err := opEmpty.validate()
 	require.Error(t, err)
 	for _, field := range []string{
-		"full-node-execution-rpc", "parent-chain-rpc", "query-service-url",
+		"full-node-execution-rpc", "eth-rpc", "query-service-url",
 		"op.light-client-address", "op.batcher-address", "op.batch-authenticator-address",
 		"listen-addr", "espresso-tag", "store-file-path", "namespace",
 	} {
@@ -129,7 +129,7 @@ func TestConfigValidate(t *testing.T) {
 
 	validNitro := Config{
 		FullNodeExecutionRPC: "http://localhost:8547",
-		ParentChainRPC:       "ws://localhost:8546",
+		EthRPC:               "ws://localhost:8546",
 		Mode:                 ModeNitro,
 		Namespace:            412346,
 		ListenAddr:           ":8080",
@@ -152,7 +152,7 @@ func TestConfigValidate(t *testing.T) {
 	err = nitroEmpty.validate()
 	require.Error(t, err)
 	for _, field := range []string{
-		"full-node-execution-rpc", "parent-chain-rpc", "nitro.feed-url",
+		"full-node-execution-rpc", "eth-rpc", "nitro.feed-url",
 		"nitro.bridge-address", "namespace", "nitro.valid-batcher-addresses",
 		"query-service-url", "listen-addr", "espresso-tag", "store-file-path",
 	} {
