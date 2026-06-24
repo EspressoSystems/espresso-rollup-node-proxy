@@ -723,8 +723,8 @@ func startLoadGen(ctx context.Context, t *testing.T, rpcURL string) func() {
 				To:        &to,
 				Value:     big.NewInt(1),
 				Gas:       21000,
-				GasTipCap: big.NewInt(1),
-				GasFeeCap: big.NewInt(1),
+				GasTipCap: big.NewInt(1_000_000_000),  // 1 gwei
+				GasFeeCap: big.NewInt(100_000_000_000), // 100 gwei
 			})
 			signed, err := types.SignTx(tx, types.NewLondonSigner(chainID), privateKey)
 			if err != nil {
