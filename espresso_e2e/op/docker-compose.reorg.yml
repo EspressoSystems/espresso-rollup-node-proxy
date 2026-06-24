@@ -118,38 +118,27 @@ services:
     environment:
       - MODE=rollup
       - L1_RPC=http://l1-geth:${L1_HTTP_PORT}
-      - OP_RPC=http://op-geth-sequencer:${OP_HTTP_PORT}
+      - OP_RPC=http://op-reth-sequencer:${OP_HTTP_PORT}
     depends_on:
       l1-geth:
         condition: service_healthy
-      op-geth-sequencer:
+      op-reth-sequencer:
         condition: service_healthy
     volumes:
       - l2-config:/config
       - ./deployment/deployer:/deployer:ro
 
-  op-geth-sequencer:
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${OP_HTTP_PORT}"]
-      interval: 3s
-      timeout: 2s
-      retries: 40
-    image: ${OP_GETH_IMAGE}
-    pull_policy: never
+  op-reth-sequencer:
+    extends:
+      file: docker-compose.reth.yml
+      service: op-reth
     depends_on:
       l2-genesis:
         condition: service_completed_successfully
       l1-geth:
         condition: service_healthy
     volumes:
-      - ./deployment:/deployment:ro
-      - ./deployment/deployer:/deployer:ro
-      - l2-config:/config:ro
       - op-data-seq:/data
-    environment:
-      L1_RPC: http://l1-geth:${L1_HTTP_PORT}
-      OP_HTTP_PORT: ${OP_HTTP_PORT}
-      OP_ENGINE_PORT: ${OP_ENGINE_PORT}
     ports:
       - "${OP_HTTP_PORT}:${OP_HTTP_PORT}"
       - "${OP_ENGINE_PORT}:${OP_ENGINE_PORT}"
@@ -164,14 +153,14 @@ services:
     depends_on:
       l2-rollup:
         condition: service_completed_successfully
-      op-geth-sequencer:
+      op-reth-sequencer:
         condition: service_healthy
       l1-validator:
         condition: service_started
     environment:
       OP_NODE_L1_ETH_RPC: http://l1-geth:${L1_HTTP_PORT}
       OP_NODE_L1_BEACON: http://mock-l1-beacon:${L1_BEACON_PORT}
-      OP_NODE_L2_ENGINE_RPC: http://op-geth-sequencer:${OP_ENGINE_PORT}
+      OP_NODE_L2_ENGINE_RPC: http://op-reth-sequencer:${OP_ENGINE_PORT}
       OP_NODE_RPC_PORT: ${ROLLUP_PORT}
       OP_NODE_SAFEDB_PATH: /data/safedb
     ports:
@@ -203,7 +192,7 @@ services:
     depends_on:
       op-node-sequencer:
         condition: service_healthy
-      op-geth-fullnode:
+      op-reth-fullnode:
         condition: service_healthy
     ports:
       - "9005:9005"
@@ -232,28 +221,17 @@ services:
           -H 'Content-Type: application/json' \
           -d "{\"jsonrpc\":\"2.0\",\"method\":\"opp2p_connectPeer\",\"params\":[\"$$MULTIADDR\"],\"id\":1}"
 
-  op-geth-fullnode:
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${OP_HTTP_PORT}"]
-      interval: 3s
-      timeout: 2s
-      retries: 40
-    image: ${OP_GETH_IMAGE}
-    pull_policy: never
+  op-reth-fullnode:
+    extends:
+      file: docker-compose.reth.yml
+      service: op-reth
     depends_on:
       l2-genesis:
         condition: service_completed_successfully
       l1-geth:
         condition: service_healthy
     volumes:
-      - ./deployment:/deployment:ro
-      - ./deployment/deployer:/deployer:ro
-      - l2-config:/config:ro
       - op-data-fullnode:/data
-    environment:
-      L1_RPC: http://l1-geth:${L1_HTTP_PORT}
-      OP_HTTP_PORT: ${OP_HTTP_PORT}
-      OP_ENGINE_PORT: ${OP_ENGINE_PORT}
     ports:
       - "${OP_FULL_HTTP_PORT}:${OP_HTTP_PORT}"
       - "${OP_FULL_ENGINE_PORT}:${OP_ENGINE_PORT}"
@@ -263,14 +241,14 @@ services:
     depends_on:
       l2-rollup:
         condition: service_completed_successfully
-      op-geth-fullnode:
+      op-reth-fullnode:
         condition: service_started
       mock-l1-beacon:
         condition: service_started
     environment:
       OP_NODE_L1_ETH_RPC: http://l1-geth:${L1_HTTP_PORT}
       OP_NODE_L1_BEACON: http://mock-l1-beacon:${L1_BEACON_PORT}
-      OP_NODE_L2_ENGINE_RPC: http://op-geth-fullnode:${OP_ENGINE_PORT}
+      OP_NODE_L2_ENGINE_RPC: http://op-reth-fullnode:${OP_ENGINE_PORT}
       OP_NODE_RPC_PORT: "9548"
     ports:
       - "9548:9548"
@@ -296,7 +274,7 @@ services:
     depends_on:
       l1-geth:
         condition: service_healthy
-      op-geth-sequencer:
+      op-reth-sequencer:
         condition: service_started
       op-node-sequencer:
         condition: service_started
@@ -309,7 +287,7 @@ services:
     environment:
       L1_RPC: http://l1-geth:${L1_HTTP_PORT}
       OP_BATCHER_L1_ETH_RPC: http://l1-geth:${L1_HTTP_PORT}
-      OP_BATCHER_L2_ETH_RPC: http://op-geth-sequencer:${OP_HTTP_PORT}
+      OP_BATCHER_L2_ETH_RPC: http://op-reth-sequencer:${OP_HTTP_PORT}
       OP_BATCHER_ROLLUP_RPC: http://op-node-sequencer:${ROLLUP_PORT}
       OP_BATCHER_ESPRESSO_URLS: http://espresso-dev-node:${ESPRESSO_SEQUENCER_API_PORT},http://espresso-dev-node:${ESPRESSO_SEQUENCER_API_PORT}
       OP_BATCHER_MAX_CHANNEL_DURATION: "32"

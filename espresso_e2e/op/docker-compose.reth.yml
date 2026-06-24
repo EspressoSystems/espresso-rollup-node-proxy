@@ -1,0 +1,47 @@
+services:
+  op-reth:
+    image: ${OP_RETH_IMAGE}
+    pull_policy: always
+    environment:
+      OP_HTTP_PORT: ${OP_HTTP_PORT:?err}
+      OP_ENGINE_PORT: ${OP_ENGINE_PORT:?err}
+    volumes:
+      - l2-config:/config:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "Waiting for genesis.json / jwt.txt ..."
+        while [ ! -f /config/genesis.json ]; do sleep 2; done
+        while [ ! -f /config/jwt.txt ]; do sleep 2; done
+
+        if [ ! -d /data/db ]; then
+          echo "Initializing reth from genesis..."
+          /usr/local/bin/celo-reth init --datadir /data --chain /config/genesis.json
+        else
+          echo "reth datadir already initialized, skipping init"
+        fi
+
+        echo "Starting celo-reth..."
+        exec /usr/local/bin/celo-reth node \
+          --datadir /data \
+          --chain /config/genesis.json \
+          --http \
+          --http.addr 0.0.0.0 \
+          --http.port ${OP_HTTP_PORT} \
+          --http.api eth,net,web3,debug,txpool \
+          --http.corsdomain '*' \
+          --ws \
+          --ws.addr 0.0.0.0 \
+          --ws.port ${OP_HTTP_PORT} \
+          --ws.api eth,net,web3,debug,txpool \
+          --authrpc.addr 0.0.0.0 \
+          --authrpc.port ${OP_ENGINE_PORT} \
+          --authrpc.jwtsecret /config/jwt.txt \
+          --disable-discovery \
+          --rollup.disable-tx-pool-gossip
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'cat < /dev/null > /dev/tcp/localhost/${OP_HTTP_PORT}' || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
