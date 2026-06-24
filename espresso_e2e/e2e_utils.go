@@ -137,7 +137,7 @@ func startNitroVerifierWithLogger(ctx context.Context, t *testing.T, logger log.
 		&nitroVerifier.NitroEspressoBatchVerifierConfig{
 			FeedURL:              feedUrl,
 			FullNodeExecutionRPC: nitroFullNodeURL,
-			L1RPC:                nitroL1URL,
+			EthRpc:               nitroL1URL,
 			VerificationInterval: 250 * time.Millisecond,
 			QueryServiceURL:      nitroEspressoURL,
 			Namespace:            nitroNamespace,

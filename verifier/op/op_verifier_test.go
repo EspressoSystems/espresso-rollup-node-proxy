@@ -74,8 +74,8 @@ func (m *mockStreamer) Update(ctx context.Context) error {
 	return args.Error(0)
 }
 
-func (m *mockStreamer) Refresh(ctx context.Context, finalizedL1 eth.L1BlockRef, safeBatchNumber uint64, safeL1Origin eth.BlockID) error {
-	args := m.Called(ctx, finalizedL1, safeBatchNumber, safeL1Origin)
+func (m *mockStreamer) Refresh(ctx context.Context, finalizedEth eth.L1BlockRef, safeBatchNumber uint64, safeL1Origin eth.BlockID) error {
+	args := m.Called(ctx, finalizedEth, safeBatchNumber, safeL1Origin)
 	return args.Error(0)
 }
 
@@ -228,7 +228,7 @@ func TestVerify(t *testing.T) {
 	require.NoError(t, err)
 
 	snapshot := opFinalitySnapshot{
-		finalizedL1: eth.L1BlockRef{Number: 10, Hash: common.Hash{1}},
+		finalizedEth: eth.L1BlockRef{Number: 10, Hash: common.Hash{1}},
 	}
 	h.finalityPoller.On("LastSnapshot").Return(snapshot, true)
 	h.ethClient.On("BlockByNumber", mock.Anything, new(big.Int).SetUint64(100)).Return(block, nil)
@@ -272,7 +272,7 @@ func TestVerifyRejectsMismatchedBlock(t *testing.T) {
 	require.NotEqual(t, block, mismatchedBlock, "blocks must differ in their L1-info deposit body")
 
 	snapshot := opFinalitySnapshot{
-		finalizedL1: eth.L1BlockRef{Number: 10, Hash: common.Hash{1}},
+		finalizedEth: eth.L1BlockRef{Number: 10, Hash: common.Hash{1}},
 	}
 	h.finalityPoller.On("LastSnapshot").Return(snapshot, true)
 	h.ethClient.On("BlockByNumber", mock.Anything, new(big.Int).SetUint64(100)).Return(mismatchedBlock, nil)
@@ -305,7 +305,7 @@ func TestStoresEthereumFinalizedBlockWhenAhead(t *testing.T) {
 		h := newTestHarness(t, log.NewLogger(capturer))
 		ctx := context.Background()
 		snapshot := opFinalitySnapshot{
-			finalizedL1:       eth.L1BlockRef{Number: 10, Hash: common.Hash{1}},
+			finalizedEth:      eth.L1BlockRef{Number: 10, Hash: common.Hash{1}},
 			finalizedL2Number: 105,
 		}
 
@@ -328,7 +328,7 @@ func TestProxyUsesEthereumFinalizedBlockWhenEspressoStopsAdvancing(t *testing.T)
 	h := newTestHarness(t, log.NewLogger(capturer))
 	ctx := context.Background()
 	snapshot := opFinalitySnapshot{
-		finalizedL1:       eth.L1BlockRef{Number: 10, Hash: common.Hash{1}},
+		finalizedEth:      eth.L1BlockRef{Number: 10, Hash: common.Hash{1}},
 		finalizedL2Number: 105,
 	}
 

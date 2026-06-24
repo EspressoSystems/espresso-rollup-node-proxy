@@ -35,7 +35,7 @@ import (
 var ErrForkMismatch = errors.New("head batch fork mismatch")
 
 type OPEspressoBatchVerifierConfig struct {
-	L1RPC                     string         `json:"l1_rpc"`
+	EthRPC                    string         `json:"eth_rpc"`
 	FullNodeExecutionRPC      string         `json:"full_node_execution_rpc"`
 	Namespace                 uint64         `json:"namespace"`
 	VerificationInterval      time.Duration  `json:"verification_interval"`
@@ -55,10 +55,10 @@ type ExecutionClient interface {
 // It is sourced from the L2 execution node (finalized L2 block) and the L1 RPC
 // (finalized L1 block).
 type opFinalitySnapshot struct {
-	finalizedL2Number uint64
-	finalizedL2Hash   common.Hash
-	finalizedL1Origin eth.BlockID
-	finalizedL1       eth.L1BlockRef
+	finalizedL2Number  uint64
+	finalizedL2Hash    common.Hash
+	finalizedEthOrigin eth.BlockID
+	finalizedEth       eth.L1BlockRef
 }
 
 // OPEspressoBatchVerifier is responsible for verifying that the batches produced by the OP full node match what the OP streamer has in its buffer.
@@ -81,8 +81,8 @@ type OPEspressoBatchVerifier struct {
 	totalBatchLatency time.Duration
 	batchCount        uint64
 	// tip is the header hash of the last successfully verified batch,
-	tip      common.Hash
-	l1Origin eth.BlockID
+	tip       common.Hash
+	ethOrigin eth.BlockID
 }
 
 func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *espressoStore.EspressoStore, l1Client *ethclient.Client, espressoLightClient opStreamer.LightClientCallerInterface, opVerifierConfig *OPEspressoBatchVerifierConfig) *OPEspressoBatchVerifier {
@@ -163,9 +163,9 @@ func (v *OPEspressoBatchVerifier) fetchFinalitySnapshot(ctx context.Context) (op
 	// The genesis block carries no L1-info deposit transaction, so it has no L1
 	// origin to derive.
 	// TODO: Maybe rethink, as this is probably only needed for integration tests
-	var l1Origin eth.BlockID
+	var ethOrigin eth.BlockID
 	if l2Block.NumberU64() != 0 {
-		l1Origin, err = l1OriginFromL2Block(l2Block)
+		ethOrigin, err = l1OriginFromL2Block(l2Block)
 		if err != nil {
 			return opFinalitySnapshot{}, fmt.Errorf("failed to derive L1 origin from finalized L2 block: %w", err)
 		}
@@ -179,22 +179,22 @@ func (v *OPEspressoBatchVerifier) fetchFinalitySnapshot(ctx context.Context) (op
 		return opFinalitySnapshot{}, fmt.Errorf("finalized L1 block not found")
 	}
 
-	finalizedL1 := eth.L1BlockRef{
+	finalizedEth := eth.L1BlockRef{
 		Number:     l1Header.Number.Uint64(),
 		Hash:       l1Header.Hash(),
 		ParentHash: l1Header.ParentHash,
 		Time:       l1Header.Time,
 	}
 
-	if finalizedL1.Hash == (common.Hash{}) || l2Block.Hash() == (common.Hash{}) {
-		return opFinalitySnapshot{}, fmt.Errorf("incomplete finality snapshot: finalized L1 %s, finalized L2 %s", finalizedL1.Hash.Hex(), l2Block.Hash().Hex())
+	if finalizedEth.Hash == (common.Hash{}) || l2Block.Hash() == (common.Hash{}) {
+		return opFinalitySnapshot{}, fmt.Errorf("incomplete finality snapshot: finalized L1 %s, finalized L2 %s", finalizedEth.Hash.Hex(), l2Block.Hash().Hex())
 	}
 
 	return opFinalitySnapshot{
-		finalizedL2Number: l2Block.NumberU64(),
-		finalizedL2Hash:   l2Block.Hash(),
-		finalizedL1Origin: l1Origin,
-		finalizedL1:       finalizedL1,
+		finalizedL2Number:  l2Block.NumberU64(),
+		finalizedL2Hash:    l2Block.Hash(),
+		finalizedEthOrigin: ethOrigin,
+		finalizedEth:       finalizedEth,
 	}, nil
 }
 
@@ -273,7 +273,7 @@ func (v *OPEspressoBatchVerifier) drainAndVerifyBatches(ctx context.Context) *de
 		v.streamer.Next(ctx)
 		verifiedBatch = espressoBatch
 		v.tip = espressoBatch.Header().Hash()
-		v.l1Origin = espressoBatch.L1Origin()
+		v.ethOrigin = espressoBatch.L1Origin()
 		v.logger.Info("Successfully verified OP batch", "batch_number", batchNumber)
 	}
 	return verifiedBatch
@@ -326,10 +326,10 @@ func (v *OPEspressoBatchVerifier) syncEspressoStateWithEthereumFinality(snapshot
 	}
 
 	v.logger.Error("ethereum finalized block is ahead of espresso finalized block",
-		"eth_finalized_block", ethFinalizedBlockNumber,
+		"eth_l2_finalized_block", ethFinalizedBlockNumber,
 		"espresso_finalized_block", espressoFinalizedBlockNumber,
-		"l1_finalized_num", snapshot.finalizedL1Origin.Number,
-		"l1_finalized_hash", snapshot.finalizedL1Origin.Hash.Hex())
+		"eth_finalized_num", snapshot.finalizedEthOrigin.Number,
+		"eth_finalized_hash", snapshot.finalizedEthOrigin.Hash.Hex())
 
 	// Update always advances here (eth > current store, single writer), so ignore the bool.
 	if _, err := v.espressoStore.UpdateIfGreater(ethFinalizedBlockNumber, v.streamer.GetFallbackHotshotPos()); err != nil {
@@ -340,7 +340,7 @@ func (v *OPEspressoBatchVerifier) syncEspressoStateWithEthereumFinality(snapshot
 	// chain onto it and refresh from there. Use that block's own L1 origin as
 	// the L1 origin so the streamer will refresh there as well
 	v.tip = snapshot.finalizedL2Hash
-	v.l1Origin = snapshot.finalizedL1Origin
+	v.ethOrigin = snapshot.finalizedEthOrigin
 	return ethFinalizedBlockNumber, nil
 }
 
@@ -438,11 +438,11 @@ func (v *OPEspressoBatchVerifier) refresh(ctx context.Context) error {
 	}
 
 	// Check if we have l1 origin, if not use it from finality poller
-	if v.l1Origin == (eth.BlockID{}) {
-		v.l1Origin = snapshot.finalizedL1Origin
+	if v.ethOrigin == (eth.BlockID{}) {
+		v.ethOrigin = snapshot.finalizedEthOrigin
 	}
 
-	if err := v.streamer.Refresh(ctx, snapshot.finalizedL1, fallbackPos, v.l1Origin); err != nil {
+	if err := v.streamer.Refresh(ctx, snapshot.finalizedEth, fallbackPos, v.ethOrigin); err != nil {
 		v.logger.Error("failed to refresh OP streamer", "error", err)
 		return err
 	}
