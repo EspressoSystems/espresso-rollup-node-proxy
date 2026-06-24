@@ -190,3 +190,51 @@ jobs:
 
       - name: E2E Tests
         run: just e2e -v -run ^TestNitroE2EFeedMismatch$
+
+  e2e-cas-nitro:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: extractions/setup-just@v2
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: E2E Tests
+        run: just e2e -v -run ^TestCASNitroE2ERollupEspressoProxy$
+
+  e2e-cas-nitro-v3-10:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: extractions/setup-just@v2
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Requires a published v3.10 CAS image. Override CAS_IMAGE if it is tagged
+      # differently than the default in espresso_e2e/CAS-v3_10/docker-compose.yml.
+      - name: E2E Tests
+        run: just e2e -v -run ^TestCASV3_10NitroE2ERollupEspressoProxy$
