@@ -49,13 +49,13 @@ type NitroConfig struct {
 	FeedURL               string                               `json:"feed_url"`
 	BridgeAddress         common.Address                       `json:"bridge_address"`
 	ValidBatcherAddresses []nitroVerifier.BatcherAddressConfig `json:"valid_batcher_addresses"`
-	WaitForL1Finalization bool                                 `json:"wait_for_l1_finalization"`
+	WaitForEthFinality    bool                                 `json:"wait_for_eth_finality"`
 }
 
 type Config struct {
 	FullNodeExecutionRPC   string      `json:"full_node_execution_rpc"`
 	WsFullNodeExecutionRPC string      `json:"ws_full_node_execution_rpc"`
-	L1RPC                  string      `json:"l1_rpc"`
+	EthRPC                 string      `json:"eth_rpc"`
 	Mode                   string      `json:"mode"`
 	Namespace              uint64      `json:"namespace"`
 	ListenAddr             string      `json:"listen_addr"`
@@ -112,7 +112,7 @@ func parseConfig() *Config {
 	pflag.StringVar(&cfg.ListenAddr, "listen-addr", cfg.ListenAddr, "proxy listen address")
 	pflag.StringVar(&cfg.WsListenAddr, "ws.listen-addr", cfg.WsListenAddr, "proxy WebSocket listen address")
 	pflag.StringVar(&cfg.FullNodeExecutionRPC, "full-node-execution-rpc", cfg.FullNodeExecutionRPC, "full node execution RPC URL")
-	pflag.StringVar(&cfg.L1RPC, "l1-rpc", cfg.L1RPC, "L1 RPC URL")
+	pflag.StringVar(&cfg.EthRPC, "eth-rpc", cfg.EthRPC, "Ethereum RPC URL")
 	pflag.TextVar(&cfg.OPConfig.LightClientAddress, "op.light-client-address", cfg.OPConfig.LightClientAddress, "Espresso light client contract address")
 	pflag.TextVar(&cfg.OPConfig.BatcherAddress, "op.batcher-address", cfg.OPConfig.BatcherAddress, "OP batcher address")
 	pflag.TextVar(&cfg.OPConfig.BatchAuthenticatorAddress, "op.batch-authenticator-address", cfg.OPConfig.BatchAuthenticatorAddress, "Espresso batch authenticator contract address")
@@ -132,8 +132,8 @@ func parseConfig() *Config {
 	pflag.Uint64Var(&cfg.Namespace, "namespace", cfg.Namespace, "Espresso namespace (Always should be l2 chain id)")
 
 	pflag.StringVar(&cfg.NitroConfig.FeedURL, "nitro.feed-url", cfg.NitroConfig.FeedURL, "Nitro sequencer feed WebSocket URL")
-	pflag.TextVar(&cfg.NitroConfig.BridgeAddress, "nitro.bridge-address", cfg.NitroConfig.BridgeAddress, "Nitro Bridge contract address on L1")
-	pflag.BoolVar(&cfg.NitroConfig.WaitForL1Finalization, "nitro.wait-for-l1-finalization", cfg.NitroConfig.WaitForL1Finalization, "wait for L1 block finalization before fetching delayed messages")
+	pflag.TextVar(&cfg.NitroConfig.BridgeAddress, "nitro.bridge-address", cfg.NitroConfig.BridgeAddress, "Nitro Bridge contract address on Ethereum")
+	pflag.BoolVar(&cfg.NitroConfig.WaitForEthFinality, "nitro.wait-for-eth-finality", cfg.NitroConfig.WaitForEthFinality, "wait for Ethereum block finalization before fetching delayed messages")
 	var batcherAddressFlags []string
 	pflag.StringArrayVar(&batcherAddressFlags, "nitro.valid-batcher-addresses", nil, "valid batcher addresses for Nitro verifier (full range; use config file for from/to)")
 
@@ -193,7 +193,7 @@ func (c *Config) validate() error {
 	var errs []error
 
 	errs = append(errs, validateURL("full-node-execution-rpc", c.FullNodeExecutionRPC))
-	errs = append(errs, validateURL("l1-rpc", c.L1RPC))
+	errs = append(errs, validateURL("eth-rpc", c.EthRPC))
 
 	switch c.Mode {
 	case ModeOP, ModeNitro:
@@ -249,7 +249,7 @@ func (c *Config) validate() error {
 func (c *Config) toOPVerifierConfig() *opVerifier.OPEspressoBatchVerifierConfig {
 	return &opVerifier.OPEspressoBatchVerifierConfig{
 		FullNodeExecutionRPC:      c.FullNodeExecutionRPC,
-		L1RPC:                     c.L1RPC,
+		EthRPC:                    c.EthRPC,
 		Namespace:                 c.Namespace,
 		VerificationInterval:      time.Duration(c.VerificationInterval),
 		QueryServiceURL:           c.QueryServiceURL,
@@ -262,15 +262,15 @@ func (c *Config) toOPVerifierConfig() *opVerifier.OPEspressoBatchVerifierConfig 
 
 func (c *Config) toNitroVerifierConfig() *nitroVerifier.NitroEspressoBatchVerifierConfig {
 	return &nitroVerifier.NitroEspressoBatchVerifierConfig{
-		FeedURL:               c.NitroConfig.FeedURL,
-		FullNodeExecutionRPC:  c.FullNodeExecutionRPC,
-		L1RPC:                 c.L1RPC,
-		BridgeAddress:         c.NitroConfig.BridgeAddress,
-		VerificationInterval:  time.Duration(c.VerificationInterval),
-		FinalityPollInterval:  time.Duration(c.FinalityPollInterval),
-		QueryServiceURL:       c.QueryServiceURL,
-		Namespace:             c.Namespace,
-		ValidBatcherAddresses: c.NitroConfig.ValidBatcherAddresses,
-		WaitForL1Finalization: c.NitroConfig.WaitForL1Finalization,
+		FeedURL:                c.NitroConfig.FeedURL,
+		FullNodeExecutionRPC:   c.FullNodeExecutionRPC,
+		EthRpc:                 c.EthRPC,
+		BridgeAddress:          c.NitroConfig.BridgeAddress,
+		VerificationInterval:   time.Duration(c.VerificationInterval),
+		FinalityPollInterval:   time.Duration(c.FinalityPollInterval),
+		QueryServiceURL:        c.QueryServiceURL,
+		Namespace:              c.Namespace,
+		ValidBatcherAddresses:  c.NitroConfig.ValidBatcherAddresses,
+		WaitForEthFinalization: c.NitroConfig.WaitForEthFinality,
 	}
 }

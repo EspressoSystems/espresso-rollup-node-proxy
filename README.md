@@ -6,7 +6,7 @@ The proxy can also be configured to intercept the standard `"finalized"` tag and
 
 In both modes, the proxy resolves the block number as `max(espresso finalized, eth finalized)`. This means clients always get Espresso's faster finality when it is ahead, but can safely fall back to Ethereum finality.
 
-The `"espresso"` block number is **monotonically increasing** — it will never move backwards, even across restarts, L1 reorgs, or sequencer reorgs. The finalized block number is persisted to disk, so on restart the proxy resumes from where it left off rather than resetting to zero. This gives clients a stable, safe cursor into the chain that only ever moves forward.
+The `"espresso"` block number is **monotonically increasing** — it will never move backwards, even across restarts, Ethereum reorgs, or sequencer reorgs. The finalized block number is persisted to disk, so on restart the proxy resumes from where it left off rather than resetting to zero. This gives clients a stable, safe cursor into the chain that only ever moves forward.
 
 ## How it works
 
@@ -40,7 +40,7 @@ The proxy is configured via CLI flags or a JSON config file (or both — flags o
 {
   "full_node_execution_rpc": "<op-geth-rpc>",
   "ws_full_node_execution_rpc": "<op-geth-ws-rpc>",
-  "l1_rpc": "<l1-rpc>",
+  "eth_rpc": "<eth-rpc>",
   "mode": "op",
   "namespace": <l2-chain-id>,
   "listen_addr": ":8080",
@@ -64,7 +64,7 @@ The proxy is configured via CLI flags or a JSON config file (or both — flags o
 {
   "full_node_execution_rpc": "<nitro-rpc>",
   "ws_full_node_execution_rpc": "<nitro-ws-rpc>",
-  "l1_rpc": "<l1-rpc>",
+  "eth_rpc": "<eth-rpc>",
   "mode": "nitro",
   "namespace": <l2-chain-id>,
   "listen_addr": ":8080",
@@ -101,7 +101,7 @@ The proxy is configured via CLI flags or a JSON config file (or both — flags o
   --espresso-tag espresso \
   --store-file-path /data/espresso_store.json \
   --query-service-url <espresso-query-service-url> \
-  --l1-rpc <l1-rpc> \
+  --eth-rpc <eth-rpc> \
   --op.light-client-address <light-client-contract-address> \
   --op.batcher-address <batcher-address> \
   --op.batch-authenticator-address <batch-authenticator-contract-address>
@@ -120,7 +120,7 @@ The proxy is configured via CLI flags or a JSON config file (or both — flags o
   --espresso-tag espresso \
   --store-file-path /data/espresso_store.json \
   --query-service-url <espresso-query-service-url> \
-  --l1-rpc <l1-rpc> \
+  --eth-rpc <eth-rpc> \
   --nitro.feed-url <nitro-sequencer-feed-ws-url> \
   --nitro.bridge-address <bridge-contract-address> \
   --nitro.valid-batcher-addresses <batcher-address>
@@ -154,7 +154,7 @@ docker run --rm \
   --namespace <l2-chain-id> \
   --store-file-path /data/espresso_store.json \
   --query-service-url <espresso-query-service-url> \
-  --l1-rpc <l1-rpc> \
+  --eth-rpc <eth-rpc> \
   --op.light-client-address <light-client-contract-address> \
   --op.batcher-address <batcher-address> \
   --op.batch-authenticator-address <batch-authenticator-contract-address>
@@ -183,7 +183,7 @@ services:
       - --ws.listen-addr=:8081
       - --store-file-path=/data/espresso_store.json
       - --query-service-url=<espresso-query-service-url>
-      - --l1-rpc=<l1-rpc>
+      - --eth-rpc=<eth-rpc>
       - --op.light-client-address=<light-client-contract-address>
       - --op.batcher-address=<batcher-address>
       - --op.batch-authenticator-address=<batch-authenticator-contract-address>
@@ -222,14 +222,14 @@ Clients should point at the proxy (`http://localhost:8080`) rather than directly
 | `--log-level`                      | `log_level`                      | `info`                | Log level (`debug`, `info`, `warn`, `error`)                                                        |
 | `--log-format`                     | `log_format`                     | `json`                | Log output format (`text` or `json`)                                                                |
 | `--track-batch-latency`            | `track_batch_latency`            | `false`               | Log per-batch and average latency from HotShot finalization to verification                         |
-| `--l1-rpc`                         | `l1_rpc`                         | —                     | L1 RPC URL (required)                                                                               |
-| `--op.light-client-address`        | `op.light_client_address`        | —                     | Espresso light client contract address on L1                                                        |
+| `--eth-rpc`                        | `eth_rpc`                        | —                     | Ethereum RPC URL (required)                                                                         |
+| `--op.light-client-address`        | `op.light_client_address`        | —                     | Espresso light client contract address on Ethereum                                                      |
 | `--op.batcher-address`             | `op.batcher_address`             | —                     | OP batcher address                                                                                  |
-| `--op.batch-authenticator-address` | `op.batch_authenticator_address` | —                     | Batch Authenticator contract address on L1                                                          |
+| `--op.batch-authenticator-address` | `op.batch_authenticator_address` | —                     | Batch Authenticator contract address on Ethereum                                                        |
 | `--nitro.feed-url`                 | `nitro.feed_url`                 | —                     | Nitro full node feed WebSocket URL (Nitro mode, required)                                           |
-| `--nitro.bridge-address`           | `nitro.bridge_address`           | —                     | Nitro Bridge contract address on L1 (Nitro mode, required)                                          |
+| `--nitro.bridge-address`           | `nitro.bridge_address`           | —                     | Nitro Bridge contract address on Ethereum (Nitro mode, required)                                          |
 | `--nitro.valid-batcher-addresses`  | `nitro.valid_batcher_addresses`  | —                     | Valid batcher addresses (Nitro mode, at least one required)                                         |
-| `--nitro.wait-for-l1-finalization` | `nitro.wait_for_l1_finalization` | `false`               | Wait for L1 block finalization before fetching delayed messages                                     |
+| `--nitro.wait-for-eth-finality`    | `nitro.wait_for_eth_finality`    | `false`               | Wait for Ethereum block finalization before fetching delayed messages                               |
 
 ## WebSockets
 
@@ -250,7 +250,7 @@ parsing the provided Execution WebSocket RPC URL.
 
 ## E2E Tests
 
-The `espresso_e2e/` directory contains a battery of integration tests that spin up a full rollup environment via Docker Compose and verify the proxy behaves correctly under adversarial and failure conditions — including L1 reorgs, sequencer reorgs, malicious sequencer feeds, and proxy restarts. In all cases two invariants must hold: the `"espresso"` tag must never move backwards, and it must only advance when the full node's state matches that of Espresso.
+The `espresso_e2e/` directory contains a battery of integration tests that spin up a full rollup environment via Docker Compose and verify the proxy behaves correctly under adversarial and failure conditions — including Ethereum reorgs, sequencer reorgs, malicious sequencer feeds, and proxy restarts. In all cases two invariants must hold: the `"espresso"` tag must never move backwards, and it must only advance when the full node's state matches that of Espresso.
 
 Run the e2e tests with `just e2e`.
 

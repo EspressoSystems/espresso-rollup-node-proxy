@@ -35,16 +35,16 @@ type BatcherAddressConfig struct {
 }
 
 type NitroEspressoBatchVerifierConfig struct {
-	FeedURL               string                 `json:"feed_url"`
-	FullNodeExecutionRPC  string                 `json:"full_node_execution_rpc"`
-	L1RPC                 string                 `json:"l1_rpc"`
-	BridgeAddress         common.Address         `json:"bridge_address"`
-	VerificationInterval  time.Duration          `json:"verification_interval"`
-	FinalityPollInterval  time.Duration          `json:"finality_poll_interval"`
-	QueryServiceURL       string                 `json:"query_service_url"`
-	Namespace             uint64                 `json:"namespace"`
-	ValidBatcherAddresses []BatcherAddressConfig `json:"valid_batcher_addresses"`
-	WaitForL1Finalization bool                   `json:"wait_for_l1_finalization"`
+	FeedURL                string                 `json:"feed_url"`
+	FullNodeExecutionRPC   string                 `json:"full_node_execution_rpc"`
+	EthRpc                 string                 `json:"eth_rpc"`
+	BridgeAddress          common.Address         `json:"bridge_address"`
+	VerificationInterval   time.Duration          `json:"verification_interval"`
+	FinalityPollInterval   time.Duration          `json:"finality_poll_interval"`
+	QueryServiceURL        string                 `json:"query_service_url"`
+	Namespace              uint64                 `json:"namespace"`
+	ValidBatcherAddresses  []BatcherAddressConfig `json:"valid_batcher_addresses"`
+	WaitForEthFinalization bool                   `json:"wait_for_eth_finalization"`
 }
 
 // NitroEspressoBatchVerifier verifies that messages from the Nitro sequencer feed
@@ -57,7 +57,7 @@ type NitroEspressoBatchVerifier struct {
 	streamer            nitroStreamer.EspressoStreamerInterface
 	feedClient          *feedclient.FeedClient
 	l2Client            *ethclient.Client
-	l1Client            *ethclient.Client
+	ethClient           *ethclient.Client
 	espressoStore       *espressoStore.EspressoStore
 	config              *NitroEspressoBatchVerifierConfig
 	finalityPoller      sharedVerifier.FinalityPollerInterface[uint64]
@@ -86,9 +86,9 @@ func NewNitroEspressoBatchVerifier(
 		return nil
 	}
 
-	l1Client, err := ethclient.DialContext(ctx, config.L1RPC)
+	ethClient, err := ethclient.DialContext(ctx, config.EthRpc)
 	if err != nil {
-		logger.Crit("failed to dial Nitro L1 RPC", "url", config.L1RPC, "error", err)
+		logger.Crit("failed to dial Nitro eth RPC", "url", config.EthRpc, "error", err)
 		return nil
 	}
 
@@ -120,15 +120,15 @@ func NewNitroEspressoBatchVerifier(
 
 	v := &NitroEspressoBatchVerifier{
 		l2Client:      l2Client,
-		l1Client:      l1Client,
+		ethClient:     ethClient,
 		espressoStore: store,
 		config:        config,
 		logger:        logger,
 		delayedMsgFetcher: delayedmessagefetcher.MustNewDelayedMessageFetcher(
 			ctx,
-			l1Client,
+			ethClient,
 			config.BridgeAddress,
-			config.WaitForL1Finalization,
+			config.WaitForEthFinalization,
 			logger,
 		),
 	}
@@ -397,7 +397,7 @@ func (v *NitroEspressoBatchVerifier) Stop() {
 	v.finalityPoller.Stop()
 	v.delayedMsgFetcher.Stop()
 	v.streamer.StopAndWait()
-	v.l1Client.Close()
+	v.ethClient.Close()
 	v.l2Client.Close()
 	v.logger.Info("Nitro verifier stopped")
 }
