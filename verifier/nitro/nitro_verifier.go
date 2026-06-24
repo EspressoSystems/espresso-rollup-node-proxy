@@ -228,12 +228,19 @@ func (v *NitroEspressoBatchVerifier) drainAndVerifyMessages(ctx context.Context)
 			v.logger.Debug("no new messages to verify")
 			break
 		}
+		// Assumptions being made at this point:
+		// espressoMsg is the next message in sequence
+		// espressoMsg has not moved backwards in position
+		// v.streamer is being trusted
 
 		feedMsg := v.feedClient.GetMessage(espressoMsg.Pos)
 		if feedMsg == nil {
 			v.logger.Debug("feed does not have message yet", "msg_pos", espressoMsg.Pos)
 			break
 		}
+		// Assumptions being made at this point
+		// feedMsg corresponds to the position we provided
+		// v.feedClient is being trusted
 
 		if err := v.verifyMessage(ctx, espressoMsg, feedMsg); err != nil {
 			if errors.Is(err, delayedmessagefetcher.ErrParentBlockNotFinalized) || errors.Is(err, delayedmessagefetcher.ErrDelayedMessageNotFound) {
@@ -249,6 +256,26 @@ func (v *NitroEspressoBatchVerifier) drainAndVerifyMessages(ctx context.Context)
 			break
 		}
 
+		// We have verified that the feedMsg contents match the contents of
+		// espressoMsg, or that the delayedMessageFetcher's contents that
+		// correspond to espressoMsg's position matches the feedMsg's
+		// contents.
+		//
+		// Trust Assumptions:
+		// v.streamer is trusted to provide the next message in sequence
+		// v.feedClient is trusted to provide the message corresponding to the
+		// position we provided
+		// MessagePosition has advanced
+		// v.delayedMessageFetcher is trusted to provide the correct delayed
+		// message from L1 for the given position for espressoMsg.
+		//
+		// All data comes from espressoMsg, so espressoMsg is being verified
+		// against, and is somewhat being trusted implicitly, as it's contents
+		// are informing everything else of what to fetch.
+		//
+		// Scenario: What happens if espressoMsg moves backwards from the
+		// previous position?
+		//
 		v.advance(espressoMsg.MessageWithMeta.DelayedMessagesRead - 1)
 		verifiedMsg = espressoMsg
 		v.logger.Info("successfully verified nitro message", "msg_pos", verifiedMsg.Pos)
@@ -284,6 +311,7 @@ func (v *NitroEspressoBatchVerifier) verifyDelayedMessage(ctx context.Context, e
 	if err != nil {
 		return fmt.Errorf("failed to fetch delayed message from parent chain: %w", err)
 	}
+	// v.delayedMessageFetcher is being trusted at this point.
 
 	espressoMsg.Message.L2msg = delayedMsg
 	if err := ensureMessagesMatch(espressoMsg, feedMsg); err != nil {
