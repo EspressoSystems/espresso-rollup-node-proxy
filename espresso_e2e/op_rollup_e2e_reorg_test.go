@@ -25,7 +25,7 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 
 	ctx := context.Background()
 	t.Log("Starting in-process proxy")
-	proxyURL, shutdownProxy := startTestProxy(ctx, t, opGethFullNode, espressoStore, espressoTag)
+	proxyURL, shutdownProxy := startTestProxy(ctx, t, opRethFullNode, espressoStore, espressoTag)
 	defer shutdownProxy()
 
 	t.Log("Starting OP Verifier")
@@ -37,7 +37,7 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 		const targetBlockNum = uint64(10)
 		t.Log("Waiting for block 10 to be produced on OP Geth full node")
 		pollUntil(t, 2*time.Minute, "block 10 not produced within timeout", func() bool {
-			result := jsonRPCCall(t, opGethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{"0xa", false}))
+			result := jsonRPCCall(t, opRethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{"0xa", false}))
 			return string(result) != "null"
 		})
 
@@ -65,7 +65,7 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 		t.Log("L1 reorg triggered successfully")
 
 		t.Log("Monitoring proxy block number for backwards movement during and after reorg")
-		previous := monitorStoredBlockProgress(t, espressoStore, blockBeforeReorg, 1*time.Minute, opGethFullNode, func(uint64) bool {
+		previous := monitorStoredBlockProgress(t, espressoStore, blockBeforeReorg, 1*time.Minute, opRethFullNode, func(uint64) bool {
 			return false
 		})
 
@@ -73,13 +73,13 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 			"proxy did not advance past block %d during monitoring", blockBeforeReorg)
 		t.Logf("Proxy at L2 block %d after reorg, block never moved backwards", previous)
 
-		requireProxyTagMatchesDirectBlock(t, proxyURL, opGethFullNode, espressoTag)
+		requireProxyTagMatchesDirectBlock(t, proxyURL, opRethFullNode, espressoTag)
 		t.Log("Proxy espresso tag response matches direct OP geth full node response after reorg")
 	})
 
 	t.Run("proxy does not advance if full node has incorrect state", func(t *testing.T) {
 		const forkFullNodeOffset = uint64(5)
-		currentL2 := getBlockByTag(t, opGethFullNode, "latest")
+		currentL2 := getBlockByTag(t, opRethFullNode, "latest")
 		maliciousBlockNum := currentL2 + forkFullNodeOffset
 
 		// First send malicious block number to engine
@@ -106,13 +106,13 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 		// Wait for both full node and sequencer to produce the malicious block
 		maliciousBlockHex := fmt.Sprintf("0x%x", maliciousBlockNum)
 		pollUntil(t, 3*time.Minute, fmt.Sprintf("full node did not produce block %d within timeout", maliciousBlockNum), func() bool {
-			return getBlockByTag(t, opGethFullNode, "latest") >= maliciousBlockNum &&
-				getBlockByTag(t, opGethSeqURL, "latest") >= maliciousBlockNum
+			return getBlockByTag(t, opRethFullNode, "latest") >= maliciousBlockNum &&
+				getBlockByTag(t, opRethSeqURL, "latest") >= maliciousBlockNum
 		})
 
 		// Ensure full node block hash and sequencer block hash mismatch
-		fullNodeBlock := jsonRPCCall(t, opGethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{maliciousBlockHex, false}))
-		seqBlock := jsonRPCCall(t, opGethSeqURL, "eth_getBlockByNumber", jsonMarshal(t, []any{maliciousBlockHex, false}))
+		fullNodeBlock := jsonRPCCall(t, opRethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{maliciousBlockHex, false}))
+		seqBlock := jsonRPCCall(t, opRethSeqURL, "eth_getBlockByNumber", jsonMarshal(t, []any{maliciousBlockHex, false}))
 		var fullNodeHash, seqHash struct {
 			Hash string `json:"hash"`
 		}
@@ -126,7 +126,7 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 		t.Log("Monitoring proxy block number for backwards movement during and after reorg")
 		now := time.Now()
 		stop := true
-		monitorStoredBlockProgress(t, espressoStore, blockBeforeFork, 5*time.Minute, opGethFullNode, func(current uint64) bool {
+		monitorStoredBlockProgress(t, espressoStore, blockBeforeFork, 5*time.Minute, opRethFullNode, func(current uint64) bool {
 			if (time.Since(now) >= 10*time.Second || current >= blockBeforeFork+10) && stop {
 				resp, err = http.Post(p2pAttackUrl+"/stop-fork", "application/json", nil)
 				require.NoError(t, err)
@@ -143,7 +143,7 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 			"proxy did not advance past block %d after full node reorg resolved", blockBeforeFork)
 		t.Logf("Proxy at L2 block %d after full node fork, before was at %d, block never moved backwards", verifiedBlock, blockBeforeFork)
 
-		requireProxyTagMatchesDirectBlock(t, proxyURL, opGethFullNode, espressoTag)
+		requireProxyTagMatchesDirectBlock(t, proxyURL, opRethFullNode, espressoTag)
 		t.Log("Proxy espresso tag response matches direct OP geth full node response after full node reorg")
 
 		requireLogStringAttrs(t, defaultCapturer, "batch verification failed", map[string]string{
@@ -152,7 +152,7 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 		t.Logf("Succesfully discarded verification of bad block hash")
 		// Make sure hashes are now correct at the malicious block as well
 		proxyMaliciousBlock := jsonRPCCall(t, proxyURL, "eth_getBlockByNumber", jsonMarshal(t, []any{maliciousBlockHex, false}))
-		seqMaliciousBlock := jsonRPCCall(t, opGethSeqURL, "eth_getBlockByNumber", jsonMarshal(t, []any{maliciousBlockHex, false}))
+		seqMaliciousBlock := jsonRPCCall(t, opRethSeqURL, "eth_getBlockByNumber", jsonMarshal(t, []any{maliciousBlockHex, false}))
 		require.JSONEq(t, string(seqMaliciousBlock), string(proxyMaliciousBlock),
 			"proxy block at %d should match sequencer after full node reorg resolved", maliciousBlockNum)
 		t.Logf("Proxy block %d matches sequencer after full node reorg resolved", maliciousBlockNum)
