@@ -28,7 +28,7 @@ const (
 	sequencerP2PAddress = "/dns4/op-node-sequencer/tcp/9003"
 
 	// Full node engine rpc used sending malicious block payload to
-	opFullNodeEngineRpc = "http://op-geth-fullnode:8552"
+	opFullNodeEngineRpc = "http://op-reth-fullnode:8552"
 
 	// Jwt token path
 	jwtPath = "/config/jwt.txt"
