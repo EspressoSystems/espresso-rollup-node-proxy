@@ -19,7 +19,6 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -38,8 +37,6 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/require"
@@ -78,11 +75,11 @@ const (
 	opWorkingDir                   = "./op"
 	l1GethURL                      = "http://127.0.0.1:8545"
 	espressoURL                    = "http://127.0.0.1:24000"
-	opGethSeqURL                   = "http://127.0.0.1:8546"
-	opGethFullNode                 = "http://127.0.0.1:8555"
+	opRethSeqURL                   = "http://127.0.0.1:8546"
+	opRethFullNode                 = "http://127.0.0.1:8555"
 	opNodeSeqURL                   = "http://127.0.0.1:9545"
 	opNodeFullNode                 = "http://127.0.0.1:9548"
-	opGethVerifierUrl              = "http://127.0.0.1:8547"
+	opRethVerifierUrl              = "http://127.0.0.1:8547"
 	mockBeaconURL                  = "http://127.0.0.1:5052"
 	p2pAttackUrl                   = "http://127.0.0.1:8560"
 	L2_CHAIN_ID                    = 22266222
@@ -115,7 +112,7 @@ func startOpVerifier(ctx context.Context, t *testing.T, logger log.Logger, store
 		l1Client,
 		&mockLightClient{client: espressoClient.NewClient(espressoURL)},
 		&verifier.OPEspressoBatchVerifierConfig{
-			FullNodeExecutionRPC:      opGethFullNode,
+			FullNodeExecutionRPC:      opRethFullNode,
 			Namespace:                 L2_CHAIN_ID,
 			VerificationInterval:      250 * time.Millisecond,
 			QueryServiceURL:           espressoURL,
@@ -251,6 +248,32 @@ func dockerComposeStart(t *testing.T, workingDir string, profiles []string, serv
 	}
 }
 
+// unwindSequencerEL rewinds the op-reth sequencer execution layer to toBlock
+// using reth's `stage unwind` flag.
+func rewindSequencer(t *testing.T, workingDir string, toBlock uint64) {
+	t.Helper()
+	t.Logf("stopping op-reth-sequencer")
+	dockerComposeStop(t, workingDir, "op-reth-sequencer")
+
+	run := exec.Command("docker", "compose", "run", "--rm", "-T", "--no-deps",
+		"--entrypoint", "/usr/local/bin/celo-reth", "op-reth-sequencer",
+		"stage", "unwind", "--datadir", "/data", "--chain", "/config/genesis.json",
+		"to-block", fmt.Sprintf("%d", toBlock))
+	run.Dir = workingDir
+	if out, err := run.CombinedOutput(); err != nil {
+		t.Fatalf("celo-reth stage unwind to-block %d failed: %v\n%s", toBlock, err, string(out))
+	}
+
+	t.Logf("starting op-reth-sequencer with rewind flag")
+	dockerComposeStart(t, workingDir, nil, "op-reth-sequencer")
+	t.Logf("waiting for op-reth-sequencer to get healthy")
+	waitForHTTPReady(t, opRethSeqURL, 2*time.Minute)
+	pollUntil(t, 1*time.Minute, fmt.Sprintf("op-reth-sequencer did not return at rewound head %d", toBlock), func() bool {
+		n, ok := tryGetBlockByTag(t, opRethSeqURL, "latest")
+		return ok && n == toBlock
+	})
+}
+
 func switchBatcher(t *testing.T) {
 	t.Helper()
 	batchAuthenticatorABI, err := abi.JSON(strings.NewReader(`[{"inputs":[],"name":"switchBatcher","outputs":[],"stateMutability":"nonpayable","type":"function"}]`))
@@ -308,9 +331,9 @@ func waitForRollupServicesReady(t *testing.T) {
 	t.Helper()
 	waitForHTTPReady(t, l1GethURL, 1*time.Minute)
 	waitForHTTPReady(t, espressoURL+"/v0/status/block-height", 1*time.Minute)
-	waitForHTTPReady(t, opGethSeqURL, 1*time.Minute)
+	waitForHTTPReady(t, opRethSeqURL, 1*time.Minute)
 	waitForHTTPReady(t, opNodeSeqURL, 1*time.Minute)
-	waitForHTTPReady(t, opGethFullNode, 1*time.Minute)
+	waitForHTTPReady(t, opRethFullNode, 1*time.Minute)
 	waitForHTTPReady(t, opNodeFullNode, 1*time.Minute)
 }
 
@@ -681,67 +704,4 @@ func matchLogAttrs(capturer *logutil.CaptureLogger, msg string, expected map[str
 		}
 	}
 	return false
-}
-
-func startLoadGen(ctx context.Context, t *testing.T, rpcURL string) func() {
-	t.Helper()
-
-	// "well-known Hardhat/Anvil test key, never use in production
-	// nolint:gosec
-	const loadGenKey = "59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
-	privateKey, err := crypto.HexToECDSA(loadGenKey)
-	require.NoError(t, err)
-
-	client, err := ethclient.DialContext(ctx, rpcURL)
-	require.NoError(t, err)
-
-	sender := crypto.PubkeyToAddress(privateKey.PublicKey)
-	to := common.HexToAddress("0x0000000000000000000000000000000000000001")
-	chainID := big.NewInt(L2_CHAIN_ID)
-
-	stopCh := make(chan struct{})
-	var once sync.Once
-	go func() {
-		nonce, err := client.PendingNonceAt(ctx, sender)
-		if err != nil {
-			t.Logf("load gen: failed to get nonce: %v", err)
-			return
-		}
-		t.Logf("load gen: starting from nonce %d", nonce)
-		for {
-			select {
-			case <-stopCh:
-				t.Logf("load gen: stopped")
-				return
-			case <-ctx.Done():
-				return
-			default:
-			}
-			tx := types.NewTx(&types.DynamicFeeTx{
-				ChainID:   chainID,
-				Nonce:     nonce,
-				To:        &to,
-				Value:     big.NewInt(1),
-				Gas:       21000,
-				GasTipCap: big.NewInt(1),
-				GasFeeCap: big.NewInt(1),
-			})
-			signed, err := types.SignTx(tx, types.NewLondonSigner(chainID), privateKey)
-			if err != nil {
-				time.Sleep(50 * time.Millisecond)
-				continue
-			}
-			if err := client.SendTransaction(ctx, signed); err != nil {
-				t.Logf("load gen: tx nonce=%d failed: %v — re-querying nonce", nonce, err)
-				if n, err := client.PendingNonceAt(ctx, sender); err == nil {
-					nonce = n
-				}
-			} else {
-				nonce++
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-	}()
-
-	return func() { once.Do(func() { close(stopCh) }) }
 }
