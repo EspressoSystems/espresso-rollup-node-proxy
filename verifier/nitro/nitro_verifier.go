@@ -45,6 +45,7 @@ type NitroEspressoBatchVerifierConfig struct {
 	Namespace                uint64                    `json:"namespace"`
 	ValidSigningKeyAddresses []SigningKeyAddressConfig `json:"valid_signing_key_addresses"`
 	WaitForEthFinalization   bool                      `json:"wait_for_eth_finalization"`
+	EthLogScanBlockRange     uint64                    `json:"eth_log_scan_block_range"`
 }
 
 // NitroEspressoBatchVerifier verifies that messages from the Nitro sequencer feed
@@ -129,6 +130,7 @@ func NewNitroEspressoBatchVerifier(
 			ethClient,
 			config.BridgeAddress,
 			config.WaitForEthFinalization,
+			config.EthLogScanBlockRange,
 			logger,
 		),
 	}

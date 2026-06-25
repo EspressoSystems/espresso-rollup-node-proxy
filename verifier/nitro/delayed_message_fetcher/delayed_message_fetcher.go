@@ -26,10 +26,13 @@ const (
 	eventInboxMessageDelivered = "InboxMessageDelivered"
 	eventInboxFromOrigin       = "InboxMessageDeliveredFromOrigin"
 	methodSendL2FromOrigin     = "sendL2MessageFromOrigin"
-	maxBlocksPerScan           = 10000
 	startBlockLookback         = 5000
 	timeoutPerCall             = 10 * time.Second
 	pollInterval               = 5 * time.Second
+
+	// DefaultMaxBlocksPerScan is the fallback value used when Config.MaxBlocksPerScan
+	// is left at zero.
+	DefaultMaxBlocksPerScan = 10000
 
 	// Two events are:
 	// `event InboxMessageDelivered(uint256 indexed messageNum, bytes data)`
@@ -69,6 +72,7 @@ type DelayedMessageFetcher struct {
 	bridgeAddress     common.Address
 	waitForFinality   bool
 	parentBlockNumber uint64
+	maxBlocksPerScan  uint64
 	bridgeFilterer    *nitroabi.BridgeFilterer
 	delayedMessages   map[uint64]*delayedMessage
 
@@ -109,8 +113,13 @@ func newDelayedMessageFetcher(
 	parentChainClient *ethclient.Client,
 	bridgeAddress common.Address,
 	waitForFinality bool,
+	maxBlocksPerScan uint64,
 	logger log.Logger,
 ) (*DelayedMessageFetcher, error) {
+	if maxBlocksPerScan == 0 {
+		maxBlocksPerScan = DefaultMaxBlocksPerScan
+	}
+
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeoutPerCall)
 	defer cancel()
 	finalized, err := parentChainClient.HeaderByNumber(timeoutCtx, big.NewInt(rpc.FinalizedBlockNumber.Int64()))
@@ -146,6 +155,7 @@ func newDelayedMessageFetcher(
 		sendL2FromOriginInputs:     inboxABI.Methods[methodSendL2FromOrigin].Inputs,
 		sendL2FromOriginSelector:   inboxABI.Methods[methodSendL2FromOrigin].ID,
 		parentBlockNumber:          startBlock,
+		maxBlocksPerScan:           maxBlocksPerScan,
 		logger:                     logger,
 	}
 	return f, nil
@@ -156,9 +166,10 @@ func MustNewDelayedMessageFetcher(
 	parentChainClient *ethclient.Client,
 	bridgeAddress common.Address,
 	waitForFinality bool,
+	maxBlocksPerScan uint64,
 	logger log.Logger,
 ) *DelayedMessageFetcher {
-	f, err := newDelayedMessageFetcher(ctx, parentChainClient, bridgeAddress, waitForFinality, logger)
+	f, err := newDelayedMessageFetcher(ctx, parentChainClient, bridgeAddress, waitForFinality, maxBlocksPerScan, logger)
 	if err != nil {
 		panic(fmt.Sprintf("failed to create DelayedMessageFetcher: %v", err))
 	}
@@ -557,8 +568,8 @@ func (f *DelayedMessageFetcher) poll(ctx context.Context) {
 		f.logger.Warn("start block is ahead of endblock", "start_block", startBlock, "end_block", endBlock)
 		return
 	}
-	if endBlock-startBlock >= maxBlocksPerScan {
-		endBlock = startBlock + maxBlocksPerScan
+	if endBlock-startBlock >= f.maxBlocksPerScan {
+		endBlock = startBlock + f.maxBlocksPerScan
 	}
 	if err := f.fetchDelayedMessageFromParentChain(timeoutCtx, startBlock, endBlock, finalized); err != nil {
 		f.logger.Warn("failed to fetch delayed messages", "error", err)

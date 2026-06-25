@@ -11,6 +11,7 @@ import (
 
 	"github.com/EspressoSystems/espresso-rollup-node-proxy/proxy"
 	nitroVerifier "github.com/EspressoSystems/espresso-rollup-node-proxy/verifier/nitro"
+	delayedmessagefetcher "github.com/EspressoSystems/espresso-rollup-node-proxy/verifier/nitro/delayed_message_fetcher"
 	opVerifier "github.com/EspressoSystems/espresso-rollup-node-proxy/verifier/op"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -50,6 +51,7 @@ type NitroConfig struct {
 	BridgeAddress            common.Address                          `json:"bridge_address"`
 	ValidSigningKeyAddresses []nitroVerifier.SigningKeyAddressConfig `json:"valid_signing_key_addresses"`
 	WaitForEthFinality       bool                                    `json:"wait_for_eth_finality"`
+	EthLogScanBlockRange     uint64                                  `json:"eth_log_scan_block_range"`
 }
 
 type Config struct {
@@ -85,6 +87,9 @@ func defaultConfig() *Config {
 		LogLevel:             "info",
 		LogFormat:            "json",
 		VerificationInterval: Duration(10 * time.Millisecond),
+		NitroConfig: NitroConfig{
+			EthLogScanBlockRange: delayedmessagefetcher.DefaultMaxBlocksPerScan,
+		},
 	}
 }
 
@@ -134,6 +139,7 @@ func parseConfig() *Config {
 	pflag.StringVar(&cfg.NitroConfig.FeedURL, "nitro.feed-url", cfg.NitroConfig.FeedURL, "Nitro sequencer feed WebSocket URL")
 	pflag.TextVar(&cfg.NitroConfig.BridgeAddress, "nitro.bridge-address", cfg.NitroConfig.BridgeAddress, "Nitro Bridge contract address on Ethereum")
 	pflag.BoolVar(&cfg.NitroConfig.WaitForEthFinality, "nitro.wait-for-eth-finality", cfg.NitroConfig.WaitForEthFinality, "wait for Ethereum block finalization before fetching delayed messages")
+	pflag.Uint64Var(&cfg.NitroConfig.EthLogScanBlockRange, "nitro.eth-log-scan-block-range", cfg.NitroConfig.EthLogScanBlockRange, "max Ethereum blocks scanned per eth_getLogs query when fetching delayed messages")
 	var signingKeyAddressFlags []string
 	pflag.StringArrayVar(&signingKeyAddressFlags, "nitro.valid-signing-key-addresses", nil, "valid signing key addresses for Nitro verifier (full range; use config file for from/to)")
 
@@ -148,12 +154,12 @@ func parseConfig() *Config {
 	}
 
 	if err := cfg.validate(); err != nil {
-		// validate() returns an errors.Join result; log each underlying error
-		// on its own line rather than as one newline-escaped blob.
-		if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		var joined interface{ Unwrap() []error }
+		if errors.As(err, &joined) {
 			for _, e := range joined.Unwrap() {
 				log.Error("invalid configuration", "error", e)
 			}
+			log.Crit("invalid configuration")
 			os.Exit(1)
 		}
 		log.Crit("invalid configuration", "error", err)
@@ -280,5 +286,6 @@ func (c *Config) toNitroVerifierConfig() *nitroVerifier.NitroEspressoBatchVerifi
 		Namespace:                c.Namespace,
 		ValidSigningKeyAddresses: c.NitroConfig.ValidSigningKeyAddresses,
 		WaitForEthFinalization:   c.NitroConfig.WaitForEthFinality,
+		EthLogScanBlockRange:     c.NitroConfig.EthLogScanBlockRange,
 	}
 }
