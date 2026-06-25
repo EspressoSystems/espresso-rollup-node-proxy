@@ -139,7 +139,7 @@ func startNitroVerifierWithLogger(ctx context.Context, t *testing.T, logger log.
 			QueryServiceURL:      nitroEspressoURL,
 			Namespace:            nitroNamespace,
 			BridgeAddress:        common.HexToAddress(nitroBridgeAddress),
-			ValidBatcherAddresses: []nitroVerifier.BatcherAddressConfig{
+			ValidSigningKeyAddresses: []nitroVerifier.SigningKeyAddressConfig{
 				{Address: common.HexToAddress(nitroBatchPoster), From: 0, To: math.MaxUint64},
 			},
 		})

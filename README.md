@@ -75,8 +75,8 @@ The proxy is configured via CLI flags or a JSON config file (or both — flags o
   "verification_interval": "250ms",
   "nitro": {
     "feed_url": "<nitro-sequencer-feed-ws-url>",
-    "valid_batcher_addresses": [
-      { "address": "<batcher-address>", "from": 0, "to": 18446744073709551615 }
+    "valid_signing_key_addresses": [
+      { "address": "<signing-key-address>", "from": 0, "to": 18446744073709551615 }
     ]
   }
 }
@@ -123,7 +123,7 @@ The proxy is configured via CLI flags or a JSON config file (or both — flags o
   --eth-rpc <eth-rpc> \
   --nitro.feed-url <nitro-sequencer-feed-ws-url> \
   --nitro.bridge-address <bridge-contract-address> \
-  --nitro.valid-batcher-addresses <batcher-address>
+  --nitro.valid-signing-key-addresses <signing-key-address>
 ```
 
 ### Docker
@@ -228,7 +228,7 @@ Clients should point at the proxy (`http://localhost:8080`) rather than directly
 | `--op.batch-authenticator-address` | `op.batch_authenticator_address` | —                     | Batch Authenticator contract address on Ethereum                                                        |
 | `--nitro.feed-url`                 | `nitro.feed_url`                 | —                     | Nitro full node feed WebSocket URL (Nitro mode, required)                                           |
 | `--nitro.bridge-address`           | `nitro.bridge_address`           | —                     | Nitro Bridge contract address on Ethereum (Nitro mode, required)                                          |
-| `--nitro.valid-batcher-addresses`  | `nitro.valid_batcher_addresses`  | —                     | Valid batcher addresses (Nitro mode, at least one required)                                         |
+| `--nitro.valid-signing-key-addresses` | `nitro.valid_signing_key_addresses` | —                  | Addresses of the keys that sign data sent to Espresso — the batch poster private key or the sequencer private key (Nitro mode, at least one required) |
 | `--nitro.wait-for-eth-finality`    | `nitro.wait_for_eth_finality`    | `false`               | Wait for Ethereum block finalization before fetching delayed messages                               |
 
 ## WebSockets

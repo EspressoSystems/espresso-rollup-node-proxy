@@ -46,10 +46,10 @@ type OPConfig struct {
 }
 
 type NitroConfig struct {
-	FeedURL               string                               `json:"feed_url"`
-	BridgeAddress         common.Address                       `json:"bridge_address"`
-	ValidBatcherAddresses []nitroVerifier.BatcherAddressConfig `json:"valid_batcher_addresses"`
-	WaitForEthFinality    bool                                 `json:"wait_for_eth_finality"`
+	FeedURL                  string                                  `json:"feed_url"`
+	BridgeAddress            common.Address                          `json:"bridge_address"`
+	ValidSigningKeyAddresses []nitroVerifier.SigningKeyAddressConfig `json:"valid_signing_key_addresses"`
+	WaitForEthFinality       bool                                    `json:"wait_for_eth_finality"`
 }
 
 type Config struct {
@@ -134,13 +134,13 @@ func parseConfig() *Config {
 	pflag.StringVar(&cfg.NitroConfig.FeedURL, "nitro.feed-url", cfg.NitroConfig.FeedURL, "Nitro sequencer feed WebSocket URL")
 	pflag.TextVar(&cfg.NitroConfig.BridgeAddress, "nitro.bridge-address", cfg.NitroConfig.BridgeAddress, "Nitro Bridge contract address on Ethereum")
 	pflag.BoolVar(&cfg.NitroConfig.WaitForEthFinality, "nitro.wait-for-eth-finality", cfg.NitroConfig.WaitForEthFinality, "wait for Ethereum block finalization before fetching delayed messages")
-	var batcherAddressFlags []string
-	pflag.StringArrayVar(&batcherAddressFlags, "nitro.valid-batcher-addresses", nil, "valid batcher addresses for Nitro verifier (full range; use config file for from/to)")
+	var signingKeyAddressFlags []string
+	pflag.StringArrayVar(&signingKeyAddressFlags, "nitro.valid-signing-key-addresses", nil, "valid signing key addresses for Nitro verifier (full range; use config file for from/to)")
 
 	pflag.Parse()
 
-	for _, addr := range batcherAddressFlags {
-		cfg.NitroConfig.ValidBatcherAddresses = append(cfg.NitroConfig.ValidBatcherAddresses, nitroVerifier.BatcherAddressConfig{
+	for _, addr := range signingKeyAddressFlags {
+		cfg.NitroConfig.ValidSigningKeyAddresses = append(cfg.NitroConfig.ValidSigningKeyAddresses, nitroVerifier.SigningKeyAddressConfig{
 			Address: common.HexToAddress(addr),
 			From:    0,
 			To:      math.MaxUint64,
@@ -148,6 +148,14 @@ func parseConfig() *Config {
 	}
 
 	if err := cfg.validate(); err != nil {
+		// validate() returns an errors.Join result; log each underlying error
+		// on its own line rather than as one newline-escaped blob.
+		if joined, ok := err.(interface{ Unwrap() []error }); ok {
+			for _, e := range joined.Unwrap() {
+				log.Error("invalid configuration", "error", e)
+			}
+			os.Exit(1)
+		}
 		log.Crit("invalid configuration", "error", err)
 	}
 
@@ -215,11 +223,11 @@ func (c *Config) validate() error {
 	if c.Mode == ModeNitro {
 		errs = append(errs, validateURL("nitro.feed-url", c.NitroConfig.FeedURL))
 		errs = append(errs, validateAddress("nitro.bridge-address", c.NitroConfig.BridgeAddress))
-		if len(c.NitroConfig.ValidBatcherAddresses) == 0 {
-			errs = append(errs, fmt.Errorf("nitro.valid-batcher-addresses: at least one address required"))
+		if len(c.NitroConfig.ValidSigningKeyAddresses) == 0 {
+			errs = append(errs, fmt.Errorf("nitro.valid-signing-key-addresses: at least one address required"))
 		}
-		for i, a := range c.NitroConfig.ValidBatcherAddresses {
-			errs = append(errs, validateAddress(fmt.Sprintf("nitro.valid-batcher-addresses[%d].address", i), a.Address))
+		for i, a := range c.NitroConfig.ValidSigningKeyAddresses {
+			errs = append(errs, validateAddress(fmt.Sprintf("nitro.valid-signing-key-addresses[%d].address", i), a.Address))
 		}
 	}
 
@@ -262,15 +270,15 @@ func (c *Config) toOPVerifierConfig() *opVerifier.OPEspressoBatchVerifierConfig 
 
 func (c *Config) toNitroVerifierConfig() *nitroVerifier.NitroEspressoBatchVerifierConfig {
 	return &nitroVerifier.NitroEspressoBatchVerifierConfig{
-		FeedURL:                c.NitroConfig.FeedURL,
-		FullNodeExecutionRPC:   c.FullNodeExecutionRPC,
-		EthRpc:                 c.EthRPC,
-		BridgeAddress:          c.NitroConfig.BridgeAddress,
-		VerificationInterval:   time.Duration(c.VerificationInterval),
-		FinalityPollInterval:   time.Duration(c.FinalityPollInterval),
-		QueryServiceURL:        c.QueryServiceURL,
-		Namespace:              c.Namespace,
-		ValidBatcherAddresses:  c.NitroConfig.ValidBatcherAddresses,
-		WaitForEthFinalization: c.NitroConfig.WaitForEthFinality,
+		FeedURL:                  c.NitroConfig.FeedURL,
+		FullNodeExecutionRPC:     c.FullNodeExecutionRPC,
+		EthRpc:                   c.EthRPC,
+		BridgeAddress:            c.NitroConfig.BridgeAddress,
+		VerificationInterval:     time.Duration(c.VerificationInterval),
+		FinalityPollInterval:     time.Duration(c.FinalityPollInterval),
+		QueryServiceURL:          c.QueryServiceURL,
+		Namespace:                c.Namespace,
+		ValidSigningKeyAddresses: c.NitroConfig.ValidSigningKeyAddresses,
+		WaitForEthFinalization:   c.NitroConfig.WaitForEthFinality,
 	}
 }

@@ -309,6 +309,8 @@ func cleanHTTPServerShutdown(logger log.Logger, servers ...*http.Server) {
 }
 
 func main() {
+	log.SetDefault(log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stderr, slog.LevelInfo, true)))
+
 	cfg := parseConfig()
 	logger := configureLogger(cfg)
 
