@@ -141,7 +141,7 @@ func TestConfigValidate(t *testing.T) {
 		NitroConfig: NitroConfig{
 			FeedURL:       "ws://localhost:9642",
 			BridgeAddress: common.HexToAddress("0x3f1Eae7D46d88F08fc2F8ed27FCb2AB183EB2d0E"),
-			ValidBatcherAddresses: []nitroVerifier.BatcherAddressConfig{
+			ValidSigningKeyAddresses: []nitroVerifier.SigningKeyAddressConfig{
 				{Address: common.HexToAddress("0x3f1Eae7D46d88F08fc2F8ed27FCb2AB183EB2d0E")},
 			},
 		},
@@ -153,17 +153,17 @@ func TestConfigValidate(t *testing.T) {
 	require.Error(t, err)
 	for _, field := range []string{
 		"full-node-execution-rpc", "eth-rpc", "nitro.feed-url",
-		"nitro.bridge-address", "namespace", "nitro.valid-batcher-addresses",
+		"nitro.bridge-address", "namespace", "nitro.valid-signing-key-addresses",
 		"query-service-url", "listen-addr", "espresso-tag", "store-file-path",
 	} {
 		require.Contains(t, err.Error(), field)
 	}
 
 	nitroBadAddr := validNitro
-	nitroBadAddr.NitroConfig.ValidBatcherAddresses = []nitroVerifier.BatcherAddressConfig{
+	nitroBadAddr.NitroConfig.ValidSigningKeyAddresses = []nitroVerifier.SigningKeyAddressConfig{
 		{Address: common.HexToAddress("0xNOTANADDR")},
 	}
 	err = nitroBadAddr.validate()
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "nitro.valid-batcher-addresses[0].address")
+	require.Contains(t, err.Error(), "nitro.valid-signing-key-addresses[0].address")
 }

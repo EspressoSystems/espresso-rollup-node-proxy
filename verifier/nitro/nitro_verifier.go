@@ -26,25 +26,26 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
-const l1FinalityWaitLogInterval = 5 * time.Second
+const ethFinalityWaitLogInterval = 5 * time.Second
 
-type BatcherAddressConfig struct {
+type SigningKeyAddressConfig struct {
 	Address common.Address `json:"address"`
 	From    uint64         `json:"from"`
 	To      uint64         `json:"to"`
 }
 
 type NitroEspressoBatchVerifierConfig struct {
-	FeedURL                string                 `json:"feed_url"`
-	FullNodeExecutionRPC   string                 `json:"full_node_execution_rpc"`
-	EthRpc                 string                 `json:"eth_rpc"`
-	BridgeAddress          common.Address         `json:"bridge_address"`
-	VerificationInterval   time.Duration          `json:"verification_interval"`
-	FinalityPollInterval   time.Duration          `json:"finality_poll_interval"`
-	QueryServiceURL        string                 `json:"query_service_url"`
-	Namespace              uint64                 `json:"namespace"`
-	ValidBatcherAddresses  []BatcherAddressConfig `json:"valid_batcher_addresses"`
-	WaitForEthFinalization bool                   `json:"wait_for_eth_finalization"`
+	FeedURL                  string                    `json:"feed_url"`
+	FullNodeExecutionRPC     string                    `json:"full_node_execution_rpc"`
+	EthRpc                   string                    `json:"eth_rpc"`
+	BridgeAddress            common.Address            `json:"bridge_address"`
+	VerificationInterval     time.Duration             `json:"verification_interval"`
+	FinalityPollInterval     time.Duration             `json:"finality_poll_interval"`
+	QueryServiceURL          string                    `json:"query_service_url"`
+	Namespace                uint64                    `json:"namespace"`
+	ValidSigningKeyAddresses []SigningKeyAddressConfig `json:"valid_signing_key_addresses"`
+	WaitForEthFinalization   bool                      `json:"wait_for_eth_finalization"`
+	EthLogScanBlockRange     uint64                    `json:"eth_log_scan_block_range"`
 }
 
 // NitroEspressoBatchVerifier verifies that messages from the Nitro sequencer feed
@@ -109,8 +110,8 @@ func NewNitroEspressoBatchVerifier(
 	}
 	logger.Info("chain ID verified", "chain_id", chainID.Uint64())
 
-	addrRanges := make([]nitroStreamer.AddressValidRangeConfig, 0, len(config.ValidBatcherAddresses))
-	for _, a := range config.ValidBatcherAddresses {
+	addrRanges := make([]nitroStreamer.AddressValidRangeConfig, 0, len(config.ValidSigningKeyAddresses))
+	for _, a := range config.ValidSigningKeyAddresses {
 		addrRanges = append(addrRanges, nitroStreamer.AddressValidRangeConfig{
 			Address: a.Address.Hex(),
 			From:    a.From,
@@ -129,6 +130,7 @@ func NewNitroEspressoBatchVerifier(
 			ethClient,
 			config.BridgeAddress,
 			config.WaitForEthFinalization,
+			config.EthLogScanBlockRange,
 			logger,
 		),
 	}
@@ -239,7 +241,7 @@ func (v *NitroEspressoBatchVerifier) drainAndVerifyMessages(ctx context.Context)
 			if errors.Is(err, delayedmessagefetcher.ErrParentBlockNotFinalized) || errors.Is(err, delayedmessagefetcher.ErrDelayedMessageNotFound) {
 				// This can get noisy so rate limit because if sequencer is set to safe block
 				// then we may be waiting another 7 minutes for L1 finalization
-				if time.Since(v.lastFinalityWaitLog) > l1FinalityWaitLogInterval {
+				if time.Since(v.lastFinalityWaitLog) > ethFinalityWaitLogInterval {
 					v.logger.Warn("error verifying delayed message", "msg_pos", espressoMsg.Pos, "error", err)
 					v.lastFinalityWaitLog = time.Now()
 				}

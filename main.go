@@ -90,7 +90,17 @@ func configureLogger(cfg *Config) log.Logger {
 
 // mustCreateEspressoStore creates a new instance of the EspressoStore,
 // and will log a critical error and exit if the store cannot be created.
+//
+// On a fresh start (no state file) the operator must pin a non-zero
+// --initial-hotshot-height; starting from height 0 would sync the entire
+// HotShot chain from genesis, which is not intended and will take a long time.
 func mustCreateEspressoStore(logger log.Logger, cfg *Config) *store.EspressoStore {
+	if _, err := os.Stat(cfg.StoreFilePath); os.IsNotExist(err) && cfg.InitialHotshotHeight == 0 {
+		logger.Crit("no state file found and --initial-hotshot-height is 0; set a non-zero initial hotshot height",
+			"store_file_path", cfg.StoreFilePath)
+		os.Exit(1)
+	}
+
 	espressoStore, err := store.NewEspressoStore(cfg.StoreFilePath, cfg.InitialHotshotHeight)
 	if err != nil {
 		logger.Crit("failed to create espresso store", "error", err)
@@ -309,6 +319,8 @@ func cleanHTTPServerShutdown(logger log.Logger, servers ...*http.Server) {
 }
 
 func main() {
+	log.SetDefault(log.NewLogger(log.NewTerminalHandlerWithLevel(os.Stderr, slog.LevelInfo, true)))
+
 	cfg := parseConfig()
 	logger := configureLogger(cfg)
 
