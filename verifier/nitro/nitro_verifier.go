@@ -107,7 +107,7 @@ func NewNitroEspressoBatchVerifier(
 
 	if store.GetState().ChainId != chainId.Uint64() {
 		logger.Crit(
-			"chain id does from endpoint does not match what is set in storage file",
+			"chain id from endpoint does not match what is set in storage file",
 			"chain_id_storage", store.GetState().ChainId,
 			"chain_id_endpoint", chainId.Uint64(),
 		)
