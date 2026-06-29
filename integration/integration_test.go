@@ -29,7 +29,7 @@ const (
 func newTestReverseProxyHandler(t *testing.T, upstreamURL *url.URL, l2BlockNumber uint64, espressoTag string, maxBatchSize int) http.Handler {
 	t.Helper()
 	fp := filepath.Join(t.TempDir(), "state.json")
-	store, err := espressoStore.NewEspressoStore(fp, 1)
+	store, err := espressoStore.NewEspressoStore(fp, 1, 1)
 	require.NoError(t, err)
 	updated, err := store.UpdateIfGreater(l2BlockNumber, 1)
 	require.True(t, updated)
@@ -206,7 +206,7 @@ func TestServe(t *testing.T) {
 	// allow, then it should result in an error with nothing being processed.
 	t.Run("rejects batch exceeding max batch size", func(t *testing.T) {
 		fp := filepath.Join(t.TempDir(), "state.json")
-		store, err := espressoStore.NewEspressoStore(fp, 1)
+		store, err := espressoStore.NewEspressoStore(fp, 1, 1)
 		require.NoError(t, err)
 		updated, err := store.UpdateIfGreater(100, 1)
 		require.True(t, updated)

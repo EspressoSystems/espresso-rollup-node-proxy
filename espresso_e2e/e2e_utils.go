@@ -522,7 +522,7 @@ func pollUntil(t *testing.T, timeout time.Duration, failMsg string, condition fu
 func newTestStore(t *testing.T, name string, hotshotHeight uint64) *espressostore.EspressoStore {
 	t.Helper()
 	stateFile := t.TempDir() + "/" + name + ".json"
-	store, err := espressostore.NewEspressoStore(stateFile, hotshotHeight)
+	store, err := espressostore.NewEspressoStore(stateFile, hotshotHeight, 1)
 	require.NoError(t, err)
 	return store
 }

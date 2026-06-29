@@ -99,16 +99,22 @@ func NewNitroEspressoBatchVerifier(
 		return nil
 	}
 
-	chainID, err := l2Client.ChainID(ctx)
+	chainId, err := l2Client.ChainID(ctx)
 	if err != nil {
-		logger.Crit("failed to get chain ID from L2 client", "error", err)
+		logger.Crit("failed to get L2 chain id", "error", err)
 		return nil
 	}
-	if chainID.Uint64() != config.Namespace {
-		logger.Crit("chain ID mismatch", "chain_id", chainID.Uint64(), "namespace", config.Namespace)
+
+	if store.GetState().ChainId != chainId.Uint64() {
+		logger.Crit(
+			"chain id does from endpoint does not match what is set in storage file",
+			"chain_id_storage", store.GetState().ChainId,
+			"chain_id_endpoint", chainId.Uint64(),
+		)
 		return nil
 	}
-	logger.Info("chain ID verified", "chain_id", chainID.Uint64())
+
+	logger.Info("chain ID verified", "chain_id", chainId.Uint64())
 
 	addrRanges := make([]nitroStreamer.AddressValidRangeConfig, 0, len(config.ValidSigningKeyAddresses))
 	for _, a := range config.ValidSigningKeyAddresses {

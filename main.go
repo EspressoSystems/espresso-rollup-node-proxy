@@ -101,7 +101,7 @@ func mustCreateEspressoStore(logger log.Logger, cfg *Config) *store.EspressoStor
 		os.Exit(1)
 	}
 
-	espressoStore, err := store.NewEspressoStore(cfg.StoreFilePath, cfg.InitialHotshotHeight)
+	espressoStore, err := store.NewEspressoStore(cfg.StoreFilePath, cfg.InitialHotshotHeight, cfg.Namespace)
 	if err != nil {
 		logger.Crit("failed to create espresso store", "error", err)
 		os.Exit(1)

@@ -176,7 +176,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 
 		initialStateFile := t.TempDir() + "/initial-proxy-state.json"
 		finalizedL2Block := getBlockByTag(t, opRethFullNode, "finalized")
-		initialStore, err := espressostore.NewEspressoStore(initialStateFile, initialHotshotHeight)
+		initialStore, err := espressostore.NewEspressoStore(initialStateFile, initialHotshotHeight, L2_CHAIN_ID)
 		require.NoError(t, err)
 		_, err = initialStore.UpdateIfGreater(finalizedL2Block, initialHotshotHeight)
 		require.NoError(t, err)
@@ -218,7 +218,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 
 		// Now that proxy has advanced to a higher block number and hotshot height,
 		// we will restart the proxy with with the same state file, and assert it resumes from the persisted state correctly.
-		newStore, err := espressostore.NewEspressoStore(initialStateFile, initialHotshotHeight)
+		newStore, err := espressostore.NewEspressoStore(initialStateFile, initialHotshotHeight, L2_CHAIN_ID)
 		require.NoError(t, err)
 
 		proxyURL, shutdownProxy = startTestProxy(ctx, t, opRethFullNode, newStore, espressoTag)
