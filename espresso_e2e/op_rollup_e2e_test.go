@@ -22,7 +22,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 	t.Log("waiting for services to be ready")
 	waitForRollupServicesReady(t)
 
-	espressoStore := newTestStore(t, "espresso-state", 1)
+	espressoStore := newTestStore(t, "espresso-state", 1, opNamespace)
 	updated, err := espressoStore.UpdateIfGreater(1, 1)
 	require.True(t, updated)
 	require.NoError(t, err)
@@ -176,7 +176,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 
 		initialStateFile := t.TempDir() + "/initial-proxy-state.json"
 		finalizedL2Block := getBlockByTag(t, opRethFullNode, "finalized")
-		initialStore, err := espressostore.NewEspressoStore(initialStateFile, initialHotshotHeight, L2_CHAIN_ID)
+		initialStore, err := espressostore.NewEspressoStore(initialStateFile, initialHotshotHeight, opNamespace)
 		require.NoError(t, err)
 		_, err = initialStore.UpdateIfGreater(finalizedL2Block, initialHotshotHeight)
 		require.NoError(t, err)
@@ -218,7 +218,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 
 		// Now that proxy has advanced to a higher block number and hotshot height,
 		// we will restart the proxy with with the same state file, and assert it resumes from the persisted state correctly.
-		newStore, err := espressostore.NewEspressoStore(initialStateFile, initialHotshotHeight, L2_CHAIN_ID)
+		newStore, err := espressostore.NewEspressoStore(initialStateFile, initialHotshotHeight, opNamespace)
 		require.NoError(t, err)
 
 		proxyURL, shutdownProxy = startTestProxy(ctx, t, opRethFullNode, newStore, espressoTag)
@@ -262,7 +262,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 		}()
 
 		// Create an empty store and proxy.
-		store := newTestStore(t, "switchover-state", hotshotHeight)
+		store := newTestStore(t, "switchover-state", hotshotHeight, opNamespace)
 		require.Equal(t, uint64(0), getStoredBlock(t, store), "store should start with L2BlockNumber=0")
 
 		t.Log("Starting proxy with empty store, fallback batcher active")
@@ -328,7 +328,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 			}
 		}()
 
-		store := newTestStore(t, "switchover-finalized-state", hotshotHeight)
+		store := newTestStore(t, "switchover-finalized-state", hotshotHeight, opNamespace)
 		require.Equal(t, uint64(0), getStoredBlock(t, store), "store should start with L2BlockNumber=0")
 
 		t.Log("Starting proxy with finalized tag, empty store, fallback batcher active")
@@ -381,7 +381,7 @@ func TestOPE2ERollupEspressoProxy(t *testing.T) {
 	})
 
 	t.Run("fallback to ethereum finality when espresso stops", func(t *testing.T) {
-		store := newTestStore(t, "fallback-state", 1)
+		store := newTestStore(t, "fallback-state", 1, opNamespace)
 		updated, err := store.UpdateIfGreater(1, 1)
 		require.True(t, updated)
 		require.NoError(t, err)

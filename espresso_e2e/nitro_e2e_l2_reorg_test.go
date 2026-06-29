@@ -18,7 +18,7 @@ func TestNitroE2EL2Reorg(t *testing.T) {
 	t.Log("Waiting for Nitro services to be ready")
 	waitForNitroServicesReady(t)
 
-	espressoStore := newTestStore(t, "nitro-espresso-state-seq-reorg", 1)
+	espressoStore := newTestStore(t, "nitro-espresso-state-seq-reorg", 1, nitroNamespace)
 
 	ctx := context.Background()
 	t.Log("Starting in-process proxy")
