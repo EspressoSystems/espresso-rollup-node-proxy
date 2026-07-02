@@ -274,6 +274,57 @@ func rewindSequencer(t *testing.T, workingDir string, toBlock uint64) {
 	})
 }
 
+// setEspressoBatcher updates the authorized Espresso batcher address on the
+// BatchAuthenticator (owner-only) and waits for the tx to be mined.
+func setEspressoBatcher(t *testing.T, newBatcher common.Address) {
+	t.Helper()
+	batchAuthenticatorABI, err := abi.JSON(strings.NewReader(`[{"inputs":[{"name":"_newEspressoBatcher","type":"address"}],"name":"setEspressoBatcher","outputs":[],"stateMutability":"nonpayable","type":"function"}]`))
+	require.NoError(t, err)
+	callData, err := batchAuthenticatorABI.Pack("setEspressoBatcher", newBatcher)
+	require.NoError(t, err)
+
+	txHashRaw := jsonRPCCall(t, l1GethURL, "eth_sendTransaction", jsonMarshal(t, []map[string]string{{
+		"from": batchAuthenticatorOwnerAddress,
+		"to":   batchAuthenticatorAddress,
+		"data": "0x" + hex.EncodeToString(callData),
+	}}))
+
+	var txHash string
+	require.NoError(t, json.Unmarshal(txHashRaw, &txHash))
+
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		require.True(t, time.Now().Before(deadline), "setEspressoBatcher transaction was not mined within timeout")
+		receiptResp := jsonRPCCallRaw(t, l1GethURL, "eth_getTransactionReceipt", jsonMarshal(t, []any{txHash}))
+		if receiptResp.Result == nil || string(receiptResp.Result) == "null" {
+			time.Sleep(250 * time.Millisecond)
+			continue
+		}
+		var receipt struct {
+			Status string `json:"status"`
+		}
+		require.NoError(t, json.Unmarshal(receiptResp.Result, &receipt))
+		require.Equal(t, "0x1", receipt.Status, "setEspressoBatcher transaction failed")
+		return
+	}
+}
+
+// restartBatcherWithEspressoKey recreates the op-batcher so it signs Espresso
+// batches with the given private key.
+func restartBatcherWithEspressoKey(t *testing.T, privKeyHex string) {
+	t.Helper()
+	if !strings.HasPrefix(privKeyHex, "0x") {
+		privKeyHex = "0x" + privKeyHex
+	}
+	dockerComposeStop(t, opWorkingDir, "op-batcher")
+	cmd := exec.Command("docker", "compose", "up", "-d", "--force-recreate", "--no-deps", "op-batcher")
+	cmd.Dir = opWorkingDir
+	cmd.Env = append(os.Environ(), "OP_BATCHER_PRIVATE_KEY="+privKeyHex)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("restart op-batcher with rotated key failed: %v\n%s", err, string(out))
+	}
+}
+
 func switchBatcher(t *testing.T) {
 	t.Helper()
 	batchAuthenticatorABI, err := abi.JSON(strings.NewReader(`[{"inputs":[],"name":"switchBatcher","outputs":[],"stateMutability":"nonpayable","type":"function"}]`))
