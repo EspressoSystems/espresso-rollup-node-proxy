@@ -51,9 +51,12 @@ func l1OriginFromL2Block(block *types.Block) (eth.BlockID, error) {
 	}, nil
 }
 
-// filterDeposits returns a copy of block with L1-derived user deposit
+// filterUserDeposits returns a copy of block with L1-derived user deposit
 // transactions removed
 func filterUserDeposits(block *types.Block) *types.Block {
+	if block == nil {
+		return nil
+	}
 	txs := block.Transactions()
 	if len(txs) == 0 {
 		return block
