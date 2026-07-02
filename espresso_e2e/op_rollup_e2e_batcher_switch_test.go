@@ -5,9 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/EspressoSystems/espresso-rollup-node-proxy/log/logutil"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/require"
 )
 
@@ -36,8 +34,8 @@ func TestOPE2EBatcherKeyRotation(t *testing.T) {
 	_, shutdownProxy := startTestProxy(ctx, t, opRethFullNode, store, espressoTag)
 	defer shutdownProxy()
 
-	capturer := logutil.NewCaptureLogger(nil)
-	v := startOpVerifier(ctx, t, log.NewLogger(capturer), store)
+	// capturer := logutil.NewCaptureLogger(nil)
+	v := startOpVerifier(ctx, t, newDefaultLogger(), store)
 	defer v.Stop()
 
 	// Confirm the chain is advancing normally under the original batcher.
