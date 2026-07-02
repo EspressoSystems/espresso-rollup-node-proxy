@@ -125,10 +125,10 @@ func TestEspressoBatchToBlock(t *testing.T) {
 	require.Equal(t, header.Number.Uint64(), block.NumberU64())
 }
 
-// TestStripUserDeposits checks that stripUserDeposits removes L1-derived user
+// TestFilterUserDeposits checks that filterUserDeposits removes L1-derived user
 // deposits (deposits after tx[0]) while preserving the L1-info deposit and the
 // sequenced transactions, and is a no-op when there are no user deposits.
-func TestStripUserDeposits(t *testing.T) {
+func TestFilterUserDeposits(t *testing.T) {
 	l1Info := types.NewTx(&types.DepositTx{SourceHash: common.HexToHash("0x01"), Data: []byte{0xaa}})
 	userDeposit := types.NewTx(&types.DepositTx{SourceHash: common.HexToHash("0x02"), Data: []byte{0xbb}})
 	seqTx := types.NewTx(&types.LegacyTx{Nonce: 1, Gas: 21000, GasPrice: big.NewInt(1)})
