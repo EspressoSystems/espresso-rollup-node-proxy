@@ -125,6 +125,74 @@ func TestEspressoBatchToBlock(t *testing.T) {
 	require.Equal(t, header.Number.Uint64(), block.NumberU64())
 }
 
+// TestStripUserDeposits checks that stripUserDeposits removes L1-derived user
+// deposits (deposits after tx[0]) while preserving the L1-info deposit and the
+// sequenced transactions, and is a no-op when there are no user deposits.
+func TestStripUserDeposits(t *testing.T) {
+	l1Info := types.NewTx(&types.DepositTx{SourceHash: common.HexToHash("0x01"), Data: []byte{0xaa}})
+	userDeposit := types.NewTx(&types.DepositTx{SourceHash: common.HexToHash("0x02"), Data: []byte{0xbb}})
+	seqTx := types.NewTx(&types.LegacyTx{Nonce: 1, Gas: 21000, GasPrice: big.NewInt(1)})
+
+	t.Run("removes user deposits", func(t *testing.T) {
+		block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(123)}).
+			WithBody(types.Body{Transactions: types.Transactions{l1Info, userDeposit, seqTx}})
+
+		stripped := filterUserDeposits(block)
+		txs := stripped.Transactions()
+		require.Len(t, txs, 2)
+		require.Equal(t, l1Info.Hash(), txs[0].Hash(), "L1-info deposit must be preserved")
+		require.Equal(t, seqTx.Hash(), txs[1].Hash(), "sequenced tx must be preserved")
+		// Header (and therefore block hash) is unchanged by the strip.
+		require.Equal(t, block.Hash(), stripped.Hash())
+	})
+
+	t.Run("no-op without user deposits", func(t *testing.T) {
+		block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(123)}).
+			WithBody(types.Body{Transactions: types.Transactions{l1Info, seqTx}})
+
+		stripped := filterUserDeposits(block)
+		require.Same(t, block, stripped, "block without user deposits should be returned unchanged")
+	})
+
+	t.Run("empty block", func(t *testing.T) {
+		block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(123)})
+		require.Same(t, block, filterUserDeposits(block))
+	})
+}
+
+// TestEnsureBlocksMatch_EpochBoundaryDeposits checks that an epoch-boundary block
+// carrying an L1-derived user deposit verifies against its reconstructed batch
+// once user deposits are stripped, and fails to match if they are not.
+func TestEnsureBlocksMatch_EpochBoundaryDeposits(t *testing.T) {
+	l1Info := types.NewTx(&types.DepositTx{SourceHash: common.HexToHash("0x01"), Data: []byte{0xaa}})
+	userDeposit := types.NewTx(&types.DepositTx{SourceHash: common.HexToHash("0x02"), Data: []byte{0xbb}})
+	seqTx := types.NewTx(&types.LegacyTx{Nonce: 1, Gas: 21000, GasPrice: big.NewInt(1)})
+	rawSeq, err := seqTx.MarshalBinary()
+	require.NoError(t, err)
+
+	// Full node block as produced on an epoch boundary: L1-info deposit, then an
+	// L1-derived user deposit, then the sequenced transaction.
+	fullNodeBlock := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(123)}).
+		WithBody(types.Body{Transactions: types.Transactions{l1Info, userDeposit, seqTx}})
+
+	// The batch Espresso finalized carries only the L1-info deposit and the
+	// sequenced transactions; user deposits are excluded.
+	batch := &derivation.EspressoBatch{
+		BatchHeader:   fullNodeBlock.Header(),
+		L1InfoDeposit: l1Info,
+		Batch:         derive.SingularBatch{Transactions: []hexutil.Bytes{rawSeq}},
+	}
+	espressoBlock, err := espressoBatchToBlock(fullNodeBlock, batch)
+	require.NoError(t, err)
+
+	// Without stripping, the extra user deposit makes the blocks differ.
+	require.Error(t, ensureBlocksMatch(espressoBlock, fullNodeBlock),
+		"unstripped full node block should not match the reconstruction")
+
+	// After stripping user deposits, the blocks match byte-for-byte.
+	require.NoError(t, ensureBlocksMatch(espressoBlock, filterUserDeposits(fullNodeBlock)))
+}
+
 // TestEspressoBatchToBlock_BadTx checks that an undecodable transaction errors
 func TestEspressoBatchToBlock_BadTx(t *testing.T) {
 	batch := &derivation.EspressoBatch{

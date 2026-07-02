@@ -51,6 +51,32 @@ func l1OriginFromL2Block(block *types.Block) (eth.BlockID, error) {
 	}, nil
 }
 
+// filterDeposits returns a copy of block with L1-derived user deposit
+// transactions removed
+func filterUserDeposits(block *types.Block) *types.Block {
+	txs := block.Transactions()
+	if len(txs) == 0 {
+		return block
+	}
+	// Keep tx[0] (the L1-info deposit) and every non-deposit transaction.
+	filtered := make(types.Transactions, 0, len(txs))
+	filtered = append(filtered, txs[0])
+	for _, tx := range txs[1:] {
+		if tx.IsDepositTx() {
+			continue
+		}
+		filtered = append(filtered, tx)
+	}
+	if len(filtered) == len(txs) {
+		return block
+	}
+	return block.WithBody(types.Body{
+		Transactions: filtered,
+		Uncles:       block.Uncles(),
+		Withdrawals:  block.Withdrawals(),
+	})
+}
+
 func espressoBatchToBlock(fullNodeBlock *types.Block, batch *derivation.EspressoBatch) (*types.Block, error) {
 	// Re-insert the deposit transaction
 	txs := []*types.Transaction{batch.L1InfoDeposit}
