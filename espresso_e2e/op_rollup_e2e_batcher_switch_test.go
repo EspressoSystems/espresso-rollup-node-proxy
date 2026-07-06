@@ -13,6 +13,10 @@ import (
 // key (anvil account #9).
 const batcherKeyB = "2a871d0798f97d79848a013d4936a73bf4cc922c825d33c1cf7073dff6d409c6"
 
+// droppedBatcherLogMsg is the streamer log emitted when a batch signed by a
+// batcher that is not the authorized espresso batcher is dropped.
+const droppedBatcherLogMsg = "Dropping batch with invalid espresso batcher"
+
 // pendingBatcherLogMsg is the streamer log emitted while a batch is signed by a
 // batcher whose on-chain authorization is not yet finalized.
 // const pendingBatcherLogMsg = "Batch signed by pending (unfinalized) espresso batcher, awaiting L1 finality"
@@ -34,8 +38,8 @@ func TestOPE2EBatcherKeyRotation(t *testing.T) {
 	_, shutdownProxy := startTestProxy(ctx, t, opRethFullNode, store, espressoTag)
 	defer shutdownProxy()
 
-	// capturer := logutil.NewCaptureLogger(nil)
-	v := startOpVerifier(ctx, t, newDefaultLogger(), store)
+	logger, capturer := newCapturingLogger()
+	v := startOpVerifier(ctx, t, logger, store)
 	defer v.Stop()
 
 	// Confirm the chain is advancing normally under the original batcher.
@@ -52,19 +56,27 @@ func TestOPE2EBatcherKeyRotation(t *testing.T) {
 	addrB := crypto.PubkeyToAddress(keyB.PublicKey)
 
 	t.Logf("authorizing new espresso batcher %s on-chain", addrB)
-	setEspressoBatcher(t, addrB)
+	rotationBlock := setEspressoBatcher(t, addrB)
+
+	// Wait for the L1 block carrying the rotation to finalize so the new
+	// batcher's authorization is final before it starts signing.
+	t.Logf("waiting for L1 block %d containing the rotation to finalize", rotationBlock)
+	pollUntil(t, 5*time.Minute, "L1 block containing the batcher rotation did not finalize", func() bool {
+		b := getBlockByTag(t, l1GethURL, "finalized")
+		t.Logf("finalized %d, rotation %d", b, rotationBlock)
+		return getBlockByTag(t, l1GethURL, "finalized") >= rotationBlock
+	})
+
+	// The old batcher is still signing with the now-unauthorized key, so wait
+	// until the streamer drops one of its batches — proof the rotation has taken
+	// effect on the streamer side.
+	pollUntil(t, 3*time.Minute, "streamer never dropped a batch from the old batcher after the rotation finalized", func() bool {
+		return matchLogStringAttrs(capturer, droppedBatcherLogMsg, map[string]string{"signer": opBatcherAddress})
+	})
 
 	t.Log("restarting op-batcher to sign with the new key")
 	restartBatcherWithEspressoKey(t, batcherKeyB)
 	verified := getStoredBlock(t, store)
-
-	// The new batcher signs blocks while its authorization is still unfinalized, so
-	// the streamer should hold those batches (BatchUndecided) rather than dropping
-	// them. Wait for that log instead of a fixed sleep.
-	// pollUntil(t, 5*time.Minute, "streamer never reported a pending (unfinalized) batcher after the rotation", func() bool {
-	// 	return matchLogStringAttrs(capturer, pendingBatcherLogMsg, map[string]string{})
-	// })
-	// t.Log("streamer is holding batches from the pending batcher; waiting for the rotation to finalize and verification to resume")
 
 	// Once the rotation finalizes the held batches are accepted and the batcher
 	// keeps posting, so the chain finalizes past the rotation point. Without the
@@ -73,6 +85,7 @@ func TestOPE2EBatcherKeyRotation(t *testing.T) {
 		return getStoredBlock(t, store) > verified+20
 	})
 
+	t.Logf("proxy continued progressing past the rotation point %d, verified %d", verified, getStoredBlock(t, store))
 	pollUntil(t, 5*time.Minute, "chain did not finalize past the rotation — batcher key rotation stalled the batcher", func() bool {
 		return getBlockByTag(t, opRethFullNode, "finalized") > verified+20
 	})

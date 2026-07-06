@@ -87,6 +87,7 @@ const (
 	finalizedBlocks                = 200
 	batchAuthenticatorAddress      = "0x4826533b4897376654bb4d4ad88b7fafd0c98528"
 	batchAuthenticatorOwnerAddress = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
+	opBatcherAddress               = "0x976EA74026E726554dB657fA54763abd0C3a0aa9"
 )
 
 // Nitro
@@ -116,7 +117,7 @@ func startOpVerifier(ctx context.Context, t *testing.T, logger log.Logger, store
 			Namespace:                 L2_CHAIN_ID,
 			VerificationInterval:      250 * time.Millisecond,
 			QueryServiceURL:           espressoURL,
-			BatcherAddress:            common.HexToAddress("0x976EA74026E726554dB657fA54763abd0C3a0aa9"),
+			BatcherAddress:            common.HexToAddress(opBatcherAddress),
 			BatchAuthenticatorAddress: common.HexToAddress(batchAuthenticatorAddress),
 		},
 	)
@@ -275,8 +276,9 @@ func rewindSequencer(t *testing.T, workingDir string, toBlock uint64) {
 }
 
 // setEspressoBatcher updates the authorized Espresso batcher address on the
-// BatchAuthenticator (owner-only) and waits for the tx to be mined.
-func setEspressoBatcher(t *testing.T, newBatcher common.Address) {
+// BatchAuthenticator (owner-only), waits for the tx to be mined, and returns
+// the L1 block number it was mined in.
+func setEspressoBatcher(t *testing.T, newBatcher common.Address) uint64 {
 	t.Helper()
 	batchAuthenticatorABI, err := abi.JSON(strings.NewReader(`[{"inputs":[{"name":"_newEspressoBatcher","type":"address"}],"name":"setEspressoBatcher","outputs":[],"stateMutability":"nonpayable","type":"function"}]`))
 	require.NoError(t, err)
@@ -301,11 +303,14 @@ func setEspressoBatcher(t *testing.T, newBatcher common.Address) {
 			continue
 		}
 		var receipt struct {
-			Status string `json:"status"`
+			Status      string `json:"status"`
+			BlockNumber string `json:"blockNumber"`
 		}
 		require.NoError(t, json.Unmarshal(receiptResp.Result, &receipt))
 		require.Equal(t, "0x1", receipt.Status, "setEspressoBatcher transaction failed")
-		return
+		blockNumber, err := strconv.ParseUint(strings.TrimPrefix(receipt.BlockNumber, "0x"), 16, 64)
+		require.NoError(t, err)
+		return blockNumber
 	}
 }
 
@@ -668,6 +673,7 @@ func newCapturingLogger() (log.Logger, *logutil.CaptureLogger) {
 	capturer := logutil.NewCaptureLogger(
 		log.NewTerminalHandlerWithLevel(os.Stdout, log.LevelInfo, true),
 	)
+	capturer.Level = log.LevelInfo
 	logger := log.NewLogger(capturer)
 	log.SetDefault(logger)
 	return logger, capturer
