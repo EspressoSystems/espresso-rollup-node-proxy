@@ -193,6 +193,36 @@ func TestEnsureBlocksMatch_EpochBoundaryDeposits(t *testing.T) {
 	require.NoError(t, ensureBlocksMatch(espressoBlock, filterUserDeposits(fullNodeBlock)))
 }
 
+// TestEnsureBlocksMatch_OnlyUserDeposits checks a block containing only deposits
+// matches Espresso after filtering out user deposits, and fails to match if they are not filtered.
+func TestEnsureBlocksMatch_OnlyUserDeposits(t *testing.T) {
+	l1Info := types.NewTx(&types.DepositTx{SourceHash: common.HexToHash("0x01"), Data: []byte{0xaa}})
+	userDeposit1 := types.NewTx(&types.DepositTx{SourceHash: common.HexToHash("0x02"), Data: []byte{0xbb}})
+	userDeposit2 := types.NewTx(&types.DepositTx{SourceHash: common.HexToHash("0x03"), Data: []byte{0xcc}})
+
+	fullNodeBlock := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(123)}).
+		WithBody(types.Body{Transactions: types.Transactions{l1Info, userDeposit1, userDeposit2}})
+
+	batch := &derivation.EspressoBatch{
+		BatchHeader:   fullNodeBlock.Header(),
+		L1InfoDeposit: l1Info,
+		Batch:         derive.SingularBatch{},
+	}
+	espressoBlock, err := espressoBatchToBlock(fullNodeBlock, batch)
+	require.NoError(t, err)
+	require.Len(t, espressoBlock.Transactions(), 1, "reconstruction should contain only the L1-info deposit")
+
+	// No stripping, blocks should differ
+	require.Error(t, ensureBlocksMatch(espressoBlock, fullNodeBlock),
+		"unstripped full node block should not match the reconstruction")
+
+	// After stripping user deposits, only the L1-info deposit remains and the
+	// blocks match byte-for-byte.
+	stripped := filterUserDeposits(fullNodeBlock)
+	require.Len(t, stripped.Transactions(), 1)
+	require.NoError(t, ensureBlocksMatch(espressoBlock, stripped))
+}
+
 // TestEspressoBatchToBlock_BadTx checks that an undecodable transaction errors
 func TestEspressoBatchToBlock_BadTx(t *testing.T) {
 	batch := &derivation.EspressoBatch{

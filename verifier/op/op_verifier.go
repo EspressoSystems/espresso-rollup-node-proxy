@@ -386,6 +386,10 @@ func (v *OPEspressoBatchVerifier) VerifyNextBatch(ctx context.Context) (*derivat
 			"espresso_parent", espressoBlock.ParentHash().Hex(),
 			"fullnode_hash", fullNodeBlock.Hash().Hex(),
 			"fullnode_parent", fullNodeBlock.ParentHash().Hex(),
+			"espresso_tx_count", len(espressoBlock.Transactions()),
+			"espresso_tx_types", txTypes(espressoBlock), // See txTypes for details on the type codes
+			"comparable_tx_count", len(comparableBlock.Transactions()),
+			"comparable_tx_types", txTypes(comparableBlock),
 		)
 		return nil, fmt.Errorf("batch verification failed for batch number %d: %w", batchNumber, err)
 	}
