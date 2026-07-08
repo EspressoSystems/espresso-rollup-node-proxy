@@ -375,13 +375,21 @@ func (v *OPEspressoBatchVerifier) VerifyNextBatch(ctx context.Context) (*derivat
 		return nil, fmt.Errorf("failed to convert espresso batch %d to block: %w", batchNumber, err)
 	}
 
-	if err := ensureBlocksMatch(espressoBlock, fullNodeBlock); err != nil {
+	// The Espresso batch does not carry L1-derived user deposits (only the L1-info
+	// deposit), so strip them from the full node block before comparison
+	comparableBlock := filterUserDeposits(fullNodeBlock)
+
+	if err := ensureBlocksMatch(espressoBlock, comparableBlock); err != nil {
 		v.logger.Error("batch mismatch details",
 			"batch_number", batchNumber,
 			"espresso_hash", espressoBlock.Hash().Hex(),
 			"espresso_parent", espressoBlock.ParentHash().Hex(),
 			"fullnode_hash", fullNodeBlock.Hash().Hex(),
 			"fullnode_parent", fullNodeBlock.ParentHash().Hex(),
+			"espresso_tx_count", len(espressoBlock.Transactions()),
+			"espresso_tx_types", txTypes(espressoBlock), // See txTypes for details on the type codes
+			"comparable_tx_count", len(comparableBlock.Transactions()),
+			"comparable_tx_types", txTypes(comparableBlock),
 		)
 		return nil, fmt.Errorf("batch verification failed for batch number %d: %w", batchNumber, err)
 	}

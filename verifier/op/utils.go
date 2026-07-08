@@ -51,6 +51,50 @@ func l1OriginFromL2Block(block *types.Block) (eth.BlockID, error) {
 	}, nil
 }
 
+// filterUserDeposits returns a copy of block with L1-derived user deposit
+// transactions removed
+func filterUserDeposits(block *types.Block) *types.Block {
+	if block == nil {
+		return nil
+	}
+	txs := block.Transactions()
+	if len(txs) == 0 {
+		return block
+	}
+	// Keep tx[0] (the L1-info deposit) and every non-deposit transaction.
+	filtered := make(types.Transactions, 0, len(txs))
+	filtered = append(filtered, txs[0])
+	for _, tx := range txs[1:] {
+		if tx.IsDepositTx() {
+			continue
+		}
+		filtered = append(filtered, tx)
+	}
+	if len(filtered) == len(txs) {
+		return block
+	}
+	return block.WithBody(types.Body{
+		Transactions: filtered,
+		Uncles:       block.Uncles(),
+		Withdrawals:  block.Withdrawals(),
+	})
+}
+
+// txTypes returns the types of a block's transactions in order, for logging
+// block comparison mismatches
+//   - standard: https://github.com/celo-org/op-geth/blob/3a40c398c038/core/types/transaction.go#L49-L55
+//   - deposit:  https://github.com/celo-org/op-geth/blob/3a40c398c038/core/types/deposit_tx.go#L27
+//   - celo:     https://github.com/celo-org/op-geth/blob/3a40c398c038/core/types/celo_dynamic_fee_tx.go#L27
+//     and https://github.com/celo-org/op-geth/blob/3a40c398c038/core/types/celo_dynamic_fee_tx_v2.go#L27
+func txTypes(block *types.Block) []int {
+	txs := block.Transactions()
+	blockTxTypes := make([]int, 0, len(txs))
+	for _, tx := range txs {
+		blockTxTypes = append(blockTxTypes, int(tx.Type()))
+	}
+	return blockTxTypes
+}
+
 func espressoBatchToBlock(fullNodeBlock *types.Block, batch *derivation.EspressoBatch) (*types.Block, error) {
 	// Re-insert the deposit transaction
 	txs := []*types.Transaction{batch.L1InfoDeposit}
