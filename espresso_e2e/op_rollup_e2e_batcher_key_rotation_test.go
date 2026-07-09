@@ -2,6 +2,7 @@ package espresso_e2e
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -17,10 +18,6 @@ const batcherKeyB = "2a871d0798f97d79848a013d4936a73bf4cc922c825d33c1cf7073dff6d
 // batcher that is not the authorized espresso batcher is dropped.
 const droppedBatcherLogMsg = "Dropping batch with invalid espresso batcher"
 
-// pendingBatcherLogMsg is the streamer log emitted while a batch is signed by a
-// batcher whose on-chain authorization is not yet finalized.
-// const pendingBatcherLogMsg = "Batch signed by pending (unfinalized) espresso batcher, awaiting L1 finality"
-
 func TestOPE2EBatcherKeyRotation(t *testing.T) {
 	t.Log("Starting rollup nodes")
 	shutdown := runDockerCompose(opWorkingDir)
@@ -35,7 +32,7 @@ func TestOPE2EBatcherKeyRotation(t *testing.T) {
 
 	ctx := context.Background()
 	t.Log("Starting in-process proxy")
-	_, shutdownProxy := startTestProxy(ctx, t, opRethFullNode, store, espressoTag)
+	proxyURL, shutdownProxy := startTestProxy(ctx, t, opRethFullNode, store, espressoTag)
 	defer shutdownProxy()
 
 	logger, capturer := newCapturingLogger()
@@ -79,8 +76,8 @@ func TestOPE2EBatcherKeyRotation(t *testing.T) {
 	verified := getStoredBlock(t, store)
 
 	// Once the rotation finalizes the held batches are accepted and the batcher
-	// keeps posting, so the chain finalizes past the rotation point. Without the
-	// fix the batcher would stall and finalization would stop advancing.
+	// keeps posting, so the chain finalizes past the rotation point. If we did the key rotation
+	// incorrectly (eg shutting off first one to early) the batch poster would stall
 	pollUntil(t, 3*time.Minute, "verification did not progress after rotation", func() bool {
 		return getStoredBlock(t, store) > verified+20
 	})
@@ -90,4 +87,23 @@ func TestOPE2EBatcherKeyRotation(t *testing.T) {
 		return getBlockByTag(t, opRethFullNode, "finalized") > verified+20
 	})
 	t.Logf("chain finalized to block %d, past the rotation point %d", getBlockByTag(t, opRethFullNode, "finalized"), verified)
+
+	// Cross-check that all three independently-derived views of the chain agree
+	// after the rotation
+	verifiedBlock := getStoredBlock(t, store)
+	verifiedBlockHex := fmt.Sprintf("0x%x", verifiedBlock)
+	t.Logf("cross-checking state consistency at verified block %d", verifiedBlock)
+
+	// The proxy's espresso-tagged view must match the full node at that block.
+	requireProxyTagMatchesDirectBlock(t, proxyURL, opRethFullNode, espressoTag)
+
+	// The independent L1-derived verifier must converge to the same block hash.
+	pollUntil(t, 2*time.Minute, fmt.Sprintf("verifier did not reach verified block %d", verifiedBlock), func() bool {
+		return getBlockByTag(t, opRethVerifierUrl, "latest") >= verifiedBlock
+	})
+	fullNodeBlockJSON := jsonRPCCall(t, opRethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{verifiedBlockHex, false}))
+	verifierBlockJSON := jsonRPCCall(t, opRethVerifierUrl, "eth_getBlockByNumber", jsonMarshal(t, []any{verifiedBlockHex, false}))
+	require.JSONEq(t, string(fullNodeBlockJSON), string(verifierBlockJSON),
+		"verifier and full node should serve the same block %d after the rotation", verifiedBlock)
+	t.Logf("full node, verifier, and proxy all agree on block %d", verifiedBlock)
 }
