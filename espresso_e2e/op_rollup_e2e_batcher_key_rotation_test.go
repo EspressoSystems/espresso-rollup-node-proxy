@@ -20,11 +20,12 @@ const droppedBatcherLogMsg = "Dropping batch with invalid espresso batcher"
 
 func TestOPE2EBatcherKeyRotation(t *testing.T) {
 	t.Log("Starting rollup nodes")
-	shutdown := runDockerCompose(opWorkingDir)
+	shutdown := runDockerComposeFile(opWorkingDir, "docker-compose.yml", []string{"verifier"})
 	defer shutdown()
 
 	t.Log("waiting for services to be ready")
 	waitForRollupServicesReady(t)
+	waitForHTTPReady(t, opRethVerifierUrl, 1*time.Minute)
 
 	store := newTestStore(t, "batcher-rotation-state", 1)
 	_, err := store.UpdateIfGreater(1, 1)
