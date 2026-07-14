@@ -1,0 +1,45 @@
+{
+  "espresso_client": {
+    "base_url": "http://espresso-dev-node:41000"
+  },
+  "streamer": {
+    "starting_hotshot_height": 1
+  },
+  "rollup": {
+    "type": "nitro",
+    "namespace_id": 412346,
+    "stack": {
+      "chain_id": 412346,
+      "feed": {
+        "web_socket_url": "ws://sequencer:9642",
+        "current_message_count": 0,
+        "client": {
+          "trusted_sequencer_addresses": [
+            "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+          ]
+        },
+        "server": {
+          "ws_server": {
+            "port": 9643,
+            "enable_compression": true
+          }
+        }
+      },
+      "l1_http_url": "http://l1-anvil:8545",
+      "l1_ws_url": "ws://l1-anvil:8545",
+      "sequencer_inbox_address": "0x3Ca8f9C04c7e3E1624Ac2008F92f6F366A869444"
+    }
+  },
+  "da_server": {
+    "listen_addr": "0.0.0.0:8000"
+  },
+  "submitter": {
+    "max_in_flight": 1000
+  },
+  "key_manager": {
+    "tee_verifier_address": "0x7a2088a1bFc9d81c55368AE168C2C02570cB814F",
+    "attestation_verifier_url": "http://localhost:9000",
+    "tee_type": "test"
+  },
+  "is_fresh_deployment": true
+}
