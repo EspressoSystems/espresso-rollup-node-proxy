@@ -167,7 +167,7 @@ func newTestHarness(t *testing.T, logger log.Logger) *testHarness {
 	streamer := new(mockStreamer)
 	ethClient := new(mockEthClient)
 	finalityPoller := new(mockFinalityPoller)
-	store, err := espressoStore.NewEspressoStore(tempFilePath(t), 1)
+	store, err := espressoStore.NewEspressoStore(tempFilePath(t), 1, 1)
 	require.NoError(t, err)
 	updated, err := store.UpdateIfGreater(1, 1)
 	require.True(t, updated)

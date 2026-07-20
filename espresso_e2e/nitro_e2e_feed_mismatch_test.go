@@ -104,7 +104,7 @@ func TestNitroE2EFeedMismatch(t *testing.T) {
 	t.Log("Waiting for Nitro services to be ready")
 	waitForNitroServicesReady(t)
 
-	espressoStore := newTestStore(t, "nitro-feed-mismatch", 1)
+	espressoStore := newTestStore(t, "nitro-feed-mismatch", 1, nitroNamespace)
 	ctx := context.Background()
 
 	t.Log("Starting in-process proxy")

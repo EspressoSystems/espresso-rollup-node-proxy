@@ -15,7 +15,7 @@ import (
 func newTestStore(t *testing.T, l2BlockNumber uint64) *espressostore.EspressoStore {
 	t.Helper()
 	fp := filepath.Join(t.TempDir(), "state.json")
-	store, err := espressostore.NewEspressoStore(fp, 1)
+	store, err := espressostore.NewEspressoStore(fp, 1, 1)
 	require.NoError(t, err)
 	updated, err := store.UpdateIfGreater(l2BlockNumber, 1)
 	require.True(t, updated)
