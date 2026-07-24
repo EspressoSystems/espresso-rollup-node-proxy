@@ -87,6 +87,7 @@ const (
 	finalizedBlocks                = 200
 	batchAuthenticatorAddress      = "0x4826533b4897376654bb4d4ad88b7fafd0c98528"
 	batchAuthenticatorOwnerAddress = "0x90F79bf6EB2c4f870365E785982E1f101E93b906"
+	opBatcherAddress               = "0x976EA74026E726554dB657fA54763abd0C3a0aa9"
 )
 
 // Nitro
@@ -116,7 +117,7 @@ func startOpVerifier(ctx context.Context, t *testing.T, logger log.Logger, store
 			Namespace:                 L2_CHAIN_ID,
 			VerificationInterval:      250 * time.Millisecond,
 			QueryServiceURL:           espressoURL,
-			BatcherAddress:            common.HexToAddress("0x976EA74026E726554dB657fA54763abd0C3a0aa9"),
+			BatcherAddress:            common.HexToAddress(opBatcherAddress),
 			BatchAuthenticatorAddress: common.HexToAddress(batchAuthenticatorAddress),
 		},
 	)
@@ -274,11 +275,14 @@ func rewindSequencer(t *testing.T, workingDir string, toBlock uint64) {
 	})
 }
 
-func switchBatcher(t *testing.T) {
+// setEspressoBatcher updates the authorized Espresso batcher address on the
+// BatchAuthenticator (owner-only), waits for the tx to be mined, and returns
+// the L1 block number it was mined in.
+func setEspressoBatcher(t *testing.T, newBatcher common.Address) uint64 {
 	t.Helper()
-	batchAuthenticatorABI, err := abi.JSON(strings.NewReader(`[{"inputs":[],"name":"switchBatcher","outputs":[],"stateMutability":"nonpayable","type":"function"}]`))
+	batchAuthenticatorABI, err := abi.JSON(strings.NewReader(`[{"inputs":[{"name":"_newEspressoBatcher","type":"address"}],"name":"setEspressoBatcher","outputs":[],"stateMutability":"nonpayable","type":"function"}]`))
 	require.NoError(t, err)
-	callData, err := batchAuthenticatorABI.Pack("switchBatcher")
+	callData, err := batchAuthenticatorABI.Pack("setEspressoBatcher", newBatcher)
 	require.NoError(t, err)
 
 	txHashRaw := jsonRPCCall(t, l1GethURL, "eth_sendTransaction", jsonMarshal(t, []map[string]string{{
@@ -292,7 +296,81 @@ func switchBatcher(t *testing.T) {
 
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		require.True(t, time.Now().Before(deadline), "switchBatcher transaction was not mined within timeout")
+		require.True(t, time.Now().Before(deadline), "setEspressoBatcher transaction was not mined within timeout")
+		receiptResp := jsonRPCCallRaw(t, l1GethURL, "eth_getTransactionReceipt", jsonMarshal(t, []any{txHash}))
+		if receiptResp.Result == nil || string(receiptResp.Result) == "null" {
+			time.Sleep(250 * time.Millisecond)
+			continue
+		}
+		var receipt struct {
+			Status      string `json:"status"`
+			BlockNumber string `json:"blockNumber"`
+		}
+		require.NoError(t, json.Unmarshal(receiptResp.Result, &receipt))
+		require.Equal(t, "0x1", receipt.Status, "setEspressoBatcher transaction failed")
+		blockNumber, err := strconv.ParseUint(strings.TrimPrefix(receipt.BlockNumber, "0x"), 16, 64)
+		require.NoError(t, err)
+		return blockNumber
+	}
+}
+
+// restartBatcherWithEspressoKey recreates the op-batcher so it signs Espresso
+// batches with the given private key.
+func restartBatcherWithEspressoKey(t *testing.T, privKeyHex string) {
+	t.Helper()
+	if !strings.HasPrefix(privKeyHex, "0x") {
+		privKeyHex = "0x" + privKeyHex
+	}
+	dockerComposeStop(t, opWorkingDir, "op-batcher")
+	cmd := exec.Command("docker", "compose", "up", "-d", "--force-recreate", "--no-deps", "op-batcher")
+	cmd.Dir = opWorkingDir
+	cmd.Env = append(os.Environ(), "OP_BATCHER_PRIVATE_KEY="+privKeyHex)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("restart op-batcher with rotated key failed: %v\n%s", err, string(out))
+	}
+}
+
+func switchBatcher(t *testing.T) {
+	t.Helper()
+	batchAuthenticatorABI, err := abi.JSON(strings.NewReader(`[` +
+		`{"inputs":[],"name":"activeIsEspresso","outputs":[{"type":"bool"}],"stateMutability":"view","type":"function"},` +
+		`{"inputs":[{"name":"_activeIsEspresso","type":"bool"}],"name":"setActiveIsEspresso","outputs":[],"stateMutability":"nonpayable","type":"function"}` +
+		`]`))
+	require.NoError(t, err)
+
+	// Read the current active flag so we can flip it.
+	readData, err := batchAuthenticatorABI.Pack("activeIsEspresso")
+	require.NoError(t, err)
+	readResult := jsonRPCCall(t, l1GethURL, "eth_call", jsonMarshal(t, []any{
+		map[string]string{
+			"to":   batchAuthenticatorAddress,
+			"data": "0x" + hex.EncodeToString(readData),
+		},
+		"latest",
+	}))
+	var readHex string
+	require.NoError(t, json.Unmarshal(readResult, &readHex))
+	readBytes, err := hex.DecodeString(strings.TrimPrefix(readHex, "0x"))
+	require.NoError(t, err)
+	values, err := batchAuthenticatorABI.Unpack("activeIsEspresso", readBytes)
+	require.NoError(t, err)
+	current := values[0].(bool)
+
+	callData, err := batchAuthenticatorABI.Pack("setActiveIsEspresso", !current)
+	require.NoError(t, err)
+
+	txHashRaw := jsonRPCCall(t, l1GethURL, "eth_sendTransaction", jsonMarshal(t, []map[string]string{{
+		"from": batchAuthenticatorOwnerAddress,
+		"to":   batchAuthenticatorAddress,
+		"data": "0x" + hex.EncodeToString(callData),
+	}}))
+
+	var txHash string
+	require.NoError(t, json.Unmarshal(txHashRaw, &txHash))
+
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		require.True(t, time.Now().Before(deadline), "setActiveIsEspresso transaction was not mined within timeout")
 		receiptResp := jsonRPCCallRaw(t, l1GethURL, "eth_getTransactionReceipt", jsonMarshal(t, []any{txHash}))
 		if receiptResp.Result == nil || string(receiptResp.Result) == "null" {
 			time.Sleep(250 * time.Millisecond)
@@ -303,7 +381,7 @@ func switchBatcher(t *testing.T) {
 			Status string `json:"status"`
 		}
 		require.NoError(t, json.Unmarshal(receiptResp.Result, &receipt))
-		require.Equal(t, "0x1", receipt.Status, "switchBatcher transaction failed")
+		require.Equal(t, "0x1", receipt.Status, "setActiveIsEspresso transaction failed")
 		return
 	}
 }
@@ -617,6 +695,7 @@ func newCapturingLogger() (log.Logger, *logutil.CaptureLogger) {
 	capturer := logutil.NewCaptureLogger(
 		log.NewTerminalHandlerWithLevel(os.Stdout, log.LevelInfo, true),
 	)
+	capturer.Level = log.LevelInfo
 	logger := log.NewLogger(capturer)
 	log.SetDefault(logger)
 	return logger, capturer
