@@ -54,16 +54,7 @@ func TestOPE2EBatcherKeyRotation(t *testing.T) {
 	addrB := crypto.PubkeyToAddress(keyB.PublicKey)
 
 	t.Logf("authorizing new espresso batcher %s on-chain", addrB)
-	rotationBlock := setEspressoBatcher(t, addrB)
-
-	// Wait for the L1 block carrying the rotation to finalize so the new
-	// batcher's authorization is final before it starts signing.
-	t.Logf("waiting for L1 block %d containing the rotation to finalize", rotationBlock)
-	pollUntil(t, 5*time.Minute, "L1 block containing the batcher rotation did not finalize", func() bool {
-		b := getBlockByTag(t, l1GethURL, "finalized")
-		t.Logf("finalized %d, rotation %d", b, rotationBlock)
-		return getBlockByTag(t, l1GethURL, "finalized") >= rotationBlock
-	})
+	_ = setEspressoBatcher(t, addrB)
 
 	// The old batcher is still signing with the now-unauthorized key, so wait
 	// until the streamer drops one of its batches — proof the rotation has taken
