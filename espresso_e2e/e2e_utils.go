@@ -332,9 +332,31 @@ func restartBatcherWithEspressoKey(t *testing.T, privKeyHex string) {
 
 func switchBatcher(t *testing.T) {
 	t.Helper()
-	batchAuthenticatorABI, err := abi.JSON(strings.NewReader(`[{"inputs":[],"name":"switchBatcher","outputs":[],"stateMutability":"nonpayable","type":"function"}]`))
+	batchAuthenticatorABI, err := abi.JSON(strings.NewReader(`[` +
+		`{"inputs":[],"name":"activeIsEspresso","outputs":[{"type":"bool"}],"stateMutability":"view","type":"function"},` +
+		`{"inputs":[{"name":"_activeIsEspresso","type":"bool"}],"name":"setActiveIsEspresso","outputs":[],"stateMutability":"nonpayable","type":"function"}` +
+		`]`))
 	require.NoError(t, err)
-	callData, err := batchAuthenticatorABI.Pack("switchBatcher")
+
+	// Read the current active flag so we can flip it.
+	readData, err := batchAuthenticatorABI.Pack("activeIsEspresso")
+	require.NoError(t, err)
+	readResult := jsonRPCCall(t, l1GethURL, "eth_call", jsonMarshal(t, []any{
+		map[string]string{
+			"to":   batchAuthenticatorAddress,
+			"data": "0x" + hex.EncodeToString(readData),
+		},
+		"latest",
+	}))
+	var readHex string
+	require.NoError(t, json.Unmarshal(readResult, &readHex))
+	readBytes, err := hex.DecodeString(strings.TrimPrefix(readHex, "0x"))
+	require.NoError(t, err)
+	values, err := batchAuthenticatorABI.Unpack("activeIsEspresso", readBytes)
+	require.NoError(t, err)
+	current := values[0].(bool)
+
+	callData, err := batchAuthenticatorABI.Pack("setActiveIsEspresso", !current)
 	require.NoError(t, err)
 
 	txHashRaw := jsonRPCCall(t, l1GethURL, "eth_sendTransaction", jsonMarshal(t, []map[string]string{{
@@ -348,7 +370,7 @@ func switchBatcher(t *testing.T) {
 
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		require.True(t, time.Now().Before(deadline), "switchBatcher transaction was not mined within timeout")
+		require.True(t, time.Now().Before(deadline), "setActiveIsEspresso transaction was not mined within timeout")
 		receiptResp := jsonRPCCallRaw(t, l1GethURL, "eth_getTransactionReceipt", jsonMarshal(t, []any{txHash}))
 		if receiptResp.Result == nil || string(receiptResp.Result) == "null" {
 			time.Sleep(250 * time.Millisecond)
@@ -359,7 +381,7 @@ func switchBatcher(t *testing.T) {
 			Status string `json:"status"`
 		}
 		require.NoError(t, json.Unmarshal(receiptResp.Result, &receipt))
-		require.Equal(t, "0x1", receipt.Status, "switchBatcher transaction failed")
+		require.Equal(t, "0x1", receipt.Status, "setActiveIsEspresso transaction failed")
 		return
 	}
 }
