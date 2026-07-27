@@ -4,7 +4,7 @@ go 1.25.1
 
 require (
 	github.com/EspressoSystems/espresso-network/sdks/go v0.3.4
-	github.com/EspressoSystems/espresso-streamers v1.2.1-0.20260724035247-425f7a5b46eb
+	github.com/EspressoSystems/espresso-streamers v1.2.1-0.20260727232637-568e66da84de
 	github.com/coder/websocket v1.8.13
 	github.com/ethereum-optimism/optimism v1.16.7
 	github.com/ethereum/go-ethereum v1.17.1
