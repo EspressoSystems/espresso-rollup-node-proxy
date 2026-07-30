@@ -105,6 +105,13 @@ const (
 
 func startOpVerifier(ctx context.Context, t *testing.T, logger log.Logger, store *espressostore.EspressoStore) *verifier.OPEspressoBatchVerifier {
 	t.Helper()
+
+	anchorBlock := store.GetState().L2BlockNumber
+	pollUntil(t, 2*time.Minute, fmt.Sprintf("L2 block %d (streamer anchor) not produced within timeout", anchorBlock), func() bool {
+		result := jsonRPCCall(t, opRethFullNode, "eth_getBlockByNumber", jsonMarshal(t, []any{fmt.Sprintf("0x%x", anchorBlock), false}))
+		return string(result) != "null"
+	})
+
 	l1Client, err := ethclient.DialContext(ctx, l1GethURL)
 	if err != nil {
 		t.Fatalf("failed to create L1 client: %v", err)
