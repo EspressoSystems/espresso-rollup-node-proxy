@@ -8,6 +8,7 @@ import (
 
 	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
@@ -37,6 +38,11 @@ func (c *AdaptL1BlockRefClient) HeaderHashByNumber(ctx context.Context, number *
 	}
 
 	return expectedL1BlockRef.Hash(), nil
+}
+
+// HeaderByNumber implements the op.L1Client interface
+func (c *AdaptL1BlockRefClient) HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error) {
+	return c.L1Client.HeaderByNumber(ctx, number)
 }
 
 // CodeAt implements bind.ContractCaller
