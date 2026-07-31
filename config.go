@@ -74,7 +74,6 @@ type Config struct {
 	NitroConfig            NitroConfig `json:"nitro"`
 	LogLevel               string      `json:"log_level"`
 	LogFormat              string      `json:"log_format"`
-	TrackBatchLatency      bool        `json:"track_batch_latency"`
 }
 
 func defaultConfig() *Config {
@@ -125,7 +124,6 @@ func parseConfig() *Config {
 	pflag.StringVar(&cfg.EspressoTag, "espresso-tag", cfg.EspressoTag, "espresso tag")
 	pflag.StringVar(&cfg.StoreFilePath, "store-file-path", cfg.StoreFilePath, "path to state persistence file")
 	pflag.Uint64Var(&cfg.InitialHotshotHeight, "initial-hotshot-height", cfg.InitialHotshotHeight, "initial hotshot height")
-	pflag.BoolVar(&cfg.TrackBatchLatency, "track-batch-latency", cfg.TrackBatchLatency, "whether to track batch latency")
 	pflag.IntVar(&cfg.MaxBatchSize, "max-batch-size", cfg.MaxBatchSize, "maximum number of requests in a JSON-RPC batch (0 = no limit)")
 	pflag.IntVar(&cfg.MaxRequestBodySize, "max-request-body-size", cfg.MaxRequestBodySize, "maximum request body size in bytes (0 = no limit)")
 
@@ -269,7 +267,6 @@ func (c *Config) toOPVerifierConfig() *opVerifier.OPEspressoBatchVerifierConfig 
 		QueryServiceURL:           c.QueryServiceURL,
 		BatcherAddress:            c.OPConfig.BatcherAddress,
 		BatchAuthenticatorAddress: c.OPConfig.BatchAuthenticatorAddress,
-		TrackBatchLatency:         c.TrackBatchLatency,
 		FinalityPollInterval:      time.Duration(c.FinalityPollInterval),
 	}
 }

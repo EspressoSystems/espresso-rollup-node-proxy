@@ -23,7 +23,6 @@ import (
 
 	espressoStore "github.com/EspressoSystems/espresso-rollup-node-proxy/store"
 
-	opStreamer "github.com/EspressoSystems/espresso-streamers/op"
 	"github.com/EspressoSystems/espresso-streamers/op/derivation"
 
 	"github.com/ethereum-optimism/optimism/op-node/rollup"
@@ -69,43 +68,13 @@ type mockStreamer struct {
 	mock.Mock
 }
 
-func (m *mockStreamer) Update(ctx context.Context) error {
+func (m *mockStreamer) Start(ctx context.Context) error {
 	args := m.Called(ctx)
 	return args.Error(0)
 }
 
-func (m *mockStreamer) Refresh(ctx context.Context, finalizedEth eth.L1BlockRef, safeBatchNumber uint64, safeL1Origin eth.BlockID) error {
-	args := m.Called(ctx, finalizedEth, safeBatchNumber, safeL1Origin)
-	return args.Error(0)
-}
-
-func (m *mockStreamer) RefreshSafeL1Origin(safeL1Origin eth.BlockID) {
-	m.Called(safeL1Origin)
-}
-
-func (m *mockStreamer) Reset() {
+func (m *mockStreamer) Stop() {
 	m.Called()
-}
-
-func (m *mockStreamer) UnmarshalBatch(b []byte, l1Head uint64) (*derivation.EspressoBatch, error) {
-	args := m.Called(b)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*derivation.EspressoBatch), args.Error(1)
-}
-
-func (m *mockStreamer) HasNext(ctx context.Context) bool {
-	args := m.Called(ctx)
-	return args.Bool(0)
-}
-
-func (m *mockStreamer) Next(ctx context.Context) *derivation.EspressoBatch {
-	args := m.Called(ctx)
-	if args.Get(0) == nil {
-		return nil
-	}
-	return args.Get(0).(*derivation.EspressoBatch)
 }
 
 func (m *mockStreamer) Peek(ctx context.Context) *derivation.EspressoBatch {
@@ -116,19 +85,20 @@ func (m *mockStreamer) Peek(ctx context.Context) *derivation.EspressoBatch {
 	return args.Get(0).(*derivation.EspressoBatch)
 }
 
+func (m *mockStreamer) AdvancePosition() {
+	m.Called()
+}
+
+func (m *mockStreamer) SetBatchPosition(l2Head eth.L2BlockRef) {
+	m.Called(l2Head)
+}
+
 func (m *mockStreamer) GetFallbackHotshotPos() uint64 {
 	args := m.Called()
 	return args.Get(0).(uint64)
 }
 
-func (m *mockStreamer) GetBatchFinalizationTimestamp(hash common.Hash) (uint64, bool) {
-	args := m.Called(hash)
-	return args.Get(0).(uint64), args.Bool(1)
-}
-
-func (m *mockStreamer) SetProperHead(_ common.Hash) {}
-
-var _ opStreamer.EspressoStreamer[derivation.EspressoBatch] = (*mockStreamer)(nil)
+var _ EspressoStreamer = (*mockStreamer)(nil)
 
 type mockEthClient struct {
 	mock.Mock
@@ -191,28 +161,53 @@ func newTestHarness(t *testing.T, logger log.Logger) *testHarness {
 	}
 }
 
-func TestPeekNextBatch(t *testing.T) {
+// TestVerifyNextBatchDoesNotConsumeBatch checks that a peeked batch is left in place
+// for the streamer to serve again: the verifier advances only once the full node block
+// has been verified against it.
+func TestVerifyNextBatchDoesNotConsumeBatch(t *testing.T) {
 	h := newTestHarness(t, nil)
 	ctx := context.Background()
-	batch := &derivation.EspressoBatch{
-		BatchHeader: &types.Header{Number: big.NewInt(100)},
-	}
-	h.streamer.On("HasNext", mock.Anything).Return(true).Once()
-	h.streamer.On("Peek", mock.Anything).Return(batch).Once()
 
-	peekedBatch, err := h.verifier.peekNextBatch(ctx)
+	block := createOpBlock(100, eth.BlockID{Number: 5, Hash: common.Hash{0xaa}})
+	batch, err := derivation.BlockToEspressoBatch(&rollup.Config{}, block)
 	require.NoError(t, err)
-	require.Equal(t, batch, peekedBatch)
-	h.streamer.AssertNotCalled(t, "Update", mock.Anything)
 
-	h.streamer.On("HasNext", mock.Anything).Return(false)
-	h.streamer.On("Update", mock.Anything).Return(nil)
+	h.ethClient.On("BlockByNumber", mock.Anything, new(big.Int).SetUint64(100)).Return(block, nil)
+	h.streamer.On("Peek", mock.Anything).Return(batch)
+
+	verified, err := h.verifier.VerifyNextBatch(ctx)
+	require.NoError(t, err)
+	require.Equal(t, batch, verified)
+	h.streamer.AssertNotCalled(t, "AdvancePosition")
+}
+
+// TestFallbackHotshotPosIsFloored covers the streamer reporting a fallback HotShot
+// height below the one it was seeded with, which the light client does when it has no
+// finalized state to report. Persisting a zero there would make the proxy's interceptor
+// read the store as uninitialized and stop serving the espresso tag.
+func TestFallbackHotshotPosIsFloored(t *testing.T) {
+	h := newTestHarness(t, nil)
+	h.verifier.originHotshotPos = 7
+
+	h.streamer.On("GetFallbackHotshotPos").Return(uint64(0)).Once()
+	require.Equal(t, uint64(7), h.verifier.fallbackHotshotPos(),
+		"a reported height below the seed must be floored at the seed")
+
+	// A height above the seed is the streamer making real progress, so take it.
+	h.streamer.On("GetFallbackHotshotPos").Return(uint64(42))
+	require.Equal(t, uint64(42), h.verifier.fallbackHotshotPos())
+}
+
+// TestVerifyNextBatchNoBatch covers the streamer having nothing to serve.
+func TestVerifyNextBatchNoBatch(t *testing.T) {
+	h := newTestHarness(t, nil)
+	ctx := context.Background()
+
 	h.streamer.On("Peek", mock.Anything).Return(nil)
 
-	result, err := h.verifier.peekNextBatch(ctx)
+	verified, err := h.verifier.VerifyNextBatch(ctx)
 	require.NoError(t, err)
-	require.Nil(t, result)
-	h.streamer.AssertCalled(t, "Update", mock.Anything)
+	require.Nil(t, verified)
 }
 
 func TestVerify(t *testing.T) {
@@ -232,14 +227,10 @@ func TestVerify(t *testing.T) {
 	}
 	h.finalityPoller.On("LastSnapshot").Return(snapshot, true)
 	h.ethClient.On("BlockByNumber", mock.Anything, new(big.Int).SetUint64(100)).Return(block, nil)
-	h.streamer.On("Refresh", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	h.streamer.On("HasNext", mock.Anything).Return(true).Once()
-	h.streamer.On("HasNext", mock.Anything).Return(false)
 	h.streamer.On("Peek", mock.Anything).Return(batch).Once()
-	h.streamer.On("Update", mock.Anything).Return(nil)
 	h.streamer.On("Peek", mock.Anything).Return(nil)
 	h.streamer.On("GetFallbackHotshotPos").Return(uint64(2))
-	h.streamer.On("Next", mock.Anything).Return(batch)
+	h.streamer.On("AdvancePosition").Return()
 
 	h.verifier.verifyAndAdvance(ctx)
 
@@ -276,15 +267,13 @@ func TestVerifyRejectsMismatchedBlock(t *testing.T) {
 	}
 	h.finalityPoller.On("LastSnapshot").Return(snapshot, true)
 	h.ethClient.On("BlockByNumber", mock.Anything, new(big.Int).SetUint64(100)).Return(mismatchedBlock, nil)
-	h.streamer.On("Refresh", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	h.streamer.On("HasNext", mock.Anything).Return(true)
 	h.streamer.On("Peek", mock.Anything).Return(batch)
 
 	h.verifier.verifyAndAdvance(ctx)
 
 	require.Contains(t, capturer.errorMessages, "batch verification failed",
 		"expected a verification failure to be logged")
-	h.streamer.AssertNotCalled(t, "Next", mock.Anything)
+	h.streamer.AssertNotCalled(t, "AdvancePosition")
 	state := h.store.GetState()
 	require.Equal(t, uint64(1), state.L2BlockNumber, "store must not advance on a mismatched block")
 }
@@ -311,15 +300,19 @@ func TestStoresEthereumFinalizedBlockWhenAhead(t *testing.T) {
 
 		h.streamer.On("GetFallbackHotshotPos").Return(uint64(1))
 		h.finalityPoller.On("LastSnapshot").Return(snapshot, true)
-		h.streamer.On("Refresh", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
-		h.streamer.On("HasNext", mock.Anything).Return(false)
-		h.streamer.On("Update", mock.Anything).Return(nil)
+		h.streamer.On("SetBatchPosition", mock.Anything).Return()
 		h.streamer.On("Peek", mock.Anything).Return(nil)
 
 		h.verifier.verifyAndAdvance(ctx)
 
 		assertEthereumFinalizedBlockStored(t, h, capturer, 1)
-		h.streamer.AssertNotCalled(t, "Next", mock.Anything)
+		h.streamer.AssertNotCalled(t, "AdvancePosition")
+		// Fast-forwarding past where the streamer was must re-anchor it on the
+		// Ethereum-finalized head, so it serves that block's child next.
+		h.streamer.AssertCalled(t, "SetBatchPosition", eth.L2BlockRef{
+			Number: 105,
+			Hash:   snapshot.finalizedL2Hash,
+		})
 	})
 }
 
@@ -334,9 +327,7 @@ func TestProxyUsesEthereumFinalizedBlockWhenEspressoStopsAdvancing(t *testing.T)
 
 	h.streamer.On("GetFallbackHotshotPos").Return(uint64(1))
 	h.finalityPoller.On("LastSnapshot").Return(snapshot, true)
-	h.streamer.On("Refresh", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	h.streamer.On("HasNext", mock.Anything).Return(false)
-	h.streamer.On("Update", mock.Anything).Return(nil)
+	h.streamer.On("SetBatchPosition", mock.Anything).Return()
 	h.streamer.On("Peek", mock.Anything).Return(nil)
 
 	var upstreamSeenTags []string

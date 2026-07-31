@@ -8,6 +8,7 @@ import (
 
 	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 )
 
@@ -17,6 +18,10 @@ type AdaptL1BlockRefClient struct {
 }
 
 var _ op.L1Client = new(AdaptL1BlockRefClient)
+
+// The streamer also resolves the hash of the L2 block it is anchored to, which the
+// same wrapper serves over an L2 endpoint.
+var _ op.L2Client = new(AdaptL1BlockRefClient)
 
 // NewAdaptL1BlockRefClient creates a new L1BlockRefClient
 func NewAdaptL1BlockRefClient(L1Client *ethclient.Client) *AdaptL1BlockRefClient {
@@ -33,6 +38,11 @@ func (c *AdaptL1BlockRefClient) HeaderHashByNumber(ctx context.Context, number *
 	}
 
 	return expectedL1BlockRef.Hash(), nil
+}
+
+// HeaderByNumber implements the op.L1Client interface
+func (c *AdaptL1BlockRefClient) HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error) {
+	return c.L1Client.HeaderByNumber(ctx, number)
 }
 
 // CodeAt implements bind.ContractCaller
