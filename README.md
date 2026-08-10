@@ -2,7 +2,7 @@
 
 The Espresso Rollup Node Proxy is a Go service that sits between clients and a rollup's full node to enforce [Espresso](https://docs.espressosys.com/) finality. Instead of relying solely on Ethereum for finality, clients can use an Espresso-specific block tag (default: `"espresso"`) in their JSON-RPC calls; the proxy resolves that tag to the latest L2 block number confirmed by Espresso's HotShot consensus.
 
-The proxy can also be configured to intercept the standard `"finalized"` tag and back it with Espresso finality, so existing clients that already use `"finalized"` get faster finality with no code changes at all.
+The proxy can also be configured to intercept the standard `"finalized"` and/or `"safe"` tags and back them with Espresso finality, so existing clients that already use those tags get faster finality with no code changes at all. Multiple tags can be intercepted at once (e.g. `"espresso_tag": ["safe", "finalized"]`); every configured tag resolves to the same Espresso-finalized block number.
 
 In both modes, the proxy resolves the block number as `max(espresso finalized, eth finalized)`. This means clients always get Espresso's faster finality when it is ahead, but can safely fall back to Ethereum finality.
 
@@ -229,7 +229,7 @@ The **Required** column shows ✅ for settings required in all modes, and ✅ OP
 | `--listen-addr` | `listen_addr` | `:8080` | Address the proxy listens on |
 | `--ws.listen-addr` | `ws_listen_addr` | — | WebSocket listen address; set together with `ws.full-node-execution-rpc` to enable the WebSocket proxy |
 | `--ws.full-node-execution-rpc` | `ws_full_node_execution_rpc` | — | Execution layer WebSocket RPC URL; required to enable the WebSocket proxy |
-| `--espresso-tag` | `espresso_tag` | `espresso` | JSON-RPC block tag to intercept; set to `finalized` to back the standard finality tag with Espresso |
+| `--espresso-tag` | `espresso_tag` | `espresso` | JSON-RPC block tag(s) to intercept; set to `finalized` (or `safe,finalized`) to back the standard tags with Espresso. The flag accepts a comma-separated list or may be repeated; the JSON field accepts a string or an array of strings. All configured tags resolve to the same Espresso-finalized block number |
 | `--store-file-path` | `store_file_path` | `espresso_store.json` | Path to the state persistence file |
 | `--verification-interval` | `verification_interval` | `10ms` | How often the verifier polls for new confirmed batches |
 | `--finality-poll-interval` | `finality_poll_interval` | `1s` | How often the finality poller queries the full node for the latest finalized block |

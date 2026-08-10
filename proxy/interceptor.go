@@ -16,9 +16,10 @@ const (
 )
 
 // Interceptor is responsible for intercepting JSON-RPC requests with
-// the specified espresso tag and replacing the tag with a block number
-// finalized by Espresso. Note: the espreso tag can be "finalized", "espresso" etc
-// and is configurable
+// any of the specified espresso tags and replacing the tag with a block
+// number finalized by Espresso. Note: the espresso tags can be "finalized",
+// "safe", "espresso" etc and are configurable. All configured tags resolve
+// to the same Espresso-finalized block number.
 const maxJSONDepth = 32
 
 // ErrMaxJSONDepthExceeded is returned when the JSON nesting depth exceeds
@@ -45,7 +46,7 @@ type Interceptor interface {
 type interceptor struct {
 	logger       log.Logger
 	store        *espressoStore.EspressoStore
-	espressoTag  string
+	espressoTags []string
 	maxBatchSize int
 }
 
@@ -60,16 +61,26 @@ func (e *BatchTooLargeError) Error() string {
 	return fmt.Sprintf("batch too large (count %d exceeds limit %d)", e.Count, e.Limit)
 }
 
-func NewInterceptor(logger log.Logger, store *espressoStore.EspressoStore, espressoTag string, maxBatchSize int) Interceptor {
+func NewInterceptor(logger log.Logger, store *espressoStore.EspressoStore, espressoTags []string, maxBatchSize int) Interceptor {
 	if logger == nil {
 		logger = log.Root()
 	}
 	return &interceptor{
 		logger:       logger,
 		store:        store,
-		espressoTag:  espressoTag,
+		espressoTags: espressoTags,
 		maxBatchSize: maxBatchSize,
 	}
+}
+
+// isEspressoTag reports whether s is one of the configured espresso tags.
+func (i *interceptor) isEspressoTag(s string) bool {
+	for _, tag := range i.espressoTags {
+		if s == tag {
+			return true
+		}
+	}
+	return false
 }
 
 // ErrUnknownEspressoFinalizedBlockNumber is a sentinel error indicating that
@@ -171,11 +182,11 @@ func (i *interceptor) replaceTagInParams(params any, espressoFinalizedBlockNumbe
 		)
 	}
 
-	// Case 1: params is a string containing the espresso tag
+	// Case 1: params is a string containing one of the espresso tags
 	// {"jsonrpc":"2.0","method":"eth_getBalance","params":["0xAddr","espresso"]}`
-	// This case is the end of the recursion since we have found the espresso tag
+	// This case is the end of the recursion since we have found an espresso tag
 	// and replaced it with the block number
-	if cast, castOK := params.(string); castOK && cast == i.espressoTag {
+	if cast, castOK := params.(string); castOK && i.isEspressoTag(cast) {
 		return fmt.Sprintf("0x%x", espressoFinalizedBlockNumber), true, nil
 	}
 

@@ -40,6 +40,21 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 	return json.Unmarshal(b, (*time.Duration)(d))
 }
 
+// Tags is a list of block tags to intercept. It unmarshals from either a
+// single JSON string or an array of strings, so existing configs using
+// "espresso_tag": "espresso" keep working alongside
+// "espresso_tag": ["safe", "finalized"].
+type Tags []string
+
+func (t *Tags) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		*t = Tags{s}
+		return nil
+	}
+	return json.Unmarshal(b, (*[]string)(t))
+}
+
 type OPConfig struct {
 	LightClientAddress        common.Address `json:"light_client_address"`
 	BatcherAddress            common.Address `json:"batcher_address"`
@@ -62,7 +77,7 @@ type Config struct {
 	Namespace              uint64      `json:"namespace"`
 	ListenAddr             string      `json:"listen_addr"`
 	WsListenAddr           string      `json:"ws_listen_addr"`
-	EspressoTag            string      `json:"espresso_tag"`
+	EspressoTags           Tags        `json:"espresso_tag"`
 	StoreFilePath          string      `json:"store_file_path"`
 	QueryServiceURL        string      `json:"query_service_url"`
 	VerificationInterval   Duration    `json:"verification_interval"`
@@ -80,7 +95,7 @@ type Config struct {
 func defaultConfig() *Config {
 	return &Config{
 		ListenAddr:           ":8080",
-		EspressoTag:          "espresso",
+		EspressoTags:         Tags{"espresso"},
 		StoreFilePath:        "espresso_store.json",
 		MaxBatchSize:         proxy.DefaultMaxBatchSize,
 		MaxRequestBodySize:   proxy.DefaultMaxRequestBodySize,
@@ -122,7 +137,7 @@ func parseConfig() *Config {
 	pflag.TextVar(&cfg.OPConfig.BatcherAddress, "op.batcher-address", cfg.OPConfig.BatcherAddress, "OP batcher address")
 	pflag.TextVar(&cfg.OPConfig.BatchAuthenticatorAddress, "op.batch-authenticator-address", cfg.OPConfig.BatchAuthenticatorAddress, "Espresso batch authenticator contract address")
 	pflag.StringVar(&cfg.WsFullNodeExecutionRPC, "ws.full-node-execution-rpc", cfg.WsFullNodeExecutionRPC, "full node execution RPC URL (websocket)")
-	pflag.StringVar(&cfg.EspressoTag, "espresso-tag", cfg.EspressoTag, "espresso tag")
+	pflag.StringSliceVar((*[]string)(&cfg.EspressoTags), "espresso-tag", cfg.EspressoTags, "block tags to intercept and resolve to the Espresso-finalized block number (comma-separated or repeated for multiple tags, e.g. safe,finalized)")
 	pflag.StringVar(&cfg.StoreFilePath, "store-file-path", cfg.StoreFilePath, "path to state persistence file")
 	pflag.Uint64Var(&cfg.InitialHotshotHeight, "initial-hotshot-height", cfg.InitialHotshotHeight, "initial hotshot height")
 	pflag.BoolVar(&cfg.TrackBatchLatency, "track-batch-latency", cfg.TrackBatchLatency, "whether to track batch latency")
@@ -244,8 +259,13 @@ func (c *Config) validate() error {
 	if c.ListenAddr == "" {
 		errs = append(errs, fmt.Errorf("listen-addr: must not be empty"))
 	}
-	if c.EspressoTag == "" {
+	if len(c.EspressoTags) == 0 {
 		errs = append(errs, fmt.Errorf("espresso-tag: must not be empty"))
+	}
+	for i, tag := range c.EspressoTags {
+		if tag == "" {
+			errs = append(errs, fmt.Errorf("espresso-tag[%d]: must not be empty", i))
+		}
 	}
 	if c.StoreFilePath == "" {
 		errs = append(errs, fmt.Errorf("store-file-path: must not be empty"))

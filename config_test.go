@@ -64,6 +64,34 @@ func TestDurationUnmarshalJSON(t *testing.T) {
 	})
 }
 
+func TestTagsUnmarshalJSON(t *testing.T) {
+	t.Run("single string", func(t *testing.T) {
+		var cfg Config
+		require.NoError(t, json.Unmarshal([]byte(`{"espresso_tag": "espresso"}`), &cfg))
+		require.Equal(t, Tags{"espresso"}, cfg.EspressoTags)
+	})
+
+	t.Run("array of strings", func(t *testing.T) {
+		var cfg Config
+		require.NoError(t, json.Unmarshal([]byte(`{"espresso_tag": ["safe", "finalized"]}`), &cfg))
+		require.Equal(t, Tags{"safe", "finalized"}, cfg.EspressoTags)
+	})
+
+	t.Run("invalid type", func(t *testing.T) {
+		var tags Tags
+		require.Error(t, json.Unmarshal([]byte(`42`), &tags))
+	})
+}
+
+func TestTagsPflag(t *testing.T) {
+	var tags Tags
+	fs := pflag.NewFlagSet("test", pflag.ContinueOnError)
+	fs.StringSliceVar((*[]string)(&tags), "espresso-tag", []string{"espresso"}, "test tags")
+
+	require.NoError(t, fs.Parse([]string{"--espresso-tag=safe,finalized"}))
+	require.Equal(t, Tags{"safe", "finalized"}, tags)
+}
+
 func TestConfigValidate(t *testing.T) {
 	valid := Config{
 		FullNodeExecutionRPC: "http://localhost:8545",
@@ -71,7 +99,7 @@ func TestConfigValidate(t *testing.T) {
 		Mode:                 ModeOP,
 		Namespace:            22266222,
 		ListenAddr:           ":8080",
-		EspressoTag:          "espresso",
+		EspressoTags:         Tags{"espresso"},
 		StoreFilePath:        "espresso_store.json",
 		LogLevel:             "info",
 		QueryServiceURL:      "https://query.espresso.network",
@@ -115,6 +143,16 @@ func TestConfigValidate(t *testing.T) {
 		require.Error(t, json.Unmarshal(raw, &cfg))
 	})
 
+	multiTag := valid
+	multiTag.EspressoTags = Tags{"safe", "finalized"}
+	require.NoError(t, multiTag.validate())
+
+	emptyTagInList := valid
+	emptyTagInList.EspressoTags = Tags{"safe", ""}
+	err = emptyTagInList.validate()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "espresso-tag[1]: must not be empty")
+
 	badLogFormat := valid
 	badLogFormat.LogFormat = "yaml"
 	err = badLogFormat.validate()
@@ -133,7 +171,7 @@ func TestConfigValidate(t *testing.T) {
 		Mode:                 ModeNitro,
 		Namespace:            412346,
 		ListenAddr:           ":8080",
-		EspressoTag:          "espresso",
+		EspressoTags:         Tags{"espresso"},
 		StoreFilePath:        "espresso_store.json",
 		LogLevel:             "info",
 		QueryServiceURL:      "https://query.espresso.network",
