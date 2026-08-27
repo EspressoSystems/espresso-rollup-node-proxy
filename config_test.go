@@ -64,24 +64,33 @@ func TestDurationUnmarshalJSON(t *testing.T) {
 	})
 }
 
+func TestTagsUnmarshalJSON(t *testing.T) {
+	t.Run("single string", func(t *testing.T) {
+		var cfg Config
+		require.NoError(t, json.Unmarshal([]byte(`{"espresso_tag": "espresso"}`), &cfg))
+		require.Equal(t, Tags{"espresso"}, cfg.EspressoTags)
+	})
+
+	t.Run("array of strings", func(t *testing.T) {
+		var cfg Config
+		require.NoError(t, json.Unmarshal([]byte(`{"espresso_tag": ["safe", "finalized"]}`), &cfg))
+		require.Equal(t, Tags{"safe", "finalized"}, cfg.EspressoTags)
+	})
+
+	t.Run("invalid type", func(t *testing.T) {
+		var tags Tags
+		require.Error(t, json.Unmarshal([]byte(`42`), &tags))
+	})
+
+	t.Run("null keeps the default", func(t *testing.T) {
+		cfg := defaultConfig()
+		require.NoError(t, json.Unmarshal([]byte(`{"espresso_tag": null}`), cfg))
+		require.Equal(t, Tags{"espresso"}, cfg.EspressoTags)
+	})
+}
+
 func TestConfigValidate(t *testing.T) {
-	valid := Config{
-		FullNodeExecutionRPC: "http://localhost:8545",
-		EthRPC:               "ws://localhost:8546",
-		Mode:                 ModeOP,
-		Namespace:            22266222,
-		ListenAddr:           ":8080",
-		EspressoTag:          "espresso",
-		StoreFilePath:        "espresso_store.json",
-		LogLevel:             "info",
-		QueryServiceURL:      "https://query.espresso.network",
-		VerificationInterval: Duration(1 * time.Millisecond),
-		OPConfig: OPConfig{
-			LightClientAddress:        common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678"),
-			BatcherAddress:            common.HexToAddress("0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"),
-			BatchAuthenticatorAddress: common.HexToAddress("0x1111111111111111111111111111111111111111"),
-		},
-	}
+	valid := newValidOPConfig()
 	require.NoError(t, valid.validate())
 
 	opEmpty := Config{Mode: ModeOP}
@@ -115,6 +124,12 @@ func TestConfigValidate(t *testing.T) {
 		require.Error(t, json.Unmarshal(raw, &cfg))
 	})
 
+	emptyTagInList := valid
+	emptyTagInList.EspressoTags = Tags{"safe", ""}
+	err = emptyTagInList.validate()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "espresso-tag[1]: must not be empty")
+
 	badLogFormat := valid
 	badLogFormat.LogFormat = "yaml"
 	err = badLogFormat.validate()
@@ -133,7 +148,7 @@ func TestConfigValidate(t *testing.T) {
 		Mode:                 ModeNitro,
 		Namespace:            412346,
 		ListenAddr:           ":8080",
-		EspressoTag:          "espresso",
+		EspressoTags:         Tags{"espresso"},
 		StoreFilePath:        "espresso_store.json",
 		LogLevel:             "info",
 		QueryServiceURL:      "https://query.espresso.network",
@@ -166,4 +181,66 @@ func TestConfigValidate(t *testing.T) {
 	err = nitroBadAddr.validate()
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "nitro.valid-signing-key-addresses[0].address")
+}
+
+// newValidOPConfig returns a minimal configuration that passes validation in
+// OP mode, for tests that tweak a single field.
+func newValidOPConfig() Config {
+	return Config{
+		FullNodeExecutionRPC: "http://localhost:8545",
+		EthRPC:               "ws://localhost:8546",
+		Mode:                 ModeOP,
+		Namespace:            22266222,
+		ListenAddr:           ":8080",
+		EspressoTags:         Tags{"espresso"},
+		StoreFilePath:        "espresso_store.json",
+		LogLevel:             "info",
+		QueryServiceURL:      "https://query.espresso.network",
+		VerificationInterval: Duration(1 * time.Millisecond),
+		OPConfig: OPConfig{
+			LightClientAddress:        common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678"),
+			BatcherAddress:            common.HexToAddress("0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"),
+			BatchAuthenticatorAddress: common.HexToAddress("0x1111111111111111111111111111111111111111"),
+		},
+	}
+}
+
+// TestTagsAnyTagAccepted verifies that the configuration layer keeps no
+// allowlist of tags: any non-empty string is accepted, and only empty lists
+// and empty strings are rejected. Which strings the interceptor then rewrites
+// is covered in the proxy package.
+func TestTagsAnyTagAccepted(t *testing.T) {
+	t.Run("any non-empty strings are accepted", func(t *testing.T) {
+		cfg := newValidOPConfig()
+		cfg.EspressoTags = Tags{"finalized", "safe", "my-custom-tag"}
+		require.NoError(t, cfg.validate())
+	})
+
+	t.Run("empty JSON array is rejected", func(t *testing.T) {
+		cfg := newValidOPConfig()
+		require.NoError(t, json.Unmarshal([]byte(`{"espresso_tag": []}`), &cfg))
+		err := cfg.validate()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "espresso-tag: must not be empty")
+	})
+
+	t.Run("empty JSON string is rejected", func(t *testing.T) {
+		cfg := newValidOPConfig()
+		require.NoError(t, json.Unmarshal([]byte(`{"espresso_tag": ""}`), &cfg))
+		err := cfg.validate()
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "espresso-tag[0]: must not be empty")
+	})
+}
+
+// TestTagsPflag checks that the flag, which is registered against the Tags
+// field by conversion, accepts both the repeated and the comma-separated
+// form. The rest of the flag semantics belong to pflag.
+func TestTagsPflag(t *testing.T) {
+	var tags Tags
+	fs := pflag.NewFlagSet("test", pflag.ContinueOnError)
+	fs.StringSliceVar((*[]string)(&tags), "espresso-tag", []string{"espresso"}, "test tags")
+
+	require.NoError(t, fs.Parse([]string{"--espresso-tag=latest,safe", "--espresso-tag", "finalized"}))
+	require.Equal(t, Tags{"latest", "safe", "finalized"}, tags)
 }
