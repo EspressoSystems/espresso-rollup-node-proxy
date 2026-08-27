@@ -20,24 +20,16 @@ The proxy starts in non-Espresso mode and automatically switches to Espresso mod
 
 ### Intercepted tags
 
-**Any tag can be intercepted.** The proxy keeps no allowlist of block tags: whatever strings are listed in `espresso_tag` are the tags it rewrites, and nothing else is touched. In particular:
+**Any tag can be intercepted.** The proxy keeps no allowlist of block tags: whatever strings are listed in `espresso_tag` are the tags it rewrites, and nothing else is touched. `finalized` and `safe` are the usual choices — clients that already send them get Espresso finality (`max(espresso finalized, eth finalized)`) with no code changes, and the two are typically configured together as `["safe", "finalized"]`. The default `espresso` is opt-in: only clients that explicitly ask for it are affected. A custom string such as `"my-tag"` behaves exactly the same way.
 
-| Configured tag | Effect |
-| -------------- | ------ |
-| `espresso` (default) | Opt-in. Only clients that explicitly send `"espresso"` get Espresso finality; every standard tag is passed through to the full node untouched. |
-| `finalized` | Existing clients that already send `"finalized"` get Espresso finality (`max(espresso finalized, eth finalized)`) with no code changes. |
-| `safe` | Same as `finalized`; the two are typically configured together as `["safe", "finalized"]`. |
-| `latest` / `pending` | Accepted like any other tag. Note that these normally refer to the chain head, so intercepting them makes clients observe only the Espresso-finalized state, which lags the head. |
-| `earliest` | Accepted like any other tag. Intercepting it changes its meaning from the genesis block to the Espresso-finalized block. |
-| any other string | A custom tag such as `"my-tag"` behaves exactly like `"espresso"`. |
+Matching is by **exact, case-sensitive string equality**, applied to every string value in `params` at any depth — positional arrays, object values such as `{"blockTag": "finalized"}`, nested structures, and every request in a batch. With `latest` configured, `"Latest"`, `"latest "` and `"latest-ish"` are *not* rewritten; object *keys*, the `method` and the `id` are never rewritten either. All configured tags resolve to the same block number, encoded as a hex quantity (e.g. `"0x64"`).
 
-The following matching rules apply identically to every configured tag:
+Two things to weigh when choosing tags:
 
-- **Exact, case-sensitive string equality.** With `latest` configured, `"Latest"`, `"latest "` and `"latest-ish"` are *not* rewritten. Tags are never matched by prefix or substring.
-- **Any string value in `params`, at any depth.** The interceptor walks positional arrays, object values (e.g. `{"blockTag": "finalized"}`), nested structures, and every request in a batch. Object *keys*, the `method`, and the `id` are never rewritten.
-- **Method-agnostic.** The interceptor does not know which parameter of which method is the block parameter; a string equal to a configured tag is rewritten wherever it appears. Avoid configuring a tag that could legitimately show up as some other parameter value (for example a hex quantity such as `"0x1"`).
-- **One block number for every tag.** All configured tags resolve to the same value, encoded as a hex quantity (e.g. `"0x64"`).
-- **Pass-through until Espresso state exists.** Until the verifier has confirmed the first batch, every request is forwarded unchanged. An intercepted `"latest"` is then still served by the full node as the chain head, while an intercepted `"espresso"` reaches the full node as-is (which will typically reject it as an unknown block tag).
+- **The interceptor is not method-aware.** A string equal to a configured tag is rewritten wherever it appears, including positions that are not block parameters. Avoid configuring a tag that could legitimately show up as some other parameter value (for example a hex quantity such as `"0x1"`).
+- **`latest` and `pending` normally mean the chain head**, so intercepting them makes clients observe only the Espresso-finalized state, which lags the head. Intercepting `earliest` likewise changes its meaning from the genesis block to the Espresso-finalized block.
+
+Until the verifier has confirmed the first batch, every request is forwarded unchanged: an intercepted `"latest"` is still served by the full node as the chain head, while an intercepted `"espresso"` reaches the full node as-is (which will typically reject it as an unknown block tag).
 
 ## Architecture
 

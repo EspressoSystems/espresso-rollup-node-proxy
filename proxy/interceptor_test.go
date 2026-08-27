@@ -3,43 +3,28 @@ package proxy
 import (
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/EspressoSystems/espresso-rollup-node-proxy/adapters"
 	"github.com/EspressoSystems/espresso-rollup-node-proxy/jsonrpcv2"
-	espressostore "github.com/EspressoSystems/espresso-rollup-node-proxy/store"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/store/storetest"
 
 	"github.com/stretchr/testify/require"
 )
 
-// newEmptyTestStore returns a store that holds no Espresso state yet.
-func newEmptyTestStore(t *testing.T) *espressostore.EspressoStore {
+// newTagInterceptor returns an interceptor configured with tags, backed by a
+// store whose Espresso-finalized L2 block is l2BlockNumber.
+func newTagInterceptor(t *testing.T, l2BlockNumber uint64, tags ...string) Interceptor {
 	t.Helper()
-	fp := filepath.Join(t.TempDir(), "state.json")
-	store, err := espressostore.NewEspressoStore(fp, 1)
-	require.NoError(t, err)
-	return store
-}
-
-// newTestStore returns a store whose Espresso-finalized L2 block is
-// l2BlockNumber.
-func newTestStore(t *testing.T, l2BlockNumber uint64) *espressostore.EspressoStore {
-	t.Helper()
-	store := newEmptyTestStore(t)
-	updated, err := store.UpdateIfGreater(l2BlockNumber, 1)
-	require.True(t, updated)
-	require.NoError(t, err)
-	return store
+	return NewInterceptor(nil, storetest.NewAtBlock(t, l2BlockNumber), tags, DefaultMaxBatchSize)
 }
 
 func TestInterceptor(t *testing.T) {
 	const blockNumber uint64 = 100
 	t.Run("returns original when no params", func(t *testing.T) {
-		store := newTestStore(t, blockNumber)
-		interceptor := NewInterceptor(nil, store, []string{"espresso"}, DefaultMaxBatchSize)
+		interceptor := newTagInterceptor(t, blockNumber, "espresso")
 
 		input := `{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0xabc","latest"]}`
 		result, err := adapters.PerformRequestIntercept([]byte(input), interceptor)
@@ -48,8 +33,7 @@ func TestInterceptor(t *testing.T) {
 	})
 
 	t.Run("replaces espresso tag in string param", func(t *testing.T) {
-		store := newTestStore(t, blockNumber)
-		interceptor := NewInterceptor(nil, store, []string{"espresso"}, DefaultMaxBatchSize)
+		interceptor := newTagInterceptor(t, blockNumber, "espresso")
 		input := `{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["espresso"],"foo":"bar"}`
 		result, err := adapters.PerformRequestIntercept([]byte(input), interceptor)
 		require.NoError(t, err)
@@ -58,8 +42,7 @@ func TestInterceptor(t *testing.T) {
 	})
 
 	t.Run("replaces finalized tag when configured as espresso tag", func(t *testing.T) {
-		store := newTestStore(t, blockNumber)
-		interceptor := NewInterceptor(nil, store, []string{"finalized"}, DefaultMaxBatchSize)
+		interceptor := newTagInterceptor(t, blockNumber, "finalized")
 		input := `{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0xabc","finalized"]}`
 		result, err := adapters.PerformRequestIntercept([]byte(input), interceptor)
 		require.NoError(t, err)
@@ -68,8 +51,7 @@ func TestInterceptor(t *testing.T) {
 	})
 
 	t.Run("replaces safe and finalized tags when both configured", func(t *testing.T) {
-		store := newTestStore(t, blockNumber)
-		interceptor := NewInterceptor(nil, store, []string{"safe", "finalized"}, DefaultMaxBatchSize)
+		interceptor := newTagInterceptor(t, blockNumber, "safe", "finalized")
 
 		input := `[{"jsonrpc":"2.0","id":1,"method":"eth_getBlockByNumber","params":["safe",false]},{"jsonrpc":"2.0","id":2,"method":"eth_getBlockByNumber","params":["finalized",false]},{"jsonrpc":"2.0","id":3,"method":"eth_getBlockByNumber","params":["latest",false]}]`
 		result, err := adapters.PerformRequestIntercept([]byte(input), interceptor)
@@ -79,8 +61,7 @@ func TestInterceptor(t *testing.T) {
 	})
 
 	t.Run("replaces tag in nested json object param", func(t *testing.T) {
-		store := newTestStore(t, blockNumber)
-		interceptor := NewInterceptor(nil, store, []string{"espresso"}, DefaultMaxBatchSize)
+		interceptor := newTagInterceptor(t, blockNumber, "espresso")
 		input := `{"jsonrpc":"2.0","id":1,"method":"eth_call","params":{"to":"0xabc","data":"0x123","blockTag":"espresso"}}`
 		result, err := adapters.PerformRequestIntercept([]byte(input), interceptor)
 		require.NoError(t, err)
@@ -89,8 +70,7 @@ func TestInterceptor(t *testing.T) {
 	})
 
 	t.Run("replaces tag in array json nested structure", func(t *testing.T) {
-		store := newTestStore(t, blockNumber)
-		interceptor := NewInterceptor(nil, store, []string{"finalized"}, DefaultMaxBatchSize)
+		interceptor := newTagInterceptor(t, blockNumber, "finalized")
 
 		input := `{"jsonrpc":"2.0","id":1,"method":"m","params":[{"nested":["finalized"]}]}`
 		result, err := adapters.PerformRequestIntercept([]byte(input), interceptor)
@@ -100,8 +80,7 @@ func TestInterceptor(t *testing.T) {
 	})
 
 	t.Run("passes through params with only non-string primitives unchanged as they cant contain espresso tag", func(t *testing.T) {
-		store := newTestStore(t, blockNumber)
-		interceptor := NewInterceptor(nil, store, []string{"espresso"}, DefaultMaxBatchSize)
+		interceptor := newTagInterceptor(t, blockNumber, "espresso")
 
 		input := `{"jsonrpc":"2.0","id":1,"method":"eth_getBlockByNumber","params":["latest",true]}`
 		result, err := adapters.PerformRequestIntercept([]byte(input), interceptor)
@@ -110,8 +89,7 @@ func TestInterceptor(t *testing.T) {
 	})
 
 	t.Run("intercepts batch request replacing tags in each element", func(t *testing.T) {
-		store := newTestStore(t, blockNumber)
-		interceptor := NewInterceptor(nil, store, []string{"espresso"}, DefaultMaxBatchSize)
+		interceptor := newTagInterceptor(t, blockNumber, "espresso")
 
 		input := `[{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0xabc","espresso"]},{"jsonrpc":"2.0","id":2,"method":"eth_getBlockByNumber","params":["espresso",true]}]`
 		result, err := adapters.PerformRequestIntercept([]byte(input), interceptor)
@@ -121,8 +99,7 @@ func TestInterceptor(t *testing.T) {
 	})
 
 	t.Run("passes through batch request without espresso tags unchanged", func(t *testing.T) {
-		store := newTestStore(t, blockNumber)
-		interceptor := NewInterceptor(nil, store, []string{"espresso"}, DefaultMaxBatchSize)
+		interceptor := newTagInterceptor(t, blockNumber, "espresso")
 
 		input := `[{"jsonrpc":"2.0","id":1,"method":"eth_chainId"},{"jsonrpc":"2.0","id":2,"method":"eth_getBalance","params":["0xabc","latest"]}]`
 		result, err := adapters.PerformRequestIntercept([]byte(input), interceptor)
@@ -131,9 +108,8 @@ func TestInterceptor(t *testing.T) {
 	})
 
 	t.Run("InterceptBatchRequests returns nil slice on error", func(t *testing.T) {
-		store := newTestStore(t, blockNumber)
 		const maxBatch = 2
-		interceptor := NewInterceptor(nil, store, []string{"espresso"}, maxBatch)
+		interceptor := NewInterceptor(nil, storetest.NewAtBlock(t, blockNumber), []string{"espresso"}, maxBatch)
 
 		// Build a batch that exceeds the limit
 		requests := make([]jsonrpcv2.Request, maxBatch+1)
@@ -225,8 +201,8 @@ func containsTagValue(v any, tags []string) bool {
 var standardBlockTags = []string{"earliest", "latest", "pending", "safe", "finalized", "espresso"}
 
 // TestInterceptorAnyTag verifies that interception is not restricted to a
-// fixed set of block tags: every standard tag, as well as an arbitrary custom
-// string, can be configured and is rewritten by exactly the same rules.
+// fixed set of block tags — every standard tag and any custom string can be
+// configured — and pins the matching rules documented on Interceptor.
 func TestInterceptorAnyTag(t *testing.T) {
 	const blockNumber uint64 = 100
 	const want = "0x64"
@@ -235,31 +211,15 @@ func TestInterceptorAnyTag(t *testing.T) {
 		return fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"eth_getBlockByNumber","params":[%q,false]}`, id, tag)
 	}
 
+	// A custom string is a tag like any other; the standard tags carry no
+	// special meaning to the interceptor.
 	allTags := slices.Concat(standardBlockTags, []string{"my-custom-tag"})
 
-	for _, tag := range allTags {
-		t.Run("rewrites only "+tag+" when configured alone", func(t *testing.T) {
-			store := newTestStore(t, blockNumber)
-			interceptor := NewInterceptor(nil, store, []string{tag}, DefaultMaxBatchSize)
-
-			for _, sent := range allTags {
-				expected := sent
-				if sent == tag {
-					expected = want
-				}
-				result, err := adapters.PerformRequestIntercept([]byte(getBlock(1, sent)), interceptor)
-				require.NoError(t, err)
-				require.JSONEq(t, getBlock(1, expected), string(result), "sent %q with only %q configured", sent, tag)
-			}
-		})
-	}
-
-	t.Run("intercepts every standard tag at once in a batch", func(t *testing.T) {
-		store := newTestStore(t, blockNumber)
-		interceptor := NewInterceptor(nil, store, standardBlockTags, DefaultMaxBatchSize)
+	t.Run("intercepts every tag at once in a batch, custom ones included", func(t *testing.T) {
+		interceptor := newTagInterceptor(t, blockNumber, allTags...)
 
 		var reqs, expected []string
-		for i, tag := range standardBlockTags {
+		for i, tag := range allTags {
 			reqs = append(reqs, getBlock(i, tag))
 			expected = append(expected, getBlock(i, want))
 		}
@@ -273,8 +233,7 @@ func TestInterceptorAnyTag(t *testing.T) {
 	})
 
 	t.Run("matching is exact and case-sensitive", func(t *testing.T) {
-		store := newTestStore(t, blockNumber)
-		interceptor := NewInterceptor(nil, store, []string{"latest"}, DefaultMaxBatchSize)
+		interceptor := newTagInterceptor(t, blockNumber, "latest")
 
 		for _, notATag := range []string{"Latest", "LATEST", " latest", "latest ", "latest-ish", "xlatest", "late", ""} {
 			result, err := adapters.PerformRequestIntercept([]byte(getBlock(1, notATag)), interceptor)
@@ -284,8 +243,7 @@ func TestInterceptorAnyTag(t *testing.T) {
 	})
 
 	t.Run("rewrites a configured tag in any param position regardless of method", func(t *testing.T) {
-		store := newTestStore(t, blockNumber)
-		interceptor := NewInterceptor(nil, store, []string{"safe"}, DefaultMaxBatchSize)
+		interceptor := newTagInterceptor(t, blockNumber, "safe")
 
 		// The interceptor is not method-aware: a configured tag is rewritten
 		// wherever it appears as a string value, including positions that are
@@ -298,8 +256,7 @@ func TestInterceptorAnyTag(t *testing.T) {
 	})
 
 	t.Run("does not rewrite object keys equal to a configured tag", func(t *testing.T) {
-		store := newTestStore(t, blockNumber)
-		interceptor := NewInterceptor(nil, store, []string{"finalized"}, DefaultMaxBatchSize)
+		interceptor := newTagInterceptor(t, blockNumber, "finalized")
 
 		input := `{"jsonrpc":"2.0","id":1,"method":"m","params":[{"finalized":"latest"}]}`
 		result, err := adapters.PerformRequestIntercept([]byte(input), interceptor)
@@ -308,8 +265,7 @@ func TestInterceptorAnyTag(t *testing.T) {
 	})
 
 	t.Run("does not rewrite method, id or extra fields equal to a configured tag", func(t *testing.T) {
-		store := newTestStore(t, blockNumber)
-		interceptor := NewInterceptor(nil, store, []string{"latest"}, DefaultMaxBatchSize)
+		interceptor := newTagInterceptor(t, blockNumber, "latest")
 
 		input := `{"jsonrpc":"2.0","id":"latest","method":"latest","params":["latest"],"extra":"latest"}`
 		result, err := adapters.PerformRequestIntercept([]byte(input), interceptor)
@@ -318,17 +274,8 @@ func TestInterceptorAnyTag(t *testing.T) {
 		require.JSONEq(t, expected, string(result))
 	})
 
-	t.Run("duplicate configured tags behave like a single tag", func(t *testing.T) {
-		store := newTestStore(t, blockNumber)
-		interceptor := NewInterceptor(nil, store, []string{"finalized", "finalized"}, DefaultMaxBatchSize)
-
-		result, err := adapters.PerformRequestIntercept([]byte(getBlock(1, "finalized")), interceptor)
-		require.NoError(t, err)
-		require.JSONEq(t, getBlock(1, want), string(result))
-	})
-
 	t.Run("passes every configured tag through while espresso state is unknown", func(t *testing.T) {
-		interceptor := NewInterceptor(nil, newEmptyTestStore(t), standardBlockTags, DefaultMaxBatchSize)
+		interceptor := NewInterceptor(nil, storetest.NewEmpty(t), standardBlockTags, DefaultMaxBatchSize)
 
 		for _, tag := range standardBlockTags {
 			result, err := adapters.PerformRequestIntercept([]byte(getBlock(1, tag)), interceptor)

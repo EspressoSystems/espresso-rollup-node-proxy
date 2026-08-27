@@ -34,8 +34,20 @@ var ErrMaxBatchSizeExceeded = errors.New("maximum number of json requests in a s
 // Espresso. Any string can be configured as a tag — a standard one such as
 // "finalized" or "safe", the default "espresso", or a custom value — and all
 // configured tags resolve to the same block number, encoded as a hex quantity
-// (e.g. "0x64"). The exact matching rules are documented on
-// replaceTagInParams and in the README section "Intercepted tags".
+// (e.g. "0x64").
+//
+// Tags are matched by these rules, which apply identically to every
+// configured tag:
+//
+//   - Exact, case-sensitive string equality. Tags are never matched by
+//     prefix, by substring, or after trimming whitespace.
+//   - Any string value at any depth: positional arrays, object values
+//     (e.g. {"blockTag": "finalized"}) and nested structures. Object keys are
+//     never rewritten, and neither are the request's method or id, which are
+//     not part of params.
+//   - Method-agnostic: the interceptor does not know which parameter of
+//     which method is the block parameter, so a matching string is rewritten
+//     wherever it appears.
 type Interceptor interface {
 	// InterceptRequest takes a JSON-RPC request, and attempts to perform an
 	// intercept on it.  This means that the request may be rewritten and
@@ -137,8 +149,7 @@ func (i *interceptor) InterceptBatchRequests(requests []jsonrpcv2.Request) ([]js
 		return requests, nil
 	}
 
-	// The block number is the same for every request and every matched
-	// tag, so encode it once per batch.
+	// The same for every request in the batch, so encode it once.
 	blockHex := hexBlockNumber(finalizedEspressoBlockNumber)
 	next := make([]jsonrpcv2.Request, len(requests))
 	for j, req := range requests {
@@ -173,18 +184,7 @@ func (i *interceptor) interceptRequest(request jsonrpcv2.Request, espressoFinali
 
 // replaceTagInParams recursively walks JSON params and replaces every string
 // value that equals one of the configured espresso tags with
-// espressoFinalizedBlockHex. The matching rules, which apply identically to
-// every configured tag, are:
-//
-//   - Exact, case-sensitive string equality. Tags are never matched by
-//     prefix, by substring, or after trimming whitespace.
-//   - Any string value at any depth: positional arrays, object values
-//     (e.g. {"blockTag": "finalized"}) and nested structures. Object keys are
-//     never rewritten, and neither are the request's method or id, which are
-//     not part of params.
-//   - Method-agnostic: the interceptor does not know which parameter of
-//     which method is the block parameter, so a matching string is rewritten
-//     wherever it appears.
+// espressoFinalizedBlockHex. See [Interceptor] for the matching rules.
 func (i *interceptor) replaceTagInParams(params any, espressoFinalizedBlockHex string, depth int) (any, bool, error) {
 	if depth > maxJSONDepth {
 		return nil, false, errors.Join(

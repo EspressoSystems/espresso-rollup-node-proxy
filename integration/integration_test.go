@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -18,7 +17,7 @@ import (
 	proxyhttp "github.com/EspressoSystems/espresso-rollup-node-proxy/http"
 	"github.com/EspressoSystems/espresso-rollup-node-proxy/jsonrpcv2"
 	"github.com/EspressoSystems/espresso-rollup-node-proxy/proxy"
-	espressoStore "github.com/EspressoSystems/espresso-rollup-node-proxy/store"
+	"github.com/EspressoSystems/espresso-rollup-node-proxy/store/storetest"
 
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/stretchr/testify/require"
@@ -29,32 +28,13 @@ const (
 	DefaultMaxRequestBodySize = proxy.DefaultMaxRequestBodySize
 )
 
-// newEmptyTestStore returns a store that holds no Espresso state yet.
-func newEmptyTestStore(t *testing.T) *espressoStore.EspressoStore {
-	t.Helper()
-	fp := filepath.Join(t.TempDir(), "state.json")
-	store, err := espressoStore.NewEspressoStore(fp, 1)
-	require.NoError(t, err)
-	return store
-}
-
 // newTestReverseProxyHandler wires a store whose Espresso-finalized L2 block
 // is l2BlockNumber into an interceptor in front of a reverse proxy to
 // upstreamURL.
 func newTestReverseProxyHandler(t *testing.T, upstreamURL *url.URL, l2BlockNumber uint64, espressoTags []string, maxBatchSize int) http.Handler {
 	t.Helper()
-	store := newEmptyTestStore(t)
-	updated, err := store.UpdateIfGreater(l2BlockNumber, 1)
-	require.True(t, updated)
-	require.NoError(t, err)
-	return newTestReverseProxyHandlerWithStore(upstreamURL, store, espressoTags, maxBatchSize)
-}
-
-// newTestReverseProxyHandlerWithStore is newTestReverseProxyHandler for a
-// caller-provided store.
-func newTestReverseProxyHandlerWithStore(upstreamURL *url.URL, store *espressoStore.EspressoStore, espressoTags []string, maxBatchSize int) http.Handler {
 	reverseProxy := httputil.NewSingleHostReverseProxy(upstreamURL)
-	interceptor := proxy.NewInterceptor(nil, store, espressoTags, maxBatchSize)
+	interceptor := proxy.NewInterceptor(nil, storetest.NewAtBlock(t, l2BlockNumber), espressoTags, maxBatchSize)
 	return adapters.NewHTTPJSONRPCInterceptor(log.Root(), reverseProxy, interceptor)
 }
 
@@ -70,43 +50,19 @@ func TestServe(t *testing.T) {
 	// get modified by the Interceptor when the tag does not match
 	// the configured espresso tag value.
 	t.Run("doesnt replace requests without espresso tag", func(t *testing.T) {
-		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			body, err := io.ReadAll(r.Body)
-			require.NoError(t, err)
-
-			var req jsonrpcv2.Request
-			require.NoError(t, json.Unmarshal(body, &req))
-
-			cast, castOK := req.Params.([]any)
-			require.True(t, castOK)
-			params := cast
-			require.Equal(t, "latest", params[1])
-
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"0x1"}`))
-		}))
-
-		defer upstream.Close()
-		upstreamURL := &url.URL{
-			Scheme: "http",
-			Host:   upstream.Listener.Addr().String(),
-		}
+		upstreamURL, seen := newRecordingUpstream(t)
 		reverseProxyHandler := newTestReverseProxyHandler(t, upstreamURL, 100, []string{"espresso"}, DefaultMaxBatchSize)
 		handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), DefaultMaxRequestBodySize, reverseProxyHandler)
-		reqBody := `{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0xabc","latest"]}`
-		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
 
-		handler.ServeHTTP(rec, req)
+		rec := serveJSON(handler, `{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0xabc","latest"]}`)
 
 		require.Equal(t, http.StatusOK, rec.Code)
 		require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+		require.Equal(t, []string{"0xabc", "latest"}, seen(), "upstream must receive the params unchanged")
 
-		var resp map[string]interface{}
+		var resp map[string]any
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-		require.Equal(t, "0x1", resp["result"])
+		require.Equal(t, upstreamResult, resp["result"])
 	})
 
 	// This test simulates a successful request utilizing the "espresso" tag
@@ -115,38 +71,14 @@ func TestServe(t *testing.T) {
 	// The interceptor is configured with the "espresso" tag, and it should
 	// be replaced as expected.
 	t.Run("replaces espresso tag before forwarding", func(t *testing.T) {
-		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			body, err := io.ReadAll(r.Body)
-			require.NoError(t, err)
-
-			var req jsonrpcv2.Request
-			require.NoError(t, json.Unmarshal(body, &req))
-
-			cast, castOK := req.Params.([]any)
-			require.True(t, castOK)
-			params := cast
-			require.Equal(t, "0x64", params[1], "upstream should receive the replaced block number")
-
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"0x2"}`))
-		}))
-		defer upstream.Close()
-
-		upstreamURL := &url.URL{
-			Scheme: "http",
-			Host:   upstream.Listener.Addr().String(),
-		}
+		upstreamURL, seen := newRecordingUpstream(t)
 		reverseProxyHandler := newTestReverseProxyHandler(t, upstreamURL, 100, []string{"espresso"}, DefaultMaxBatchSize)
 		handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), DefaultMaxRequestBodySize, reverseProxyHandler)
 
-		reqBody := `{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0xabc","espresso"]}`
-		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-
-		handler.ServeHTTP(rec, req)
+		rec := serveJSON(handler, `{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0xabc","espresso"]}`)
 
 		require.Equal(t, http.StatusOK, rec.Code)
+		require.Equal(t, []string{"0xabc", "0x64"}, seen(), "upstream should receive the replaced block number")
 	})
 
 	// This test simulates a failure to read the body of the request
@@ -180,11 +112,7 @@ func TestServe(t *testing.T) {
 		reverseProxyHandler := newTestReverseProxyHandler(t, nil, 100, []string{"espresso"}, DefaultMaxBatchSize)
 		handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), DefaultMaxBatchSize, reverseProxyHandler)
 		reqBody := `{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}`
-		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-
-		handler.ServeHTTP(rec, req)
+		rec := serveJSON(handler, reqBody)
 
 		require.Equal(t, http.StatusOK, rec.Code)
 		require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
@@ -202,11 +130,7 @@ func TestServe(t *testing.T) {
 		reverseProxyHandler := newTestReverseProxyHandler(t, nil, 100, []string{"espresso"}, DefaultMaxBatchSize)
 		handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), DefaultMaxRequestBodySize, reverseProxyHandler)
 
-		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString("not valid json"))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-
-		handler.ServeHTTP(rec, req)
+		rec := serveJSON(handler, "not valid json")
 
 		require.Equal(t, http.StatusOK, rec.Code)
 		require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
@@ -224,21 +148,12 @@ func TestServe(t *testing.T) {
 	// If the user submits more requests than the interceptor is configured to
 	// allow, then it should result in an error with nothing being processed.
 	t.Run("rejects batch exceeding max batch size", func(t *testing.T) {
-		fp := filepath.Join(t.TempDir(), "state.json")
-		store, err := espressoStore.NewEspressoStore(fp, 1)
-		require.NoError(t, err)
-		updated, err := store.UpdateIfGreater(100, 1)
-		require.True(t, updated)
-		require.NoError(t, err)
 		reverseProxyHandler := newTestReverseProxyHandler(t, nil, 100, []string{"espresso"}, 2)
 		handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), DefaultMaxRequestBodySize, reverseProxyHandler)
 
 		body := `[{"jsonrpc":"2.0","id":1,"method":"eth_chainId"},{"jsonrpc":"2.0","id":2,"method":"eth_chainId"},{"jsonrpc":"2.0","id":3,"method":"eth_chainId"}]`
-		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
+		rec := serveJSON(handler, body)
 
-		handler.ServeHTTP(rec, req)
 		var resp jsonrpcv2.Response
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 		require.NotNil(t, resp.Error)
@@ -251,71 +166,49 @@ func TestServe(t *testing.T) {
 	//
 	// This should replace the "finalized" string as expected.
 	t.Run("replaces finalized tag when configured", func(t *testing.T) {
-		upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			body, err := io.ReadAll(r.Body)
-			require.NoError(t, err)
-
-			var req jsonrpcv2.Request
-			require.NoError(t, json.Unmarshal(body, &req))
-
-			cast, castOK := req.Params.([]any)
-			require.True(t, castOK)
-			params := cast
-			require.Equal(t, "0x64", params[1])
-
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"0x3"}`))
-		}))
-		defer upstream.Close()
-
-		upstreamURL := &url.URL{
-			Scheme: "http",
-			Host:   upstream.Listener.Addr().String(),
-		}
+		upstreamURL, seen := newRecordingUpstream(t)
 		reverseProxyHandler := newTestReverseProxyHandler(t, upstreamURL, 100, []string{"finalized"}, DefaultMaxBatchSize)
 		handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), DefaultMaxRequestBodySize, reverseProxyHandler)
 
-		reqBody := `{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0xabc","finalized"]}`
-		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(reqBody))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-
-		handler.ServeHTTP(rec, req)
+		rec := serveJSON(handler, `{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0xabc","finalized"]}`)
 
 		require.Equal(t, http.StatusOK, rec.Code)
+		require.Equal(t, []string{"0xabc", "0x64"}, seen(), "upstream should receive the replaced block number")
 	})
 }
 
-// standardBlockTags are the block tags defined by the Ethereum JSON-RPC spec
-// plus the proxy's default tag.
-var standardBlockTags = []string{"earliest", "latest", "pending", "safe", "finalized", "espresso"}
+// upstreamResult is the result newRecordingUpstream returns for a single
+// (non-batch) request.
+const upstreamResult = "0x1"
 
-// blockParams extracts params[0] as a string from every request in body and
+// stringParams collects every string value in the positional params of each
+// request in body — a block tag is one of them, whatever its position — and
 // reports whether body was a batch.
-func blockParams(t *testing.T, body []byte) (params []string, isBatch bool) {
+func stringParams(t *testing.T, body []byte) (params []string, isBatch bool) {
 	t.Helper()
-	var reqs []jsonrpcv2.Request
-	isBatch = json.Unmarshal(body, &reqs) == nil
+	// Decode both shapes through one path by wrapping a single request in a
+	// one-element batch.
+	isBatch = bytes.HasPrefix(bytes.TrimSpace(body), []byte("["))
 	if !isBatch {
-		var req jsonrpcv2.Request
-		require.NoError(t, json.Unmarshal(body, &req))
-		reqs = []jsonrpcv2.Request{req}
+		body = append(append([]byte("["), body...), ']')
 	}
-	params = make([]string, 0, len(reqs))
+	var reqs []jsonrpcv2.Request
+	require.NoError(t, json.Unmarshal(body, &reqs))
+
 	for _, req := range reqs {
-		positional, ok := req.Params.([]any)
-		require.True(t, ok, "params must be a positional array")
-		require.NotEmpty(t, positional)
-		s, ok := positional[0].(string)
-		require.True(t, ok, "params[0] must be a string")
-		params = append(params, s)
+		positional, _ := req.Params.([]any)
+		for _, param := range positional {
+			if s, ok := param.(string); ok {
+				params = append(params, s)
+			}
+		}
 	}
 	return params, isBatch
 }
 
-// newRecordingUpstream starts a fake full node that records the block
-// parameter of every request it receives. The returned function drains and
-// returns what was seen so far.
+// newRecordingUpstream starts a fake full node that records the string params
+// of every request it receives and answers with a fixed result. The returned
+// function returns what has been seen so far.
 func newRecordingUpstream(t *testing.T) (*url.URL, func() []string) {
 	t.Helper()
 	var mu sync.Mutex
@@ -323,7 +216,7 @@ func newRecordingUpstream(t *testing.T) (*url.URL, func() []string) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
-		params, isBatch := blockParams(t, body)
+		params, isBatch := stringParams(t, body)
 
 		mu.Lock()
 		seen = append(seen, params...)
@@ -334,19 +227,17 @@ func newRecordingUpstream(t *testing.T) (*url.URL, func() []string) {
 		if isBatch {
 			_, _ = w.Write([]byte(`[]`))
 		} else {
-			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":null}`))
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"` + upstreamResult + `"}`))
 		}
 	}))
 	t.Cleanup(upstream.Close)
 
-	drain := func() []string {
+	recorded := func() []string {
 		mu.Lock()
 		defer mu.Unlock()
-		out := seen
-		seen = nil
-		return out
+		return seen
 	}
-	return &url.URL{Scheme: "http", Host: upstream.Listener.Addr().String()}, drain
+	return &url.URL{Scheme: "http", Host: upstream.Listener.Addr().String()}, recorded
 }
 
 // serveJSON posts body to handler and returns the recorded response.
@@ -358,12 +249,12 @@ func serveJSON(handler http.Handler, body string) *httptest.ResponseRecorder {
 	return rec
 }
 
-// TestServeAnyTag verifies through the full HTTP stack (middlewares →
-// interceptor → reverse proxy) that whatever tags are configured — here every
-// standard block tag at once — are the ones rewritten before the request
-// reaches the full node, while other values are forwarded verbatim. The
-// exhaustive per-tag matching rules are unit-tested in the proxy package.
-func TestServeAnyTag(t *testing.T) {
+// TestServeMultipleTags verifies through the full HTTP stack (middlewares →
+// interceptor → reverse proxy) that every configured tag in a batch is
+// rewritten before the request reaches the full node, while unconfigured tags
+// and plain block numbers are forwarded verbatim. Which strings match is
+// exhaustively unit-tested in the proxy package.
+func TestServeMultipleTags(t *testing.T) {
 	const blockNumber uint64 = 100
 	const want = "0x64"
 
@@ -371,32 +262,21 @@ func TestServeAnyTag(t *testing.T) {
 		return fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"eth_getBlockByNumber","params":[%q,false]}`, id, tag)
 	}
 
-	t.Run("replaces every standard tag in one batch when all are configured", func(t *testing.T) {
-		upstreamURL, drain := newRecordingUpstream(t)
-		reverseProxyHandler := newTestReverseProxyHandler(t, upstreamURL, blockNumber, standardBlockTags, DefaultMaxBatchSize)
-		handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), DefaultMaxRequestBodySize, reverseProxyHandler)
+	upstreamURL, seen := newRecordingUpstream(t)
+	reverseProxyHandler := newTestReverseProxyHandler(t, upstreamURL, blockNumber, []string{"safe", "finalized", "espresso"}, DefaultMaxBatchSize)
+	handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), DefaultMaxRequestBodySize, reverseProxyHandler)
 
-		var reqs, expected []string
-		for i, tag := range standardBlockTags {
-			reqs = append(reqs, getBlock(i, tag))
-			expected = append(expected, want)
-		}
-		// A hex block number is not a tag and must reach the upstream as-is.
-		reqs = append(reqs, getBlock(99, "0x1"))
-		expected = append(expected, "0x1")
+	sent := []string{"safe", "finalized", "espresso", "latest", "0x1"}
+	// The three configured tags resolve to the block number; "latest" is not
+	// configured and a hex block number is not a tag, so both go through as-is.
+	expected := []string{want, want, want, "latest", "0x1"}
 
-		rec := serveJSON(handler, "["+strings.Join(reqs, ",")+"]")
-		require.Equal(t, http.StatusOK, rec.Code)
-		require.Equal(t, expected, drain())
-	})
+	var reqs []string
+	for i, tag := range sent {
+		reqs = append(reqs, getBlock(i, tag))
+	}
 
-	t.Run("forwards configured tags unchanged while espresso state is unknown", func(t *testing.T) {
-		upstreamURL, drain := newRecordingUpstream(t)
-		reverseProxyHandler := newTestReverseProxyHandlerWithStore(upstreamURL, newEmptyTestStore(t), standardBlockTags, DefaultMaxBatchSize)
-		handler := proxyhttp.HTTPRPCMiddlewares(log.Root(), DefaultMaxRequestBodySize, reverseProxyHandler)
-
-		rec := serveJSON(handler, getBlock(1, "finalized"))
-		require.Equal(t, http.StatusOK, rec.Code)
-		require.Equal(t, []string{"finalized"}, drain())
-	})
+	rec := serveJSON(handler, "["+strings.Join(reqs, ",")+"]")
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, expected, seen())
 }

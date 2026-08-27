@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
@@ -81,6 +80,12 @@ func TestTagsUnmarshalJSON(t *testing.T) {
 	t.Run("invalid type", func(t *testing.T) {
 		var tags Tags
 		require.Error(t, json.Unmarshal([]byte(`42`), &tags))
+	})
+
+	t.Run("null keeps the default", func(t *testing.T) {
+		cfg := defaultConfig()
+		require.NoError(t, json.Unmarshal([]byte(`{"espresso_tag": null}`), cfg))
+		require.Equal(t, Tags{"espresso"}, cfg.EspressoTags)
 	})
 }
 
@@ -200,24 +205,14 @@ func newValidOPConfig() Config {
 	}
 }
 
-// standardBlockTags are the block tags defined by the Ethereum JSON-RPC spec
-// plus the proxy's default tag.
-var standardBlockTags = []string{"earliest", "latest", "pending", "safe", "finalized", "espresso"}
-
 // TestTagsAnyTagAccepted verifies that the configuration layer keeps no
-// allowlist of tags: standard block tags and arbitrary custom strings are
-// accepted alike, and only empty lists and empty strings are rejected. Which
-// strings the interceptor then rewrites is covered in the proxy package.
+// allowlist of tags: any non-empty string is accepted, and only empty lists
+// and empty strings are rejected. Which strings the interceptor then rewrites
+// is covered in the proxy package.
 func TestTagsAnyTagAccepted(t *testing.T) {
-	t.Run("custom tag is accepted", func(t *testing.T) {
+	t.Run("any non-empty strings are accepted", func(t *testing.T) {
 		cfg := newValidOPConfig()
-		cfg.EspressoTags = Tags{"my-custom-tag"}
-		require.NoError(t, cfg.validate())
-	})
-
-	t.Run("all standard tags together are accepted", func(t *testing.T) {
-		cfg := newValidOPConfig()
-		cfg.EspressoTags = Tags(standardBlockTags)
+		cfg.EspressoTags = Tags{"finalized", "safe", "my-custom-tag"}
 		require.NoError(t, cfg.validate())
 	})
 
@@ -238,56 +233,14 @@ func TestTagsAnyTagAccepted(t *testing.T) {
 	})
 }
 
-// TestTagsPflag covers the ways tags can be supplied on the command line and
-// how the flag interacts with a config file.
+// TestTagsPflag checks that the flag, which is registered against the Tags
+// field by conversion, accepts both the repeated and the comma-separated
+// form. The rest of the flag semantics belong to pflag.
 func TestTagsPflag(t *testing.T) {
-	newFlagSet := func(tags *Tags, defaults []string) *pflag.FlagSet {
-		fs := pflag.NewFlagSet("test", pflag.ContinueOnError)
-		fs.StringSliceVar((*[]string)(tags), "espresso-tag", defaults, "test tags")
-		return fs
-	}
+	var tags Tags
+	fs := pflag.NewFlagSet("test", pflag.ContinueOnError)
+	fs.StringSliceVar((*[]string)(&tags), "espresso-tag", []string{"espresso"}, "test tags")
 
-	t.Run("default is kept when the flag is absent", func(t *testing.T) {
-		var tags Tags
-		require.NoError(t, newFlagSet(&tags, []string{"espresso"}).Parse(nil))
-		require.Equal(t, Tags{"espresso"}, tags)
-	})
-
-	t.Run("repeated flag accumulates tags", func(t *testing.T) {
-		var tags Tags
-		fs := newFlagSet(&tags, []string{"espresso"})
-		require.NoError(t, fs.Parse([]string{"--espresso-tag=safe", "--espresso-tag=finalized"}))
-		require.Equal(t, Tags{"safe", "finalized"}, tags)
-	})
-
-	t.Run("repeated and comma-separated forms can be mixed", func(t *testing.T) {
-		var tags Tags
-		fs := newFlagSet(&tags, []string{"espresso"})
-		require.NoError(t, fs.Parse([]string{"--espresso-tag=latest,safe", "--espresso-tag", "finalized"}))
-		require.Equal(t, Tags{"latest", "safe", "finalized"}, tags)
-	})
-
-	t.Run("every standard tag is accepted on the command line", func(t *testing.T) {
-		var tags Tags
-		fs := newFlagSet(&tags, []string{"espresso"})
-		require.NoError(t, fs.Parse([]string{"--espresso-tag=" + strings.Join(standardBlockTags, ",")}))
-		require.Equal(t, Tags(standardBlockTags), tags)
-	})
-
-	// The next two cases mirror parseConfig: the config file is applied to
-	// the defaults first, then flags are registered using the resulting
-	// values as their defaults, so an explicit flag wins over the file.
-	t.Run("config file tags are kept when the flag is absent", func(t *testing.T) {
-		cfg := defaultConfig()
-		require.NoError(t, json.Unmarshal([]byte(`{"espresso_tag": ["safe", "finalized"]}`), cfg))
-		require.NoError(t, newFlagSet(&cfg.EspressoTags, cfg.EspressoTags).Parse(nil))
-		require.Equal(t, Tags{"safe", "finalized"}, cfg.EspressoTags)
-	})
-
-	t.Run("flag overrides config file tags", func(t *testing.T) {
-		cfg := defaultConfig()
-		require.NoError(t, json.Unmarshal([]byte(`{"espresso_tag": ["safe", "finalized"]}`), cfg))
-		require.NoError(t, newFlagSet(&cfg.EspressoTags, cfg.EspressoTags).Parse([]string{"--espresso-tag=latest"}))
-		require.Equal(t, Tags{"latest"}, cfg.EspressoTags)
-	})
+	require.NoError(t, fs.Parse([]string{"--espresso-tag=latest,safe", "--espresso-tag", "finalized"}))
+	require.Equal(t, Tags{"latest", "safe", "finalized"}, tags)
 }

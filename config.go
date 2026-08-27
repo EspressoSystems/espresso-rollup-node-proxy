@@ -49,6 +49,11 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 type Tags []string
 
 func (t *Tags) UnmarshalJSON(b []byte) error {
+	// Leave the current value in place for an explicit null, matching how
+	// encoding/json treats null for every other field.
+	if string(b) == "null" {
+		return nil
+	}
 	var s string
 	if err := json.Unmarshal(b, &s); err == nil {
 		*t = Tags{s}
