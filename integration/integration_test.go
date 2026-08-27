@@ -177,19 +177,19 @@ func TestServe(t *testing.T) {
 	})
 }
 
-// upstreamResult is the result newRecordingUpstream returns for a single
-// (non-batch) request.
+// upstreamResult is the result newRecordingUpstream returns when the request
+// is a single JSON-RPC object rather than an array of requests.
 const upstreamResult = "0x1"
 
 // stringParams collects every string value in the positional params of each
 // request in body — a block tag is one of them, whatever its position — and
-// reports whether body was a batch.
-func stringParams(t *testing.T, body []byte) (params []string, isBatch bool) {
+// reports whether body was an array of requests rather than a single one.
+func stringParams(t *testing.T, body []byte) (params []string, isArray bool) {
 	t.Helper()
 	// Decode both shapes through one path by wrapping a single request in a
-	// one-element batch.
-	isBatch = bytes.HasPrefix(bytes.TrimSpace(body), []byte("["))
-	if !isBatch {
+	// one-element array.
+	isArray = bytes.HasPrefix(bytes.TrimSpace(body), []byte("["))
+	if !isArray {
 		body = append(append([]byte("["), body...), ']')
 	}
 	var reqs []jsonrpcv2.Request
@@ -203,7 +203,7 @@ func stringParams(t *testing.T, body []byte) (params []string, isBatch bool) {
 			}
 		}
 	}
-	return params, isBatch
+	return params, isArray
 }
 
 // newRecordingUpstream starts a fake full node that records the string params
@@ -216,7 +216,7 @@ func newRecordingUpstream(t *testing.T) (*url.URL, func() []string) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
-		params, isBatch := stringParams(t, body)
+		params, isArray := stringParams(t, body)
 
 		mu.Lock()
 		seen = append(seen, params...)
@@ -224,7 +224,7 @@ func newRecordingUpstream(t *testing.T) (*url.URL, func() []string) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		if isBatch {
+		if isArray {
 			_, _ = w.Write([]byte(`[]`))
 		} else {
 			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"` + upstreamResult + `"}`))
@@ -250,8 +250,8 @@ func serveJSON(handler http.Handler, body string) *httptest.ResponseRecorder {
 }
 
 // TestServeMultipleTags verifies through the full HTTP stack (middlewares →
-// interceptor → reverse proxy) that every configured tag in a batch is
-// rewritten before the request reaches the full node, while unconfigured tags
+// interceptor → reverse proxy) that every configured tag in a request array
+// is rewritten before the request reaches the full node, while unconfigured tags
 // and plain block numbers are forwarded verbatim. Which strings match is
 // exhaustively unit-tested in the proxy package.
 func TestServeMultipleTags(t *testing.T) {

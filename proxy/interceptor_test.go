@@ -215,7 +215,7 @@ func TestInterceptorAnyTag(t *testing.T) {
 	// special meaning to the interceptor.
 	allTags := slices.Concat(standardBlockTags, []string{"my-custom-tag"})
 
-	t.Run("intercepts every tag at once in a batch, custom ones included", func(t *testing.T) {
+	t.Run("intercepts every tag at once in one request array, custom ones included", func(t *testing.T) {
 		interceptor := newTagInterceptor(t, blockNumber, allTags...)
 
 		var reqs, expected []string
