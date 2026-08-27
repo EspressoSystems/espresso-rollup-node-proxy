@@ -29,25 +29,15 @@ var ErrMaxJSONDepthExceeded = errors.New("JSON nesting depth exceeds limit")
 // limit of the maximum number of requests we'll perform in a single batch.
 var ErrMaxBatchSizeExceeded = errors.New("maximum number of json requests in a single batch exceeded")
 
-// Interceptor rewrites JSON-RPC requests so that every occurrence of a
-// configured espresso tag is replaced with the L2 block number finalized by
-// Espresso. Any string can be configured as a tag — a standard one such as
-// "finalized" or "safe", the default "espresso", or a custom value — and all
-// configured tags resolve to the same block number, encoded as a hex quantity
-// (e.g. "0x64").
+// Interceptor replaces every configured espresso tag in a request's params
+// with the L2 block number finalized by Espresso, as a hex quantity (e.g.
+// "0x64"). Any string can be a tag — "finalized", the default "espresso", or
+// a custom value — and all of them resolve to that same block number.
 //
-// Tags are matched by these rules, which apply identically to every
-// configured tag:
-//
-//   - Exact, case-sensitive string equality. Tags are never matched by
-//     prefix, by substring, or after trimming whitespace.
-//   - Any string value at any depth: positional arrays, object values
-//     (e.g. {"blockTag": "finalized"}) and nested structures. Object keys are
-//     never rewritten, and neither are the request's method or id, which are
-//     not part of params.
-//   - Method-agnostic: the interceptor does not know which parameter of
-//     which method is the block parameter, so a matching string is rewritten
-//     wherever it appears.
+// A tag matches on exact, case-sensitive equality with any string value in
+// params, at any depth. Object keys, the method and the id are never
+// rewritten, and no parameter position is privileged: a matching string is
+// replaced wherever it appears, whatever the method.
 type Interceptor interface {
 	// InterceptRequest takes a JSON-RPC request, and attempts to perform an
 	// intercept on it.  This means that the request may be rewritten and
