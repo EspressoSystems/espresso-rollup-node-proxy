@@ -238,7 +238,8 @@ func TestInterceptorAnyTag(t *testing.T) {
 		for _, notATag := range []string{"Latest", "LATEST", " latest", "latest ", "latest-ish", "xlatest", "late", ""} {
 			result, err := adapters.PerformRequestIntercept([]byte(getBlock(1, notATag)), interceptor)
 			require.NoError(t, err)
-			require.JSONEq(t, getBlock(1, notATag), string(result), "%q must not match configured tag \"latest\"", notATag)
+			require.JSONEq(t, getBlock(1, notATag), string(result),
+				`%q is not the configured tag "latest" and must be forwarded unchanged`, notATag)
 		}
 	})
 
