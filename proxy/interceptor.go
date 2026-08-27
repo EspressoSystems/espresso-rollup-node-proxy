@@ -15,11 +15,8 @@ const (
 	DefaultMaxRequestBodySize = 5 * 1024 * 1024 // 5MB, matches go-ethereum defaultBodyLimit
 )
 
-// Interceptor is responsible for intercepting JSON-RPC requests with
-// any of the specified espresso tags and replacing the tag with a block
-// number finalized by Espresso. Note: the espresso tags can be "finalized",
-// "safe", "espresso" etc and are configurable. All configured tags resolve
-// to the same Espresso-finalized block number.
+// maxJSONDepth bounds how deep replaceTagInParams recurses into request
+// params before failing with ErrMaxJSONDepthExceeded.
 const maxJSONDepth = 32
 
 // ErrMaxJSONDepthExceeded is returned when the JSON nesting depth exceeds
@@ -30,8 +27,29 @@ var ErrMaxJSONDepthExceeded = errors.New("JSON nesting depth exceeds limit")
 // limit of the maximum number of requests we'll perform in a single batch.
 var ErrMaxBatchSizeExceeded = errors.New("maximum number of json requests in a single batch exceeded")
 
-// Interceptor is an interface that defines the methods for intercepting
-// JSON-RPC.
+// Interceptor rewrites JSON-RPC requests so that every occurrence of a
+// configured espresso tag is replaced with the L2 block number finalized by
+// Espresso.
+//
+// Any tag can be intercepted. There is no allowlist of block tags: the
+// configured tags may be the standard "finalized", "safe", "latest",
+// "pending" or "earliest", the default "espresso", or any custom string.
+// All configured tags resolve to the same Espresso-finalized block number,
+// encoded as a hex quantity (e.g. "0x64").
+//
+// The following matching rules apply identically to every configured tag:
+//
+//   - Exact, case-sensitive string equality. Tags are never matched by
+//     prefix, by substring, or after trimming whitespace.
+//   - Any string value in params, at any depth: positional arrays, object
+//     values (e.g. {"blockTag": "finalized"}), nested structures, and every
+//     request of a batch. Object keys, the method and the id are never
+//     rewritten.
+//   - Method-agnostic: the interceptor does not know which parameter of
+//     which method is the block parameter, so a string equal to a configured
+//     tag is rewritten wherever it appears.
+//   - Requests are forwarded unchanged while the store holds no Espresso
+//     state yet.
 type Interceptor interface {
 	// InterceptRequest takes a JSON-RPC request, and attempts to perform an
 	// intercept on it.  This means that the request may be rewritten and
@@ -169,8 +187,10 @@ func (i *interceptor) interceptRequest(request jsonrpcv2.Request, espressoFinali
 	}, nil
 }
 
-// replaceTagInParams recursively walks JSON params and replaces
-// exact matches of the espresso tag with a hex block number.
+// replaceTagInParams recursively walks JSON params and replaces every
+// string value that exactly equals one of the configured espresso tags
+// with a hex block number. Matching is case-sensitive, position- and
+// method-agnostic; object keys are never rewritten.
 func (i *interceptor) replaceTagInParams(params any, espressoFinalizedBlockNumber uint64, depth int) (any, bool, error) {
 	if depth > maxJSONDepth {
 		return nil, false, errors.Join(

@@ -44,6 +44,12 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 // single JSON string or an array of strings, so existing configs using
 // "espresso_tag": "espresso" keep working alongside
 // "espresso_tag": ["safe", "finalized"].
+//
+// Any tag may be listed: the standard "finalized", "safe", "latest",
+// "pending" and "earliest" tags, the default "espresso", or any custom
+// string. Every listed tag is rewritten to the same Espresso-finalized block
+// number; see proxy.Interceptor for the exact matching rules. Validation
+// only requires the list to be non-empty and free of empty strings.
 type Tags []string
 
 func (t *Tags) UnmarshalJSON(b []byte) error {
@@ -137,7 +143,7 @@ func parseConfig() *Config {
 	pflag.TextVar(&cfg.OPConfig.BatcherAddress, "op.batcher-address", cfg.OPConfig.BatcherAddress, "OP batcher address")
 	pflag.TextVar(&cfg.OPConfig.BatchAuthenticatorAddress, "op.batch-authenticator-address", cfg.OPConfig.BatchAuthenticatorAddress, "Espresso batch authenticator contract address")
 	pflag.StringVar(&cfg.WsFullNodeExecutionRPC, "ws.full-node-execution-rpc", cfg.WsFullNodeExecutionRPC, "full node execution RPC URL (websocket)")
-	pflag.StringSliceVar((*[]string)(&cfg.EspressoTags), "espresso-tag", cfg.EspressoTags, "block tags to intercept and resolve to the Espresso-finalized block number (comma-separated or repeated for multiple tags, e.g. safe,finalized)")
+	pflag.StringSliceVar((*[]string)(&cfg.EspressoTags), "espresso-tag", cfg.EspressoTags, "block tags to intercept and resolve to the Espresso-finalized block number; any tag can be intercepted (e.g. espresso, safe, finalized, latest). Comma-separated or repeated for multiple tags, e.g. safe,finalized")
 	pflag.StringVar(&cfg.StoreFilePath, "store-file-path", cfg.StoreFilePath, "path to state persistence file")
 	pflag.Uint64Var(&cfg.InitialHotshotHeight, "initial-hotshot-height", cfg.InitialHotshotHeight, "initial hotshot height")
 	pflag.BoolVar(&cfg.TrackBatchLatency, "track-batch-latency", cfg.TrackBatchLatency, "whether to track batch latency")
