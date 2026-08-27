@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,33 +84,8 @@ func TestTagsUnmarshalJSON(t *testing.T) {
 	})
 }
 
-func TestTagsPflag(t *testing.T) {
-	var tags Tags
-	fs := pflag.NewFlagSet("test", pflag.ContinueOnError)
-	fs.StringSliceVar((*[]string)(&tags), "espresso-tag", []string{"espresso"}, "test tags")
-
-	require.NoError(t, fs.Parse([]string{"--espresso-tag=safe,finalized"}))
-	require.Equal(t, Tags{"safe", "finalized"}, tags)
-}
-
 func TestConfigValidate(t *testing.T) {
-	valid := Config{
-		FullNodeExecutionRPC: "http://localhost:8545",
-		EthRPC:               "ws://localhost:8546",
-		Mode:                 ModeOP,
-		Namespace:            22266222,
-		ListenAddr:           ":8080",
-		EspressoTags:         Tags{"espresso"},
-		StoreFilePath:        "espresso_store.json",
-		LogLevel:             "info",
-		QueryServiceURL:      "https://query.espresso.network",
-		VerificationInterval: Duration(1 * time.Millisecond),
-		OPConfig: OPConfig{
-			LightClientAddress:        common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678"),
-			BatcherAddress:            common.HexToAddress("0xabcdefabcdefabcdefabcdefabcdefabcdefabcd"),
-			BatchAuthenticatorAddress: common.HexToAddress("0x1111111111111111111111111111111111111111"),
-		},
-	}
+	valid := newValidOPConfig()
 	require.NoError(t, valid.validate())
 
 	opEmpty := Config{Mode: ModeOP}
@@ -142,10 +118,6 @@ func TestConfigValidate(t *testing.T) {
 		var cfg Config
 		require.Error(t, json.Unmarshal(raw, &cfg))
 	})
-
-	multiTag := valid
-	multiTag.EspressoTags = Tags{"safe", "finalized"}
-	require.NoError(t, multiTag.validate())
 
 	emptyTagInList := valid
 	emptyTagInList.EspressoTags = Tags{"safe", ""}
@@ -232,46 +204,21 @@ func newValidOPConfig() Config {
 // plus the proxy's default tag.
 var standardBlockTags = []string{"earliest", "latest", "pending", "safe", "finalized", "espresso"}
 
-// TestTagsAnyTagAccepted verifies that the configuration layer does not
-// restrict which tags may be intercepted: every standard block tag, the
-// default "espresso" tag and arbitrary custom strings are accepted, alone or
-// combined. Only empty lists and empty strings are rejected.
+// TestTagsAnyTagAccepted verifies that the configuration layer keeps no
+// allowlist of tags: standard block tags and arbitrary custom strings are
+// accepted alike, and only empty lists and empty strings are rejected. Which
+// strings the interceptor then rewrites is covered in the proxy package.
 func TestTagsAnyTagAccepted(t *testing.T) {
-	for _, tag := range append(append([]string{}, standardBlockTags...), "my-custom-tag") {
-		t.Run(tag+" alone is accepted", func(t *testing.T) {
-			cfg := newValidOPConfig()
-			cfg.EspressoTags = Tags{tag}
-			require.NoError(t, cfg.validate())
-		})
-	}
+	t.Run("custom tag is accepted", func(t *testing.T) {
+		cfg := newValidOPConfig()
+		cfg.EspressoTags = Tags{"my-custom-tag"}
+		require.NoError(t, cfg.validate())
+	})
 
 	t.Run("all standard tags together are accepted", func(t *testing.T) {
 		cfg := newValidOPConfig()
 		cfg.EspressoTags = Tags(standardBlockTags)
 		require.NoError(t, cfg.validate())
-	})
-
-	t.Run("all standard tags parse from a JSON array", func(t *testing.T) {
-		cfg := newValidOPConfig()
-		raw := `{"espresso_tag": ["earliest", "latest", "pending", "safe", "finalized", "espresso"]}`
-		require.NoError(t, json.Unmarshal([]byte(raw), &cfg))
-		require.Equal(t, Tags(standardBlockTags), cfg.EspressoTags)
-		require.NoError(t, cfg.validate())
-	})
-
-	t.Run("standard tag parses from a JSON string", func(t *testing.T) {
-		cfg := newValidOPConfig()
-		require.NoError(t, json.Unmarshal([]byte(`{"espresso_tag": "latest"}`), &cfg))
-		require.Equal(t, Tags{"latest"}, cfg.EspressoTags)
-		require.NoError(t, cfg.validate())
-	})
-
-	t.Run("empty list is rejected", func(t *testing.T) {
-		cfg := newValidOPConfig()
-		cfg.EspressoTags = Tags{}
-		err := cfg.validate()
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "espresso-tag: must not be empty")
 	})
 
 	t.Run("empty JSON array is rejected", func(t *testing.T) {
@@ -291,9 +238,9 @@ func TestTagsAnyTagAccepted(t *testing.T) {
 	})
 }
 
-// TestTagsPflagMultiple covers the ways several tags can be supplied on the
-// command line and how the flag interacts with a config file.
-func TestTagsPflagMultiple(t *testing.T) {
+// TestTagsPflag covers the ways tags can be supplied on the command line and
+// how the flag interacts with a config file.
+func TestTagsPflag(t *testing.T) {
 	newFlagSet := func(tags *Tags, defaults []string) *pflag.FlagSet {
 		fs := pflag.NewFlagSet("test", pflag.ContinueOnError)
 		fs.StringSliceVar((*[]string)(tags), "espresso-tag", defaults, "test tags")
@@ -323,7 +270,7 @@ func TestTagsPflagMultiple(t *testing.T) {
 	t.Run("every standard tag is accepted on the command line", func(t *testing.T) {
 		var tags Tags
 		fs := newFlagSet(&tags, []string{"espresso"})
-		require.NoError(t, fs.Parse([]string{"--espresso-tag=earliest,latest,pending,safe,finalized,espresso"}))
+		require.NoError(t, fs.Parse([]string{"--espresso-tag=" + strings.Join(standardBlockTags, ",")}))
 		require.Equal(t, Tags(standardBlockTags), tags)
 	})
 

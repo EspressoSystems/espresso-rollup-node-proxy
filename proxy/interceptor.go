@@ -3,6 +3,8 @@ package proxy
 import (
 	"errors"
 	"fmt"
+	"slices"
+	"strconv"
 
 	"github.com/EspressoSystems/espresso-rollup-node-proxy/jsonrpcv2"
 	espressoStore "github.com/EspressoSystems/espresso-rollup-node-proxy/store"
@@ -29,27 +31,11 @@ var ErrMaxBatchSizeExceeded = errors.New("maximum number of json requests in a s
 
 // Interceptor rewrites JSON-RPC requests so that every occurrence of a
 // configured espresso tag is replaced with the L2 block number finalized by
-// Espresso.
-//
-// Any tag can be intercepted. There is no allowlist of block tags: the
-// configured tags may be the standard "finalized", "safe", "latest",
-// "pending" or "earliest", the default "espresso", or any custom string.
-// All configured tags resolve to the same Espresso-finalized block number,
-// encoded as a hex quantity (e.g. "0x64").
-//
-// The following matching rules apply identically to every configured tag:
-//
-//   - Exact, case-sensitive string equality. Tags are never matched by
-//     prefix, by substring, or after trimming whitespace.
-//   - Any string value in params, at any depth: positional arrays, object
-//     values (e.g. {"blockTag": "finalized"}), nested structures, and every
-//     request of a batch. Object keys, the method and the id are never
-//     rewritten.
-//   - Method-agnostic: the interceptor does not know which parameter of
-//     which method is the block parameter, so a string equal to a configured
-//     tag is rewritten wherever it appears.
-//   - Requests are forwarded unchanged while the store holds no Espresso
-//     state yet.
+// Espresso. Any string can be configured as a tag — a standard one such as
+// "finalized" or "safe", the default "espresso", or a custom value — and all
+// configured tags resolve to the same block number, encoded as a hex quantity
+// (e.g. "0x64"). The exact matching rules are documented on
+// replaceTagInParams and in the README section "Intercepted tags".
 type Interceptor interface {
 	// InterceptRequest takes a JSON-RPC request, and attempts to perform an
 	// intercept on it.  This means that the request may be rewritten and
@@ -91,16 +77,6 @@ func NewInterceptor(logger log.Logger, store *espressoStore.EspressoStore, espre
 	}
 }
 
-// isEspressoTag reports whether s is one of the configured espresso tags.
-func (i *interceptor) isEspressoTag(s string) bool {
-	for _, tag := range i.espressoTags {
-		if s == tag {
-			return true
-		}
-	}
-	return false
-}
-
 // ErrUnknownEspressoFinalizedBlockNumber is a sentinel error indicating that
 // our local state for the Espresso Finalized Block is invalid, and we cannot
 // reliably know if the value is correct or now.
@@ -119,10 +95,15 @@ func (i *interceptor) getCurrentEspressoFinalizedBlockNumber() (uint64, error) {
 	return state.L2BlockNumber, nil
 }
 
+// hexBlockNumber encodes n as a JSON-RPC hex quantity (e.g. "0x64").
+func hexBlockNumber(n uint64) string {
+	return "0x" + strconv.FormatUint(n, 16)
+}
+
 // InterceptRequest takes in a JSON-RPC request, checks if the params contain
-// the espresso tag and if so replaces it with the block number from the
-// store. It returns the modified request and whether any replacement
-// was made.
+// a configured espresso tag and if so replaces it with the block number from
+// the store. While the store holds no Espresso state yet, the request is
+// returned unchanged.
 //
 // NOTE: This is a pure function, and if the parameters are modified, a new
 // object will be returned instead of modifying the existing object.
@@ -133,7 +114,7 @@ func (i *interceptor) InterceptRequest(request jsonrpcv2.Request) (jsonrpcv2.Req
 		return request, nil
 	}
 
-	return i.interceptRequest(request, finalizedEspressoBlockNumber)
+	return i.interceptRequest(request, hexBlockNumber(finalizedEspressoBlockNumber))
 }
 
 // InterceptBatchRequests takes in a batch of JSON-RPC requests, and performs
@@ -156,9 +137,12 @@ func (i *interceptor) InterceptBatchRequests(requests []jsonrpcv2.Request) ([]js
 		return requests, nil
 	}
 
+	// The block number is the same for every request and every matched
+	// tag, so encode it once per batch.
+	blockHex := hexBlockNumber(finalizedEspressoBlockNumber)
 	next := make([]jsonrpcv2.Request, len(requests))
 	for j, req := range requests {
-		r, err := i.interceptRequest(req, finalizedEspressoBlockNumber)
+		r, err := i.interceptRequest(req, blockHex)
 		if err != nil {
 			return nil, err
 		}
@@ -169,8 +153,8 @@ func (i *interceptor) InterceptBatchRequests(requests []jsonrpcv2.Request) ([]js
 	return next, nil
 }
 
-func (i *interceptor) interceptRequest(request jsonrpcv2.Request, espressoFinalizedBlockNumber uint64) (jsonrpcv2.Request, error) {
-	nextParams, changed, err := i.replaceTagInParams(request.Params, espressoFinalizedBlockNumber, 0)
+func (i *interceptor) interceptRequest(request jsonrpcv2.Request, espressoFinalizedBlockHex string) (jsonrpcv2.Request, error) {
+	nextParams, changed, err := i.replaceTagInParams(request.Params, espressoFinalizedBlockHex, 0)
 	if err != nil {
 		return request, err
 	}
@@ -187,11 +171,21 @@ func (i *interceptor) interceptRequest(request jsonrpcv2.Request, espressoFinali
 	}, nil
 }
 
-// replaceTagInParams recursively walks JSON params and replaces every
-// string value that exactly equals one of the configured espresso tags
-// with a hex block number. Matching is case-sensitive, position- and
-// method-agnostic; object keys are never rewritten.
-func (i *interceptor) replaceTagInParams(params any, espressoFinalizedBlockNumber uint64, depth int) (any, bool, error) {
+// replaceTagInParams recursively walks JSON params and replaces every string
+// value that equals one of the configured espresso tags with
+// espressoFinalizedBlockHex. The matching rules, which apply identically to
+// every configured tag, are:
+//
+//   - Exact, case-sensitive string equality. Tags are never matched by
+//     prefix, by substring, or after trimming whitespace.
+//   - Any string value at any depth: positional arrays, object values
+//     (e.g. {"blockTag": "finalized"}) and nested structures. Object keys are
+//     never rewritten, and neither are the request's method or id, which are
+//     not part of params.
+//   - Method-agnostic: the interceptor does not know which parameter of
+//     which method is the block parameter, so a matching string is rewritten
+//     wherever it appears.
+func (i *interceptor) replaceTagInParams(params any, espressoFinalizedBlockHex string, depth int) (any, bool, error) {
 	if depth > maxJSONDepth {
 		return nil, false, errors.Join(
 			ErrMaxJSONDepthExceeded,
@@ -206,8 +200,8 @@ func (i *interceptor) replaceTagInParams(params any, espressoFinalizedBlockNumbe
 	// {"jsonrpc":"2.0","method":"eth_getBalance","params":["0xAddr","espresso"]}`
 	// This case is the end of the recursion since we have found an espresso tag
 	// and replaced it with the block number
-	if cast, castOK := params.(string); castOK && i.isEspressoTag(cast) {
-		return fmt.Sprintf("0x%x", espressoFinalizedBlockNumber), true, nil
+	if cast, castOK := params.(string); castOK && slices.Contains(i.espressoTags, cast) {
+		return espressoFinalizedBlockHex, true, nil
 	}
 
 	// Case 2: params is a JSON object — recurse into each value
@@ -215,7 +209,7 @@ func (i *interceptor) replaceTagInParams(params any, espressoFinalizedBlockNumbe
 	if cast, castOK := params.(map[string]any); castOK {
 		var nextParams map[string]any
 		for key, value := range cast {
-			next, c, err := i.replaceTagInParams(value, espressoFinalizedBlockNumber, depth+1)
+			next, c, err := i.replaceTagInParams(value, espressoFinalizedBlockHex, depth+1)
 			if err != nil {
 				return nil, false, fmt.Errorf("failed to replace espresso tag in object: %w", err)
 			}
@@ -241,7 +235,7 @@ func (i *interceptor) replaceTagInParams(params any, espressoFinalizedBlockNumbe
 	if cast, castOK := params.([]any); castOK {
 		var nextParams []any
 		for j, value := range cast {
-			next, c, err := i.replaceTagInParams(value, espressoFinalizedBlockNumber, depth+1)
+			next, c, err := i.replaceTagInParams(value, espressoFinalizedBlockHex, depth+1)
 			if err != nil {
 				return nil, false, fmt.Errorf("failed to replace espresso tag in array: %w", err)
 			}

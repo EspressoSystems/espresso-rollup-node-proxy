@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -14,11 +15,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestStore(t *testing.T, l2BlockNumber uint64) *espressostore.EspressoStore {
+// newEmptyTestStore returns a store that holds no Espresso state yet.
+func newEmptyTestStore(t *testing.T) *espressostore.EspressoStore {
 	t.Helper()
 	fp := filepath.Join(t.TempDir(), "state.json")
 	store, err := espressostore.NewEspressoStore(fp, 1)
 	require.NoError(t, err)
+	return store
+}
+
+// newTestStore returns a store whose Espresso-finalized L2 block is
+// l2BlockNumber.
+func newTestStore(t *testing.T, l2BlockNumber uint64) *espressostore.EspressoStore {
+	t.Helper()
+	store := newEmptyTestStore(t)
 	updated, err := store.UpdateIfGreater(l2BlockNumber, 1)
 	require.True(t, updated)
 	require.NoError(t, err)
@@ -163,7 +173,7 @@ func FuzzReplaceTagInParams(f *testing.F) {
 			return // skip structurally invalid JSON
 		}
 
-		result, changed, err := i.replaceTagInParams(params, 42, 0)
+		result, changed, err := i.replaceTagInParams(params, "0x2a", 0)
 		if err != nil {
 			return // error paths are expected and acceptable
 		}
@@ -192,11 +202,7 @@ func FuzzReplaceTagInParams(f *testing.F) {
 func containsTagValue(v any, tags []string) bool {
 	switch cast := v.(type) {
 	case string:
-		for _, tag := range tags {
-			if cast == tag {
-				return true
-			}
-		}
+		return slices.Contains(tags, cast)
 	case map[string]any:
 		for _, val := range cast {
 			if containsTagValue(val, tags) {
@@ -225,34 +231,25 @@ func TestInterceptorAnyTag(t *testing.T) {
 	const blockNumber uint64 = 100
 	const want = "0x64"
 
-	getBlock := func(tag string) string {
-		return fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"eth_getBlockByNumber","params":[%q,false]}`, tag)
+	getBlock := func(id int, tag string) string {
+		return fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"eth_getBlockByNumber","params":[%q,false]}`, id, tag)
 	}
 
-	allTags := append(append([]string{}, standardBlockTags...), "my-custom-tag")
+	allTags := slices.Concat(standardBlockTags, []string{"my-custom-tag"})
 
 	for _, tag := range allTags {
-		t.Run("intercepts "+tag+" when configured alone", func(t *testing.T) {
+		t.Run("rewrites only "+tag+" when configured alone", func(t *testing.T) {
 			store := newTestStore(t, blockNumber)
 			interceptor := NewInterceptor(nil, store, []string{tag}, DefaultMaxBatchSize)
 
-			result, err := adapters.PerformRequestIntercept([]byte(getBlock(tag)), interceptor)
-			require.NoError(t, err)
-			require.JSONEq(t, getBlock(want), string(result))
-		})
-
-		t.Run("passes through every other tag when only "+tag+" is configured", func(t *testing.T) {
-			store := newTestStore(t, blockNumber)
-			interceptor := NewInterceptor(nil, store, []string{tag}, DefaultMaxBatchSize)
-
-			for _, other := range allTags {
-				if other == tag {
-					continue
+			for _, sent := range allTags {
+				expected := sent
+				if sent == tag {
+					expected = want
 				}
-				result, err := adapters.PerformRequestIntercept([]byte(getBlock(other)), interceptor)
+				result, err := adapters.PerformRequestIntercept([]byte(getBlock(1, sent)), interceptor)
 				require.NoError(t, err)
-				require.JSONEq(t, getBlock(other), string(result),
-					"tag %q must not be intercepted when only %q is configured", other, tag)
+				require.JSONEq(t, getBlock(1, expected), string(result), "sent %q with only %q configured", sent, tag)
 			}
 		})
 	}
@@ -263,12 +260,12 @@ func TestInterceptorAnyTag(t *testing.T) {
 
 		var reqs, expected []string
 		for i, tag := range standardBlockTags {
-			reqs = append(reqs, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"eth_getBlockByNumber","params":[%q,false]}`, i, tag))
-			expected = append(expected, fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"eth_getBlockByNumber","params":[%q,false]}`, i, want))
+			reqs = append(reqs, getBlock(i, tag))
+			expected = append(expected, getBlock(i, want))
 		}
 		// A hex block number is not a tag and must survive untouched.
-		reqs = append(reqs, `{"jsonrpc":"2.0","id":99,"method":"eth_getBlockByNumber","params":["0x1",false]}`)
-		expected = append(expected, `{"jsonrpc":"2.0","id":99,"method":"eth_getBlockByNumber","params":["0x1",false]}`)
+		reqs = append(reqs, getBlock(99, "0x1"))
+		expected = append(expected, getBlock(99, "0x1"))
 
 		result, err := adapters.PerformRequestIntercept([]byte("["+strings.Join(reqs, ",")+"]"), interceptor)
 		require.NoError(t, err)
@@ -280,9 +277,9 @@ func TestInterceptorAnyTag(t *testing.T) {
 		interceptor := NewInterceptor(nil, store, []string{"latest"}, DefaultMaxBatchSize)
 
 		for _, notATag := range []string{"Latest", "LATEST", " latest", "latest ", "latest-ish", "xlatest", "late", ""} {
-			result, err := adapters.PerformRequestIntercept([]byte(getBlock(notATag)), interceptor)
+			result, err := adapters.PerformRequestIntercept([]byte(getBlock(1, notATag)), interceptor)
 			require.NoError(t, err)
-			require.JSONEq(t, getBlock(notATag), string(result), "%q must not match configured tag \"latest\"", notATag)
+			require.JSONEq(t, getBlock(1, notATag), string(result), "%q must not match configured tag \"latest\"", notATag)
 		}
 	})
 
@@ -325,21 +322,18 @@ func TestInterceptorAnyTag(t *testing.T) {
 		store := newTestStore(t, blockNumber)
 		interceptor := NewInterceptor(nil, store, []string{"finalized", "finalized"}, DefaultMaxBatchSize)
 
-		result, err := adapters.PerformRequestIntercept([]byte(getBlock("finalized")), interceptor)
+		result, err := adapters.PerformRequestIntercept([]byte(getBlock(1, "finalized")), interceptor)
 		require.NoError(t, err)
-		require.JSONEq(t, getBlock(want), string(result))
+		require.JSONEq(t, getBlock(1, want), string(result))
 	})
 
 	t.Run("passes every configured tag through while espresso state is unknown", func(t *testing.T) {
-		fp := filepath.Join(t.TempDir(), "state.json")
-		store, err := espressostore.NewEspressoStore(fp, 1)
-		require.NoError(t, err)
-		interceptor := NewInterceptor(nil, store, standardBlockTags, DefaultMaxBatchSize)
+		interceptor := NewInterceptor(nil, newEmptyTestStore(t), standardBlockTags, DefaultMaxBatchSize)
 
 		for _, tag := range standardBlockTags {
-			result, err := adapters.PerformRequestIntercept([]byte(getBlock(tag)), interceptor)
+			result, err := adapters.PerformRequestIntercept([]byte(getBlock(1, tag)), interceptor)
 			require.NoError(t, err)
-			require.JSONEq(t, getBlock(tag), string(result), "tag %q must be forwarded unchanged without espresso state", tag)
+			require.JSONEq(t, getBlock(1, tag), string(result), "tag %q must be forwarded unchanged without espresso state", tag)
 		}
 	})
 }
