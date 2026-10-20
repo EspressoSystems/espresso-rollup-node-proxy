@@ -82,7 +82,7 @@ const (
 	opRethVerifierUrl              = "http://127.0.0.1:8547"
 	mockBeaconURL                  = "http://127.0.0.1:5052"
 	p2pAttackUrl                   = "http://127.0.0.1:8560"
-	L2_CHAIN_ID                    = 22266222
+	opNamespace                    = 22266222
 	espressoTag                    = "espresso"
 	finalizedBlocks                = 200
 	batchAuthenticatorAddress      = "0x4826533b4897376654bb4d4ad88b7fafd0c98528"
@@ -113,7 +113,7 @@ func startOpVerifier(ctx context.Context, t *testing.T, logger log.Logger, store
 		&mockLightClient{client: espressoClient.NewClient(espressoURL)},
 		&verifier.OPEspressoBatchVerifierConfig{
 			FullNodeExecutionRPC:      opRethFullNode,
-			Namespace:                 L2_CHAIN_ID,
+			Namespace:                 opNamespace,
 			VerificationInterval:      250 * time.Millisecond,
 			QueryServiceURL:           espressoURL,
 			BatcherAddress:            common.HexToAddress("0x976EA74026E726554dB657fA54763abd0C3a0aa9"),
@@ -519,10 +519,10 @@ func pollUntil(t *testing.T, timeout time.Duration, failMsg string, condition fu
 	}
 }
 
-func newTestStore(t *testing.T, name string, hotshotHeight uint64) *espressostore.EspressoStore {
+func newTestStore(t *testing.T, name string, hotshotHeight uint64, chainId uint64) *espressostore.EspressoStore {
 	t.Helper()
 	stateFile := t.TempDir() + "/" + name + ".json"
-	store, err := espressostore.NewEspressoStore(stateFile, hotshotHeight)
+	store, err := espressostore.NewEspressoStore(stateFile, hotshotHeight, chainId)
 	require.NoError(t, err)
 	return store
 }

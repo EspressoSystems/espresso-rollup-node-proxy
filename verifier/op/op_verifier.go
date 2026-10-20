@@ -98,6 +98,21 @@ func NewOPEspressoBatchVerifier(ctx context.Context, logger log.Logger, store *e
 		return nil
 	}
 
+	chainId, err := l2Client.ChainID(ctx)
+	if err != nil {
+		logger.Crit("failed to get L2 chain id", "error", err)
+		return nil
+	}
+
+	if store.GetState().ChainId != chainId.Uint64() {
+		logger.Crit(
+			"chain id from endpoint does not match what is set in storage file",
+			"chain_id_storage", store.GetState().ChainId,
+			"chain_id_endpoint", chainId.Uint64(),
+		)
+		return nil
+	}
+
 	// Create an espresso client
 	espressoClient := espressoClient.NewClient(opVerifierConfig.QueryServiceURL)
 	if espressoClient == nil {

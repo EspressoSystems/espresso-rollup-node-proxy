@@ -18,6 +18,7 @@ import (
 // start syncing from in case of a shutdown and
 // UpdatedAt which is the timestamp of the last update to the state
 type EspressoState struct {
+	ChainId               uint64    `json:"chain_id"`
 	L2BlockNumber         uint64    `json:"l2_block_number"`
 	FallbackHotshotHeight uint64    `json:"fallback_hotshot_height"`
 	UpdatedAt             time.Time `json:"updated_at"`
@@ -31,7 +32,7 @@ type EspressoStore struct {
 	state    EspressoState
 }
 
-func NewEspressoStore(filePath string, hotshotHeight uint64) (*EspressoStore, error) {
+func NewEspressoStore(filePath string, hotshotHeight uint64, namespace uint64) (*EspressoStore, error) {
 	store := &EspressoStore{filePath: filePath}
 
 	// Check if the file exists, if so load the state from the disk
@@ -49,6 +50,7 @@ func NewEspressoStore(filePath string, hotshotHeight uint64) (*EspressoStore, er
 	store.state = EspressoState{
 		FallbackHotshotHeight: hotshotHeight,
 		UpdatedAt:             time.Now(),
+		ChainId:               namespace,
 	}
 	if err := store.writeToDisk(store.state); err != nil {
 		return nil, fmt.Errorf("failed to write initial state to disk: %w", err)
@@ -73,6 +75,7 @@ func (es *EspressoStore) UpdateIfGreater(l2BlockNumber uint64, fallbackHotshotHe
 		L2BlockNumber:         l2BlockNumber,
 		FallbackHotshotHeight: fallbackHotshotHeight,
 		UpdatedAt:             time.Now(),
+		ChainId:               state.ChainId,
 	}
 
 	if err := es.writeToDisk(newState); err != nil {

@@ -20,7 +20,7 @@ func TestOPE2EL2Reorg(t *testing.T) {
 	waitForRollupServicesReady(t)
 	waitForHTTPReady(t, opRethVerifierUrl, 1*time.Minute)
 
-	espressoStore := newTestStore(t, "espresso-state", 1)
+	espressoStore := newTestStore(t, "espresso-state", 1, opNamespace)
 
 	ctx := context.Background()
 	t.Log("Starting in-process proxy")

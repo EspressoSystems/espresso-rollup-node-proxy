@@ -16,7 +16,7 @@ func tempFilePath(t *testing.T) string {
 func TestEspressoStore(t *testing.T) {
 	t.Run("Test initialization with non-existent file", func(t *testing.T) {
 		fp := tempFilePath(t)
-		store, err := NewEspressoStore(fp, 1)
+		store, err := NewEspressoStore(fp, 1, 1)
 		require.NoError(t, err)
 		updated, err := store.UpdateIfGreater(1, 1)
 		require.True(t, updated)
@@ -30,7 +30,7 @@ func TestEspressoStore(t *testing.T) {
 		require.NoError(t, err)
 
 		// Now create another store and see that the file is loaded correctly
-		store2, err := NewEspressoStore(fp, 2)
+		store2, err := NewEspressoStore(fp, 2, 1)
 		require.NoError(t, err)
 		require.NotNil(t, store2)
 		require.Equal(t, uint64(1), store2.state.L2BlockNumber)
@@ -41,14 +41,14 @@ func TestEspressoStore(t *testing.T) {
 	t.Run("Test fails on corrupted file", func(t *testing.T) {
 		fp := tempFilePath(t)
 		require.NoError(t, os.WriteFile(fp, []byte("not json"), 0644))
-		_, err := NewEspressoStore(fp, 10)
+		_, err := NewEspressoStore(fp, 10, 1)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "failed to load state from disk")
 	})
 
 	t.Run("Test GetState", func(t *testing.T) {
 		fp := tempFilePath(t)
-		store, err := NewEspressoStore(fp, 1)
+		store, err := NewEspressoStore(fp, 1, 1)
 		require.NoError(t, err)
 		updated, err := store.UpdateIfGreater(1, 1)
 		require.True(t, updated)
@@ -61,7 +61,7 @@ func TestEspressoStore(t *testing.T) {
 
 	t.Run("Test Update", func(t *testing.T) {
 		fp := tempFilePath(t)
-		store, err := NewEspressoStore(fp, 1)
+		store, err := NewEspressoStore(fp, 1, 1)
 		require.NoError(t, err)
 		updated, err := store.UpdateIfGreater(1, 1)
 		require.True(t, updated)
@@ -79,7 +79,7 @@ func TestEspressoStore(t *testing.T) {
 
 	t.Run("Test UpdateIfGreater", func(t *testing.T) {
 		fp := tempFilePath(t)
-		store, err := NewEspressoStore(fp, 1)
+		store, err := NewEspressoStore(fp, 1, 1)
 		require.NoError(t, err)
 		updated, err := store.UpdateIfGreater(10, 5)
 		require.True(t, updated)

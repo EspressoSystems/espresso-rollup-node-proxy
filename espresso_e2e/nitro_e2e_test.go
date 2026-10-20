@@ -3,9 +3,10 @@ package espresso_e2e
 import (
 	"context"
 	"fmt"
-	espressostore "github.com/EspressoSystems/espresso-rollup-node-proxy/store"
 	"testing"
 	"time"
+
+	espressostore "github.com/EspressoSystems/espresso-rollup-node-proxy/store"
 
 	"github.com/stretchr/testify/require"
 )
@@ -18,7 +19,7 @@ func TestNitroE2ERollupEspressoProxy(t *testing.T) {
 	t.Log("Waiting for Nitro services to be ready")
 	waitForNitroServicesReady(t)
 
-	espressoStore := newTestStore(t, "nitro-espresso-state", 1)
+	espressoStore := newTestStore(t, "nitro-espresso-state", 1, nitroNamespace)
 
 	ctx := context.Background()
 	t.Log("Starting in-process proxy")
@@ -173,7 +174,7 @@ func TestNitroE2ERollupEspressoProxy(t *testing.T) {
 		finalizedL2Block, _ := tryGetBlockByTag(t, nitroFullNodeURL, "finalized")
 
 		initialStateFile := t.TempDir() + "/initial-proxy-state.json"
-		initialStore, err := espressostore.NewEspressoStore(initialStateFile, initialHotshotHeight)
+		initialStore, err := espressostore.NewEspressoStore(initialStateFile, initialHotshotHeight, nitroNamespace)
 		require.NoError(t, err)
 		_, err = initialStore.UpdateIfGreater(finalizedL2Block, initialHotshotHeight)
 		require.NoError(t, err)
@@ -207,7 +208,7 @@ func TestNitroE2ERollupEspressoProxy(t *testing.T) {
 		t.Log("proxy and verifier stopped")
 
 		// Restart proxy with the same state file and verify it resumes from persisted state.
-		newStore, err := espressostore.NewEspressoStore(initialStateFile, initialHotshotHeight)
+		newStore, err := espressostore.NewEspressoStore(initialStateFile, initialHotshotHeight, nitroNamespace)
 		require.NoError(t, err)
 
 		proxyURL2, shutdownProxy2 = startTestProxy(ctx, t, nitroFullNodeURL, newStore, espressoTag)

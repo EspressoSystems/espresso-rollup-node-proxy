@@ -21,7 +21,7 @@ func TestOPE2ERollupEspressoProxyReorg(t *testing.T) {
 	t.Log("waiting for services to be ready")
 	waitForRollupServicesReady(t)
 
-	espressoStore := newTestStore(t, "espresso-state", 1)
+	espressoStore := newTestStore(t, "espresso-state", 1, opNamespace)
 
 	ctx := context.Background()
 	t.Log("Starting in-process proxy")
