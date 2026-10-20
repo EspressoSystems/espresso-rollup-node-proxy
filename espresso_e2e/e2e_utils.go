@@ -488,7 +488,7 @@ func startTestProxy(ctx context.Context, t *testing.T, backendURLString string, 
 	require.NoError(t, err)
 	backendURL, err := url.Parse(backendURLString)
 	require.NoError(t, err)
-	interceptor := proxy.NewInterceptor(log.Root(), store, tag, proxy.DefaultMaxBatchSize)
+	interceptor := proxy.NewInterceptor(log.Root(), store, []string{tag}, proxy.DefaultMaxBatchSize)
 	reverseProxy := httputil.NewSingleHostReverseProxy(backendURL)
 	reverseProxy.ErrorLog = stdlog.New(devNull, "reverse proxy", 0)
 	require.NoError(t, err)

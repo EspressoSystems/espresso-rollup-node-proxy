@@ -336,7 +336,7 @@ func main() {
 	interceptor := proxy.NewInterceptor(
 		logger,
 		espressoStore,
-		cfg.EspressoTag,
+		cfg.EspressoTags,
 		cfg.MaxBatchSize,
 	)
 

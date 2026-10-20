@@ -2,7 +2,7 @@
 
 The Espresso Rollup Node Proxy is a Go service that sits between clients and a rollup's full node to enforce [Espresso](https://docs.espressosys.com/) finality. Instead of relying solely on Ethereum for finality, clients can use an Espresso-specific block tag (default: `"espresso"`) in their JSON-RPC calls; the proxy resolves that tag to the latest L2 block number confirmed by Espresso's HotShot consensus.
 
-The proxy can also be configured to intercept the standard `"finalized"` tag and back it with Espresso finality, so existing clients that already use `"finalized"` get faster finality with no code changes at all.
+The proxy can also be configured to intercept **any** block tag — a standard one such as `"finalized"` or `"safe"`, or an arbitrary custom string — and back it with Espresso finality, so existing clients that already use a standard tag get faster finality with no code changes at all. Multiple tags can be intercepted at once (e.g. `"espresso_tag": ["safe", "finalized"]`); every configured tag resolves to the same Espresso-finalized block number. See [Intercepted tags](#intercepted-tags) for the full list and the matching rules.
 
 In both modes, the proxy resolves the block number as `max(espresso finalized, eth finalized)`. This means clients always get Espresso's faster finality when it is ahead, but can safely fall back to Ethereum finality.
 
@@ -10,13 +10,26 @@ The `"espresso"` block number is **monotonically increasing** — it will never 
 
 ## How it works
 
-**Proxy** — Intercepts every JSON-RPC request (including batch requests) before forwarding it to the full node. Any occurrence of the Espresso tag in the request params is replaced with the current Espresso-finalized L2 block number, then the request is forwarded transparently.
+**Proxy** — Intercepts every JSON-RPC request (including batch requests) before forwarding it to the full node. Any occurrence of a configured tag in the request params is replaced with the current Espresso-finalized L2 block number, then the request is forwarded transparently.
 
 **Verifier** — A background loop continuously compares batches produced by the Espresso streamer against the corresponding blocks on the full node. On a match, the loop advances the store and persists the new L2 block number to disk; on a mismatch, it retries at the next interval.
 
 **Store** — Persists the Espresso-finalized L2 block number and HotShot fallback position to a JSON file so state survives restarts.
 
 The proxy starts in non-Espresso mode and automatically switches to Espresso mode once the verifier confirms the first batch.
+
+### Intercepted tags
+
+**Any tag can be intercepted.** There is no allowlist: the strings listed in `espresso_tag` are rewritten, and nothing else is touched. `finalized` and `safe` are the usual choices — clients already sending them get Espresso finality with no code changes — while the default `espresso` is opt-in. A custom string such as `"my-tag"` works the same way.
+
+A tag matches on **exact, case-sensitive equality** with any string value in `params`, at any depth, in every request of a request array. With `latest` configured, `"Latest"` and `"latest "` are left alone; object *keys*, the `method` and the `id` are never rewritten. Every configured tag resolves to the same block number, as a hex quantity (e.g. `"0x64"`).
+
+Two caveats when choosing tags:
+
+- The interceptor is **not method-aware** — a matching string is rewritten wherever it appears, so avoid a tag that could legitimately be some other parameter's value (a hex quantity such as `"0x1"`, say).
+- `latest`, `pending` and `earliest` **change meaning** when intercepted: clients see the Espresso-finalized block rather than the chain head or genesis.
+
+Until the verifier confirms the first batch, requests are forwarded unchanged — standard tags behave normally, and `"espresso"` reaches the full node as an unknown tag.
 
 ## Architecture
 
@@ -229,7 +242,7 @@ The **Required** column shows ✅ for settings required in all modes, and ✅ OP
 | `--listen-addr` | `listen_addr` | `:8080` | Address the proxy listens on |
 | `--ws.listen-addr` | `ws_listen_addr` | — | WebSocket listen address; set together with `ws.full-node-execution-rpc` to enable the WebSocket proxy |
 | `--ws.full-node-execution-rpc` | `ws_full_node_execution_rpc` | — | Execution layer WebSocket RPC URL; required to enable the WebSocket proxy |
-| `--espresso-tag` | `espresso_tag` | `espresso` | JSON-RPC block tag to intercept; set to `finalized` to back the standard finality tag with Espresso |
+| `--espresso-tag` | `espresso_tag` | `espresso` | JSON-RPC block tag(s) to intercept — any tag, see [Intercepted tags](#intercepted-tags). Comma-separated or repeated on the CLI; a string or an array of strings in JSON |
 | `--store-file-path` | `store_file_path` | `espresso_store.json` | Path to the state persistence file |
 | `--verification-interval` | `verification_interval` | `10ms` | How often the verifier polls for new confirmed batches |
 | `--finality-poll-interval` | `finality_poll_interval` | `1s` | How often the finality poller queries the full node for the latest finalized block |
