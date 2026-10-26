@@ -87,7 +87,7 @@ func (m *mockStreamer) Reset() {
 	m.Called()
 }
 
-func (m *mockStreamer) UnmarshalBatch(b []byte) (*derivation.EspressoBatch, error) {
+func (m *mockStreamer) UnmarshalBatch(b []byte, l1Head uint64) (*derivation.EspressoBatch, error) {
 	args := m.Called(b)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
